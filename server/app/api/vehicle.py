@@ -35,8 +35,9 @@ async def get_status(vin: str | None = None) -> dict:
     try:
         status = await client.get_vehicle_status(vin=vin)
     except Exception as exc:  # noqa: BLE001 - 统一转为 HTTP 错误
-        logger.error("获取车辆状态失败：%s", exc)
-        raise _error(f"获取车辆状态失败：{exc}") from exc
+        # 不回显原始异常文本 —— 网关报文可能含令牌片段，细节只写日志
+        logger.error("获取车辆状态失败：%s", exc, exc_info=True)
+        raise _error("获取车辆状态失败，请检查服务端日志与登录状态") from exc
 
     # 补齐车辆信息（状态接口在某些网关下不返回昵称/车牌）
     try:
@@ -66,7 +67,8 @@ async def list_vehicles() -> dict:
     try:
         vehicles = await client.list_vehicles()
     except Exception as exc:  # noqa: BLE001
-        raise _error(f"获取车辆列表失败：{exc}") from exc
+        logger.error("获取车辆列表失败：%s", exc, exc_info=True)
+        raise _error("获取车辆列表失败，请检查服务端日志") from exc
 
     return {"success": True, "data": vehicles}
 
@@ -93,8 +95,8 @@ async def send_command(payload: CommandRequest) -> dict:
             vin=payload.vin,
         )
     except Exception as exc:  # noqa: BLE001
-        logger.error("下发指令失败：%s", exc)
-        raise _error(f"下发指令失败：{exc}") from exc
+        logger.error("下发指令失败：%s", exc, exc_info=True)
+        raise _error("下发指令失败，请检查服务端日志") from exc
 
     success = bool(result.get("success"))
     return {

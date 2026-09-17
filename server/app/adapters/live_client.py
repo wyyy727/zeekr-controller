@@ -67,6 +67,36 @@ class ZeekrAPIError(Exception):
         self.raw = raw
 
 
+def _compact(path: str) -> str:
+    """把路径压缩为纯字母数字形式，用于别名匹配。
+
+    例如 `electricVehicleStatus.chargeLevel` → `electricvehiclestatuschargelevel`。
+    这样别名表可以忽略层级分隔方式，只关心字段名序列。
+    """
+    return "".join(ch for ch in path.lower() if ch.isalnum())
+
+
+def _normalize_power(raw: Any) -> float | None:
+    """归一化充电功率为 kW。
+
+    网关返回的量纲在不同车型/固件下不一致：可能是瓦特（如 118000），
+    也可能是 kW（如 118）或已缩放的 0.001kW（如 118000 * 0.001 前后）。
+    按量级推断比硬编码缩放更稳健。
+
+    > 真机验证建议：充电时对照官方 App 显示的功率，确认本推断是否成立。
+    """
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return 0.0
+    # 大于 1000 按瓦特处理，否则视为已是 kW
+    return round(value / 1000.0, 2) if value > 1000 else round(value, 2)
+
+
 class LiveZeekrClient(ZeekrClient):
     """真实对接极氪国区网关。"""
 
@@ -462,9 +492,16 @@ class LiveZeekrClient(ZeekrClient):
         leaves: dict[str, Any] = {}
 
         def walk(node: Any, prefix: str = "") -> None:
+            """递归收集叶子节点，路径用 `.` 分隔。
+
+            分隔符很关键：早期用空串拼接会让相邻字段名粘连
+            （`doorstatus` + `frontleft` → `doorstatusfrontleft`），
+            虽然当时别名表恰好对应，但任何字段增删都可能产生意外匹配。
+            """
             if isinstance(node, dict):
                 for k, v in node.items():
-                    walk(v, f"{prefix}{k}".lower())
+                    key = str(k).lower()
+                    walk(v, f"{prefix}.{key}" if prefix else key)
             elif isinstance(node, list):
                 for i, v in enumerate(node):
                     walk(v, f"{prefix}[{i}]")
@@ -475,16 +512,30 @@ class LiveZeekrClient(ZeekrClient):
 
         walk(data)
 
+        # 紧凑索引：剥掉 `.` 与 `[n]`，只留字母数字。
+        # 别名表用连续小写字母书写即可，不受路径分隔方式影响。
+        compact_leaves: dict[str, Any] = {
+            _compact(path): value for path, value in leaves.items()
+        }
+
         def pick(*aliases: str) -> Any:
-            """按别名子串匹配叶子路径。"""
+            """按别名匹配叶子路径。
+
+            匹配前把两侧的 `.` 与 `[n]` 下标都剥离，只留字母数字。
+            这样别名表用「连续小写字母」书写即可，既简洁又对
+            路径分隔方式的变化免疫 —— 无论网关返回的层级怎么嵌套，
+            只要字段名序列一致就能命中。
+            """
             for alias in aliases:
-                key = alias.lower()
-                # 精确匹配优先
-                if key in leaves:
-                    return leaves[key]
-                # 退化为子串匹配
-                for path, value in leaves.items():
-                    if path.endswith(key):
+                key = _compact(alias)
+                if not key:
+                    continue
+                # 精确匹配优先（紧凑后完全相同）
+                if key in compact_leaves:
+                    return compact_leaves[key]
+                # 退化为后缀匹配（容忍外层多包了一层）
+                for compact_path, value in compact_leaves.items():
+                    if compact_path.endswith(key):
                         return value
             return None
 
@@ -521,14 +572,17 @@ class LiveZeekrClient(ZeekrClient):
         charge_current = as_float(pick("chargeiact"))
         charge_voltage = as_float(pick("chargeuact"))
 
-        # GPS 坐标：定点整数，实测量纲为「度 × 3,600,000」
+        # GPS 坐标：定点整数，实测量纲为「度 × 3,600,000」。
+        # 逐个尝试可能的缩放系数 —— 取第一个使纬度落在合理范围内的。
         lat_raw = as_float(pick("latitude", "poslat"))
         lon_raw = as_float(pick("longitude", "poslon"))
-        lat = lon_raw = None
+        lat: float | None = None
+        lon: float | None = None
         if lat_raw is not None and lon_raw is not None:
             for divisor in (3_600_000.0, 10_000_000.0, 1_000_000.0, 1.0):
                 candidate_lat = lat_raw / divisor
-                if 3.0 < abs(candidate_lat) < 54.0:  # 中国纬度范围
+                # 中国的纬度范围约 3°N–54°N
+                if 3.0 < abs(candidate_lat) < 54.0:
                     lat = round(candidate_lat, 6)
                     lon = round(lon_raw / divisor, 6)
                     break
@@ -562,7 +616,16 @@ class LiveZeekrClient(ZeekrClient):
             "battery12vLevel": b12_level,
             "isCharging": is_charging,
             "isPlugged": as_bool(pick("chargerconnected", "statusofchargerconnection")),
-            "chargePowerKw": as_float(pick("chargepowerkw"), 0.001) if pick("chargepowerkw") else None,
+            # 网关的充电功率量纲在不同车型/固件下不一致（W 或 0.001kW），
+            # 无法凭字段名断定。这里按量级推断：>1000 视为瓦特，否则视为 kW。
+            # 充电功率：优先用网关直报的字段；若没有，则由电流×电压推算。
+            # 网关的量纲在不同车型/固件下不一致，故用 _normalize_power 按量级归一。
+            "chargePowerKw": _normalize_power(pick("chargepowerkw", "chargepower"))
+            or (
+                round(charge_current * charge_voltage / 1000.0, 2)
+                if charge_current is not None and charge_voltage is not None
+                else None
+            ),
             "chargeVoltage": charge_voltage,
             "chargeCurrent": charge_current,
             "minutesToFull": minutes_to_full,
@@ -720,34 +783,48 @@ class LiveZeekrClient(ZeekrClient):
         body = build_control_body(service_id, key, value)
         path = "/ms-remote-control/v1.0/remoteControl/control"
 
-        # 优先 GW3
+        # 优先 GW3 通道。
+        #
+        # 注意：`_request_gw3` 内部已调用 `_unwrap`，失败信封会直接抛
+        # `ZeekrAPIError`。因此「未抛异常」即代表网关接受了请求，
+        # 无法也不应再去读 payload 里的 `code`（那里已不含该字段）。
         try:
-            payload = await self._request_gw3("POST", path, vin=target_vin, body=body)
-            code = str(payload.get("code", "0"))
-            if code in ("0", "000000", "00A00"):
-                return {"success": True, "message": "指令已下发", "command": command}
-            logger.warning("GW3 指令被拒：%s", payload.get("msg"))
+            await self._request_gw3("POST", path, vin=target_vin, body=body)
+            return {
+                "success": True,
+                # 措辞保持克制：网关收下 ≠ 车端已执行
+                "message": "指令已提交至车辆",
+                "command": command,
+            }
         except (ZeekrAPIError, httpx.HTTPError) as exc:
             logger.warning("GW3 指令通道失败，回退 GW2：%s", exc)
 
         # 回退 GW2 telematics 通道
         fallback_path = f"/remote-control/vehicle/telematics/{target_vin}"
         try:
-            payload = await self._request_gw2("PUT", fallback_path, body={
+            await self._request_gw2("PUT", fallback_path, body={
                 "command": "start",
                 "serviceId": service_id,
                 "setting": {"serviceParameters": [{"key": key, "value": value}]},
             })
-            code = str(payload.get("code", "0"))
-            if code in ("0", "000000", "00A00"):
-                return {"success": True, "message": "指令已下发（GW2 通道）", "command": command}
             return {
-                "success": False,
-                "message": payload.get("msg") or "指令被网关拒绝",
+                "success": True,
+                "message": "指令已提交至车辆（GW2 通道）",
                 "command": command,
             }
-        except (ZeekrAPIError, httpx.HTTPError) as exc:
-            return {"success": False, "message": f"指令下发失败：{exc}", "command": command}
+        except ZeekrAPIError as exc:
+            return {
+                "success": False,
+                "message": f"指令被网关拒绝：{exc.message}",
+                "command": command,
+            }
+        except httpx.HTTPError as exc:
+            logger.error("GW2 指令通道异常：%s", exc)
+            return {
+                "success": False,
+                "message": "指令下发失败，请检查网络与服务端日志",
+                "command": command,
+            }
 
     async def aclose(self) -> None:
         """释放底层连接。"""

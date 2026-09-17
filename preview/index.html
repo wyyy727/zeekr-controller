@@ -1,0 +1,1256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#EEF7F2">
+<title>极氪看板 · 设计预览</title>
+<style>
+/* ═══════════════════════════════════════════════
+   中国传统色设计系统
+   色值参考 zhongguose.com（中科院《色谱》1957）
+   ═══════════════════════════════════════════════ */
+:root {
+  --tian-qing:      #7FB3A8;  /* 天青 · 主色 */
+  --tian-qing-deep: #5D8A7E;  /* 天青·深 */
+  --zhu-qing:       #789262;  /* 竹青 */
+  --qing-bi:        #48C0A3;  /* 青碧 */
+  --piao-se:        #E8F4F1;  /* 缥色 */
+  --dian-lan:       #4C6E91;  /* 靛蓝 */
+  --dian-qing:      #177CB0;  /* 靛青 · 充电 */
+  --cang-qing:      #3B4A6B;  /* 藏青 */
+  --qun-qing:       #4C8DAE;  /* 群青 */
+  --zhu-sha:        #E23A28;  /* 朱砂 · 告警 */
+  --yan-zhi:        #9D2933;  /* 胭脂 */
+  --teng-huang:     #FFB61E;  /* 藤黄 · 强调 */
+  --xiang-se:       #F0C239;  /* 缃色 */
+  --ti-se:          #F0A35E;  /* 缇色 */
+  --yue-bai:        #EEF7F2;  /* 月白 · 背景 */
+  --xiang-ya-bai:   #FFFBF0;  /* 象牙白 · 卡片 */
+  --gao-se:         #F2ECDE;  /* 缟色 */
+  --mo-se:          #252726;  /* 墨 · 主文字 */
+  --xuan-qing:      #3D3B4F;  /* 玄青 · 次文字 */
+  --dai-se:         #4A4266;  /* 黛色 */
+
+  --card-radius: 16px;
+  --card-padding: 16px;
+  --gap: 12px;
+  --screen-padding: 16px;
+
+  --bg: var(--yue-bai);
+  --surface: var(--xiang-ya-bai);
+  --surface-alt: var(--gao-se);
+  --text-1: var(--mo-se);
+  --text-2: rgba(61, 59, 79, .62);
+  --text-3: rgba(74, 66, 102, .42);
+  --accent: var(--tian-qing-deep);
+  --separator: rgba(37, 39, 38, .08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1A1C1B;
+    --surface: #242726;
+    --surface-alt: #2E312F;
+    --text-1: #EDEFEC;
+    --text-2: #A5A9A4;
+    --text-3: #6E726D;
+    --accent: var(--tian-qing);
+    --separator: rgba(255, 255, 255, .08);
+  }
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+  background: var(--bg);
+  color: var(--text-1);
+  padding-bottom: calc(88px + env(safe-area-inset-bottom));
+  transition: background .2s;
+}
+
+/* ─────────── 顶部状态栏 ─────────── */
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid var(--separator);
+  padding: calc(env(safe-area-inset-top) + 10px) var(--screen-padding) 10px;
+}
+.topbar h1 {
+  margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.3px;
+}
+.topbar .sub {
+  font-size: 11px; color: var(--text-3); margin-top: 3px;
+}
+.topbar .row { display: flex; align-items: center; justify-content: space-between; }
+.badge-mode {
+  font-size: 10px; padding: 3px 8px; border-radius: 20px;
+  background: var(--piao-se); color: var(--tian-qing-deep); font-weight: 600;
+}
+@media (prefers-color-scheme: dark) {
+  .badge-mode { background: rgba(127,179,168,.15); color: var(--tian-qing); }
+}
+
+/* ─────────── 容器 ─────────── */
+.wrap { padding: var(--screen-padding); display: flex; flex-direction: column; gap: var(--gap); }
+
+/* ─────────── 卡片 ─────────── */
+.card {
+  background: var(--surface);
+  border-radius: var(--card-radius);
+  padding: var(--card-padding);
+}
+.card-title {
+  font-size: 15px; font-weight: 600; margin: 0 0 12px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+
+/* ─────────── 主卡：电量环形 ─────────── */
+.hero { display: flex; gap: 20px; align-items: center; }
+.ring-wrap { position: relative; flex-shrink: 0; }
+.ring-wrap svg { display: block; transform: rotate(-90deg); }
+.ring-bg { fill: none; stroke: var(--surface-alt); }
+.ring-fg {
+  fill: none; stroke-linecap: round;
+  transition: stroke-dashoffset .8s cubic-bezier(.4,0,.2,1), stroke .3s;
+}
+.ring-center {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.ring-num {
+  font-size: 32px; font-weight: 600; line-height: 1;
+  font-variant-numeric: tabular-nums; letter-spacing: -1px;
+}
+.ring-num .pct { font-size: 16px; font-weight: 500; opacity: .5; margin-left: 1px; }
+.ring-label { font-size: 10px; color: var(--text-3); margin-top: 5px; }
+.ring-bolt {
+  position: absolute; top: 12px; right: 12px;
+  color: var(--dian-qing); font-size: 15px;
+}
+
+.hero-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 9px; }
+.hero-name { font-size: 15px; font-weight: 600; line-height: 1.2; }
+.hero-plate { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+.hr { height: 1px; background: var(--separator); }
+.mini-row { display: flex; justify-content: space-between; align-items: baseline; }
+.mini-label { font-size: 12px; color: var(--text-3); }
+.mini-val {
+  font-size: 14px; font-weight: 500; font-variant-numeric: tabular-nums;
+}
+
+/* ─────────── 充电卡 ─────────── */
+.card-charging {
+  background: color-mix(in srgb, var(--piao-se) 55%, var(--surface));
+}
+@media (prefers-color-scheme: dark) {
+  .card-charging { background: rgba(127,179,168,.10); }
+}
+.charge-head {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 14px; font-weight: 600; color: var(--dian-qing);
+}
+.charge-grid { display: flex; margin-top: 12px; }
+.charge-item { flex: 1; text-align: center; }
+.charge-item .v {
+  font-size: 18px; font-weight: 500; font-variant-numeric: tabular-nums;
+}
+.charge-item .k { font-size: 11px; color: var(--text-3); margin-top: 3px; }
+.charge-eta {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text-2); margin-top: 11px;
+}
+
+/* ─────────── 图标（内联 SVG，避免 emoji 渲染差异）─────────── */
+.ic { width: 1em; height: 1em; display: inline-block; vertical-align: -0.14em; flex-shrink: 0; }
+.ic-sm { width: 14px; height: 14px; display: inline-block; vertical-align: -0.15em; flex-shrink: 0; }
+
+/* ─────────── 统计卡头部 ─────────── */
+.stat .head .ic-sm { opacity: .75; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
+.stat { background: var(--surface); border-radius: var(--card-radius); padding: 13px 14px; }
+.stat .head {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11.5px; color: var(--text-3); margin-bottom: 7px;
+}
+.stat .val {
+  font-size: 19px; font-weight: 500; font-variant-numeric: tabular-nums;
+  letter-spacing: -.4px;
+}
+.stat .val .u { font-size: 11px; font-weight: 400; color: var(--text-3); margin-left: 3px; }
+
+/* ─────────── 胎压 ─────────── */
+.tyre-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
+.tyre {
+  background: var(--surface-alt); border-radius: 10px;
+  padding: 10px 4px; text-align: center;
+}
+.tyre .v {
+  font-size: 17px; font-weight: 500; font-variant-numeric: tabular-nums;
+}
+.tyre .k { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+.tyre.warn .v { color: var(--zhu-sha); }
+
+/* ─────────── 车身状态 chip ─────────── */
+.chip {
+  display: flex; align-items: center; gap: 9px;
+  background: var(--surface-alt); border-radius: 11px; padding: 11px 12px;
+}
+  /* 车身状态 chip —— 每种状态给独立语义色，不滥用告警色 */
+  .chip .ico {
+    width: 30px; height: 30px; border-radius: 9px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; font-weight: 600;
+  }
+  .chip .txt { min-width: 0; }
+  .chip .t { font-size: 11px; color: var(--text-3); }
+  .chip .s { font-size: 13px; font-weight: 500; margin-top: 1px; }
+
+  /* 正常/安全 —— 青碧 */
+  .chip.good .ico { background: rgba(72,192,163,.14); color: var(--qing-bi); }
+  .chip.good .s { color: var(--qing-bi); }
+
+  /* 需要注意 —— 朱砂（仅用于真正的异常） */
+  .chip.bad .ico { background: rgba(226,58,40,.13); color: var(--zhu-sha); }
+  .chip.bad .s { color: var(--zhu-sha); }
+
+  /* 中性状态 —— 天青（空调开关等非异常状态） */
+  .chip.mid .ico { background: rgba(93,138,126,.14); color: var(--tian-qing-deep); }
+  .chip.mid .s { color: var(--tian-qing-deep); }
+
+  /* 关闭态 —— 灰调，明确表示「非异常但未启用」 */
+  .chip.off .ico { background: rgba(74,66,102,.09); color: var(--text-3); }
+  .chip.off .s { color: var(--text-2); }
+  /* 关闭态的 chip 本体压暗一档，避免与卡片底色糊在一起 */
+  .chip.off { background: rgba(74,66,102,.045); }
+
+/* ─────────── 车控按钮 ─────────── */
+.ctrl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap); }
+.ctrl {
+  background: var(--surface-alt); border: none; border-radius: 13px;
+  padding: 14px 6px; min-height: 76px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px;
+  font-family: inherit; font-size: 12px; color: var(--text-1);
+  cursor: pointer; transition: transform .12s, background .15s, color .15s;
+}
+.ctrl svg { width: 22px; height: 22px; }
+.ctrl:active { transform: scale(.95); background: var(--piao-se); color: var(--tian-qing-deep); }
+.ctrl[disabled] { opacity: .38; pointer-events: none; }
+
+/* ─────────── 底部 Tab ─────────── */
+.tabbar {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
+  display: flex;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-top: 1px solid var(--separator);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.tab {
+  flex: 1; border: none; background: none; font-family: inherit;
+  padding: 9px 2px 7px; min-height: 56px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  font-size: 10px; color: var(--text-3); cursor: pointer;
+  transition: color .15s;
+}
+.tab svg { width: 22px; height: 22px; display: block; }
+.tab.on { color: var(--accent); font-weight: 600; }
+
+/* ─────────── 图表 ─────────── */
+.chart-box { background: var(--surface); border-radius: var(--card-radius); padding: var(--card-padding); }
+.seg {
+  display: inline-flex; background: var(--surface-alt);
+  border-radius: 9px; padding: 2px; gap: 2px;
+}
+.seg button {
+  border: none; background: none; font-family: inherit;
+  font-size: 12px; color: var(--text-2);
+  padding: 5px 13px; border-radius: 7px; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.seg button.on { background: var(--surface); color: var(--text-1); font-weight: 600; }
+canvas { display: block; width: 100%; }
+
+/* ─────────── 行程 / 消费列表 ─────────── */
+.list { display: flex; flex-direction: column; gap: var(--gap); }
+.item {
+  background: var(--surface); border-radius: var(--card-radius);
+  padding: 13px 14px;
+}
+.item-top {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+}
+.item-time { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.item-amt {
+  font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.item-main { font-size: 14px; font-weight: 500; margin-top: 6px; }
+.item-sub { font-size: 12px; color: var(--text-2); margin-top: 4px; }
+.item-tags { display: flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
+.tag {
+  font-size: 10.5px; padding: 3px 8px; border-radius: 6px;
+  background: var(--surface-alt); color: var(--text-2);
+}
+.tag.p { background: rgba(127,179,168,.16); color: var(--tian-qing-deep); font-weight: 600; }
+@media (prefers-color-scheme: dark) {
+  .tag.p { background: rgba(127,179,168,.20); color: var(--tian-qing); }
+}
+.tag.a { background: rgba(23,124,176,.14); color: var(--dian-qing); }
+.tag.w { background: rgba(240,194,57,.20); color: #A8791A; }
+
+/* ─────────── 服务商分布条 ─────────── */
+.pbar { display: flex; flex-direction: column; gap: 11px; }
+.pbar-row { display: flex; flex-direction: column; gap: 5px; }
+.pbar-head { display: flex; justify-content: space-between; font-size: 12.5px; }
+.pbar-name { color: var(--text-2); }
+.pbar-amt { font-weight: 600; font-variant-numeric: tabular-nums; }
+.pbar-track { height: 7px; background: var(--surface-alt); border-radius: 4px; overflow: hidden; }
+.pbar-fill { height: 100%; border-radius: 4px; transition: width .7s cubic-bezier(.4,0,.2,1); }
+.pbar-sub { font-size: 10.5px; color: var(--text-3); }
+
+/* ─────────── 汇总大卡 ─────────── */
+.summary-hero {
+  /* 同色系渐变：天青·深 → 靛青，保持中国传统色的青调，不用偏冷的靛蓝 */
+  background: linear-gradient(135deg, var(--tian-qing-deep) 0%, #4A8085 52%, var(--dian-qing) 100%);
+  border-radius: var(--card-radius); padding: 18px var(--card-padding);
+  color: #fff;
+  box-shadow: 0 6px 20px -10px rgba(93,138,126,.55);
+}
+.summary-hero .lbl { font-size: 11.5px; opacity: .82; }
+.summary-hero .big {
+  font-size: 33px; font-weight: 600; letter-spacing: -1px;
+  margin-top: 4px; font-variant-numeric: tabular-nums;
+}
+.summary-hero .big .u { font-size: 15px; font-weight: 400; opacity: .85; margin-left: 3px; }
+.summary-sub {
+  display: flex; gap: 24px; margin-top: 14px;
+  padding-top: 13px; border-top: 1px solid rgba(255,255,255,.20);
+}
+.summary-sub .v { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.summary-sub .k { font-size: 10.5px; opacity: .78; margin-top: 2px; }
+
+/* ─────────── 空态 / 占位 ─────────── */
+.empty {
+  text-align: center; padding: 46px 24px; color: var(--text-3); font-size: 13px;
+}
+.empty .ico { font-size: 40px; opacity: .35; margin-bottom: 12px; }
+.soon {
+  display: flex; align-items: center; gap: 11px;
+  background: var(--surface); border-radius: var(--card-radius); padding: 14px;
+  opacity: .62;
+}
+.soon .ico { font-size: 21px; }
+.soon .t { font-size: 13.5px; font-weight: 500; }
+.soon .d { font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
+.soon-badge {
+  margin-left: auto; font-size: 10px; padding: 3px 8px; border-radius: 6px;
+  background: var(--surface-alt); color: var(--text-3); white-space: nowrap;
+}
+
+/* ─────────── 页脚 ─────────── */
+.foot {
+  text-align: center; font-size: 10.5px; color: var(--text-3);
+  padding: 14px 0 4px; line-height: 1.7;
+}
+
+/* ─────────── 提示条 ─────────── */
+.toast {
+  position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%) translateY(12px);
+  background: var(--mo-se); color: #fff; font-size: 12.5px;
+  padding: 10px 18px; border-radius: 22px; z-index: 100;
+  opacity: 0; pointer-events: none; transition: opacity .22s, transform .22s;
+  max-width: 82vw; text-align: center;
+}
+.toast.show { opacity: .95; transform: translateX(-50%) translateY(0); }
+
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="row">
+    <div>
+      <h1 id="pageTitle">车况</h1>
+      <div class="sub" id="pageSub">正在连接服务…</div>
+    </div>
+    <span class="badge-mode" id="modeBadge">预览</span>
+  </div>
+</header>
+
+<main class="wrap" id="view"></main>
+
+<nav class="tabbar">
+  <button class="tab on" data-tab="dash">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M5 17h14M5 17a2 2 0 0 1-2-2v-3.5L5 6h14l2 5.5V15a2 2 0 0 1-2 2M5 17v2M19 17v2"/>
+      <circle cx="7.5" cy="14" r="1.2"/><circle cx="16.5" cy="14" r="1.2"/>
+    </svg>车况
+  </button>
+  <button class="tab" data-tab="trips">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 17l5-6 4 4 5-8 4 5"/>
+    </svg>行程
+  </button>
+  <button class="tab" data-tab="charges">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M13 2L4.5 13H11l-1 9 8.5-11H12l1-9z"/>
+    </svg>充电
+  </button>
+  <button class="tab" data-tab="settings">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </svg>设置
+  </button>
+</nav>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+/* ═══════════════════════════════════════════════
+   配置
+   ═══════════════════════════════════════════════ */
+const API = (location.origin.startsWith('http') && location.port !== '5500')
+  ? location.origin
+  : 'http://localhost:8765';
+
+const state = {
+  tab: 'dash',
+  status: null,
+  trips: [],
+  trend: [],
+  summary: null,
+  records: [],
+  days: 30,
+  health: null,
+};
+
+/* ═══════════════════════════════════════════════
+   工具
+   ═══════════════════════════════════════════════ */
+const $ = (s) => document.querySelector(s);
+
+function fmt(v, d = 0, fallback = '--') {
+  if (v === null || v === undefined || Number.isNaN(v)) return fallback;
+  return Number(v).toFixed(d);
+}
+function fmtDist(km) {
+  if (km === null || km === undefined) return '--';
+  return km >= 10000 ? (km / 10000).toFixed(1) + ' 万 km' : Math.round(km) + ' km';
+}
+function fmtDuration(min) {
+  if (!min || min <= 0) return '--';
+  const t = Math.round(min);
+  if (t < 60) return t + ' 分钟';
+  const h = Math.floor(t / 60), m = t % 60;
+  return m === 0 ? h + ' 小时' : h + ' 小时 ' + m + ' 分';
+}
+function fmtTime(ts) {
+  if (!ts) return '--';
+  const d = new Date(String(ts).replace(/-/g, '/'));
+  if (Number.isNaN(d.getTime())) return String(ts).slice(5, 16);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  if (sameDay) return '今天 ' + hh + ':' + mm;
+  return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + hh + ':' + mm;
+}
+function fmtMonth(ym) {
+  const p = String(ym).split('-');
+  return p.length === 2 ? parseInt(p[1], 10) + ' 月' : ym;
+}
+function socColor(soc) {
+  if (soc < 20) return 'var(--zhu-sha)';
+  if (soc < 50) return 'var(--teng-huang)';
+  return 'var(--qing-bi)';
+}
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function api(path, opts) {
+  const res = await fetch(API + path, opts);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const json = await res.json();
+  if (!json.success) throw new Error(json.error || '服务端返回失败');
+  return json.data;
+}
+
+let toastTimer;
+function toast(msg) {
+  const el = $('#toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+/* ═══════════════════════════════════════════════
+   电量环形
+   ═══════════════════════════════════════════════ */
+function socRing(soc, charging, size = 132, lw = 11) {
+  const r = (size - lw) / 2;
+  const c = 2 * Math.PI * r;
+  const pct = Math.max(0, Math.min(100, soc));
+  const offset = c * (1 - pct / 100);
+  const color = charging ? 'var(--dian-qing)' : socColor(pct);
+
+  return `
+  <div class="ring-wrap" style="width:${size}px;height:${size}px">
+    <svg width="${size}" height="${size}">
+      <circle class="ring-bg" cx="${size / 2}" cy="${size / 2}" r="${r}" stroke-width="${lw}"/>
+      <circle class="ring-fg" cx="${size / 2}" cy="${size / 2}" r="${r}" stroke-width="${lw}"
+              stroke="${color}"
+              stroke-dasharray="${c.toFixed(2)}"
+              stroke-dashoffset="${offset.toFixed(2)}"/>
+    </svg>
+    <div class="ring-center">
+      <div class="ring-num" style="color:${color}">
+        ${Math.round(pct)}<span class="pct">%</span>
+      </div>
+      <div class="ring-label">${charging ? '充电中' : '剩余电量'}</div>
+    </div>
+    ${charging ? `<div class="ring-bolt">${SVG.bolt}</div>` : ''}
+  </div>`;
+}
+
+/* ═══════════════════════════════════════════════
+   折线图（Canvas 手绘，零依赖）
+   ═══════════════════════════════════════════════ */
+function drawLineChart(canvas, points, opts = {}) {
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth || 320;
+  const cssH = opts.height || 160;
+  canvas.width = cssW * dpr;
+  canvas.height = cssH * dpr;
+  canvas.style.height = cssH + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const padL = 34, padR = 10, padT = 14, padB = 24;
+  const w = cssW - padL - padR;
+  const h = cssH - padT - padB;
+
+  const vals = points.map((p) => p.v).filter((v) => v !== null && !Number.isNaN(v));
+  if (!vals.length) return;
+
+  let min = Math.min(...vals), max = Math.max(...vals);
+  if (max === min) { max += 1; min -= 1; }
+  const span = max - min;
+  min -= span * 0.12;
+  max += span * 0.12;
+
+  const stroke = opts.color || getComputedStyle(document.documentElement)
+    .getPropertyValue('--tian-qing-deep').trim() || '#5D8A7E';
+  const gridColor = 'rgba(128,128,128,.16)';
+  const textColor = opts.textColor || 'rgba(128,128,128,.9)';
+
+  const x = (i) => padL + (points.length === 1 ? w / 2 : (i / (points.length - 1)) * w);
+  const y = (v) => padT + h - ((v - min) / (max - min)) * h;
+
+  // 横向网格 + Y 轴刻度
+  ctx.font = '10px -apple-system, sans-serif';
+  ctx.fillStyle = textColor;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i <= 3; i++) {
+    const gy = padT + (h / 3) * i;
+    ctx.strokeStyle = gridColor;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padL, gy);
+    ctx.lineTo(padL + w, gy);
+    ctx.stroke();
+
+    const gv = max - ((max - min) / 3) * i;
+    ctx.fillText(gv.toFixed(opts.decimals ?? 0), padL - 6, gy);
+  }
+
+  // 面积渐变
+  const grad = ctx.createLinearGradient(0, padT, 0, padT + h);
+  grad.addColorStop(0, opts.fillTop || 'rgba(127,179,168,.30)');
+  grad.addColorStop(1, 'rgba(127,179,168,0)');
+
+  ctx.beginPath();
+  points.forEach((p, i) => {
+    const py = y(p.v ?? min);
+    i === 0 ? ctx.moveTo(x(i), py) : ctx.lineTo(x(i), py);
+  });
+  ctx.lineTo(x(points.length - 1), padT + h);
+  ctx.lineTo(x(0), padT + h);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // 折线
+  ctx.beginPath();
+  points.forEach((p, i) => {
+    const py = y(p.v ?? min);
+    i === 0 ? ctx.moveTo(x(i), py) : ctx.lineTo(x(i), py);
+  });
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.stroke();
+
+  // 末点标记
+  const last = points[points.length - 1];
+  if (last && last.v !== null) {
+    ctx.beginPath();
+    ctx.arc(x(points.length - 1), y(last.v), 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = stroke;
+    ctx.fill();
+  }
+
+  // 首尾日期
+  ctx.fillStyle = textColor;
+  ctx.textBaseline = 'top';
+  ctx.font = '10px -apple-system, sans-serif';
+  if (points.length > 1) {
+    ctx.textAlign = 'left';
+    ctx.fillText(points[0].label, padL, padT + h + 7);
+    ctx.textAlign = 'right';
+    ctx.fillText(last.label, padL + w, padT + h + 7);
+  }
+}
+
+/* ═══════════════════════════════════════════════
+   图标库（内联 SVG，保证跨平台渲染一致）
+   ═══════════════════════════════════════════════ */
+const SVG = {
+  chart:  '<svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 19V5M4 19h16M8 19v-6M13 19v-9M18 19v-4"/></svg>',
+  route:  '<svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M6 15.8V11a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v0"/></svg>',
+  phone:  '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="6" y="3" width="12" height="18" rx="2.5"/><path d="M10.5 18h3"/></svg>',
+  file:   '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z"/><path d="M14 3v5h5"/></svg>',
+  lock:   '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>',
+  unlock: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 7.5-2"/></svg>',
+  snow:   '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3v18M3.5 7.5l17 9M20.5 7.5l-17 9"/></svg>',
+  window: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="6" width="16" height="12" rx="2"/><path d="M12 6v12"/></svg>',
+  trunk:  '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="9" width="16" height="9" rx="2"/><path d="M4 13h16M9 9V7a3 3 0 0 1 6 0v2"/></svg>',
+  bolt:   '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4.5 13H11l-1 9 8.5-11H12l1-9z"/></svg>',
+  light:  '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 1 3.5 10.9c-.5.4-.8 1-.8 1.6v.5h-5.4v-.5c0-.6-.3-1.2-.8-1.6A6 6 0 0 1 12 3z"/></svg>',
+  horn:   '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 9v6h3l5 4V5L7 9H4z"/><path d="M16 8.5a5 5 0 0 1 0 7M19 6a9 9 0 0 1 0 12"/></svg>',
+  plug:   '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M9 3v6M15 3v6M6 9h12v3a6 6 0 0 1-6 6 6 6 0 0 1-6-6V9zM12 18v3"/></svg>',
+  thermo: '<svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0z"/></svg>',
+  sun:    '<svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+  chart:  '<svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 4 5-8 4 5"/></svg>',
+  battery:'<svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="2" y="7" width="17" height="10" rx="2"/><path d="M22 11v2"/><rect x="4.5" y="9.5" width="8" height="5" rx="1" fill="currentColor" stroke="none"/></svg>',
+  ruler:  '<svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 17L17 3l4 4L7 21l-4-4z"/><path d="M7 13l2 2M10 10l2 2M13 7l2 2"/></svg>',
+  clock:  '<svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  car:    '<svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 16h14M5 16a2 2 0 0 1-2-2v-3l2-5h14l2 5v3a2 2 0 0 1-2 2M5 16v2M19 16v2"/><circle cx="7.5" cy="13" r="1.1"/><circle cx="16.5" cy="13" r="1.1"/></svg>',
+  money:  '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M15 9.5c0-1.4-1.3-2.2-3-2.2s-3 .8-3 2.2 1.3 1.9 3 2.3 3 .9 3 2.3-1.3 2.2-3 2.2-3-.8-3-2.2"/></svg>',
+};
+const PROVIDER_COLORS = {
+  zeekr: '#5D8A7E',
+  teld: '#177CB0',
+  starCharge: '#F0A35E',
+  stateGrid: '#4C6E91',
+  eCharging: '#789262',
+  other: '#9A9A9A',
+};
+
+/* ═══════════════════════════════════════════════
+   视图：车况
+   ═══════════════════════════════════════════════ */
+function renderDashboard() {
+  const s = state.status;
+  if (!s) {
+    return `<div class="empty">
+      <div class="ico">${SVG.car}</div>
+      <div>尚未获取到车辆数据</div>
+      <div style="margin-top:8px;font-size:11.5px">请确认 Python 服务已启动，且地址配置正确</div>
+    </div>`;
+  }
+
+  const charging = s.isCharging === true;
+
+  const chargingCard = charging ? `
+    <div class="card card-charging">
+      <div class="charge-head">${SVG.bolt} 充电中</div>
+      <div class="charge-grid">
+        <div class="charge-item">
+          <div class="v">${fmt(s.chargePowerKw, 1)}</div>
+          <div class="k">功率 kW</div>
+        </div>
+        <div class="charge-item">
+          <div class="v">${fmt(s.chargeVoltage, 0)}</div>
+          <div class="k">电压 V</div>
+        </div>
+        <div class="charge-item">
+          <div class="v">${fmt(s.chargeCurrent, 0)}</div>
+          <div class="k">电流 A</div>
+        </div>
+      </div>
+      ${s.minutesToFull > 0
+        ? `<div class="charge-eta">${SVG.clock} 预计 ${fmtDuration(s.minutesToFull)} 充满</div>` : ''}
+    </div>` : '';
+
+  const tyre = (label, v) => {
+    const bad = v !== null && v !== undefined && (v < 220 || v > 280);
+    return `<div class="tyre${bad ? ' warn' : ''}">
+      <div class="v">${fmt(v, 0)}</div>
+      <div class="k">${label} kPa</div>
+    </div>`;
+  };
+
+  /**
+   * 状态 chip
+   * tone 语义：
+   *   good —— 安全/正常（青碧），如车门已锁
+   *   bad  —— 真正的异常（朱砂），如车门未锁、车窗未关
+   *   mid  —— 已启用（天青），如空调开启
+   *   off  —— 未启用但正常（灰调），如空调关闭
+   */
+  const chip = (title, tone, text, icon) => `
+    <div class="chip ${tone}">
+      <div class="ico">${icon}</div>
+      <div class="txt"><div class="t">${title}</div>
+      <div class="s">${text}</div></div>
+    </div>`;
+
+  const lockTone = s.isLocked === true ? 'good' : 'bad';
+  const lockText = s.isLocked === true ? '已锁' : '未锁';
+  const lockIcon = s.isLocked === true ? SVG.lock : SVG.unlock;
+
+  const climateOn = s.climateOn === true;
+  const winClosed = !hasOpenWindow(s);
+  const trunkClosed = s.trunkOpen !== true;
+
+  const ctrlBtn = (cmd, label, icon) => `
+    <button class="ctrl" data-cmd="${cmd}">
+      <span class="ico">${icon}</span>${label}
+    </button>`;
+
+  return `
+    <div class="card">
+      <div class="hero">
+        ${socRing(s.soc ?? 0, charging)}
+        <div class="hero-info">
+          <div>
+            <div class="hero-name">${esc(s.nickname || s.modelName || '我的爱车')}</div>
+            ${s.plateNo ? `<div class="hero-plate">${esc(s.plateNo)}</div>` : ''}
+          </div>
+          <div class="hr"></div>
+          <div class="mini-row">
+            <span class="mini-label">续航</span>
+            <span class="mini-val">${s.rangeKm ? Math.round(s.rangeKm) + ' km' : '--'}</span>
+          </div>
+          <div class="mini-row">
+            <span class="mini-label">总里程</span>
+            <span class="mini-val">${fmtDist(s.odometerKm)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    ${chargingCard}
+
+    <div class="grid2">
+      <div class="stat">
+        <div class="head">${SVG.thermo} 车内温度</div>
+        <div class="val">${fmt(s.interiorTemp, 1)}<span class="u">°C</span></div>
+      </div>
+      <div class="stat">
+        <div class="head">${SVG.sun} 车外温度</div>
+        <div class="val">${fmt(s.exteriorTemp, 1)}<span class="u">°C</span></div>
+      </div>
+      <div class="stat">
+        <div class="head">${SVG.chart} 平均能耗</div>
+        <div class="val">${fmt(s.avgConsumption, 1)}<span class="u">kWh/100km</span></div>
+      </div>
+      <div class="stat">
+        <div class="head">${SVG.battery} 12V 电瓶</div>
+        <div class="val">${fmt(s.battery12vVoltage, 1)}<span class="u">V</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">
+        <span>胎压</span>
+        ${s.tyreWarning ? '<span style="font-size:11px;color:var(--zhu-sha);font-weight:500">异常</span>' : ''}
+      </div>
+      <div class="tyre-grid">
+        ${tyre('左前', s.tyreFrontLeft)}
+        ${tyre('右前', s.tyreFrontRight)}
+        ${tyre('左后', s.tyreRearLeft)}
+        ${tyre('右后', s.tyreRearRight)}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">车身状态</div>
+      <div class="grid2">
+        ${chip('车门', lockTone, lockText, lockIcon)}
+        ${chip('空调', climateOn ? 'mid' : 'off', climateOn ? '开启' : '关闭', SVG.snow)}
+        ${chip('车窗', winClosed ? 'good' : 'bad', winClosed ? '已关' : '未关', SVG.window)}
+        ${chip('后备箱', trunkClosed ? 'good' : 'bad', trunkClosed ? '已关' : '开启', SVG.trunk)}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">快捷车控</div>
+      <div class="ctrl-grid">
+        ${ctrlBtn('lock', '锁车', SVG.lock)}
+        ${ctrlBtn('unlock', '解锁', SVG.unlock)}
+        ${ctrlBtn('climateOn', '开空调', SVG.snow)}
+        ${ctrlBtn('flash', '闪灯', SVG.light)}
+        ${ctrlBtn('honk', '鸣笛', SVG.horn)}
+        ${ctrlBtn('chargeStop', '结束充电', SVG.plug)}
+      </div>
+    </div>
+
+    <div class="foot">
+      ${state.lastRefresh ? '更新于 ' + state.lastRefresh + '<br>' : ''}
+      数据来自非官方接口，仅供参考
+    </div>`;
+}
+
+function hasOpenWindow(s) {
+  return Object.values(s.windows || {}).some((v) => v === true);
+}
+
+/* ═══════════════════════════════════════════════
+   视图：行程
+   ═══════════════════════════════════════════════ */
+function renderTrips() {
+  const trend = state.trend;
+  const trips = state.trips;
+
+  if (!trend.length && !trips.length) {
+    return `<div class="empty"><div class="ico">${SVG.chart}</div><div>暂无行程数据</div></div>`;
+  }
+
+  const totalDist = trend.reduce((a, p) => a + (p.distanceKm || 0), 0);
+  const totalEnergy = trend.reduce((a, p) => a + (p.energyKwh || 0), 0);
+  const avgCons = totalDist > 0 ? (totalEnergy / totalDist) * 100 : null;
+
+  return `
+    <div class="grid2">
+      <div class="stat">
+        <div class="head">${SVG.ruler} 累计里程</div>
+        <div class="val">${Math.round(totalDist)}<span class="u">km</span></div>
+      </div>
+      <div class="stat">
+        <div class="head">${SVG.bolt} 累计能耗</div>
+        <div class="val">${totalEnergy.toFixed(1)}<span class="u">kWh</span></div>
+      </div>
+      <div class="stat">
+        <div class="head">${SVG.chart} 平均能耗</div>
+        <div class="val">${fmt(avgCons, 1)}<span class="u">kWh/100km</span></div>
+      </div>
+      <div class="stat">
+        <div class="head">${SVG.route} 行程次数</div>
+        <div class="val">${trips.length}<span class="u">次</span></div>
+      </div>
+    </div>
+
+    <div class="chart-box">
+      <div class="card-title">
+        <span>百公里能耗趋势</span>
+        <span class="seg">
+          <button data-days="7" class="${state.days === 7 ? 'on' : ''}">7天</button>
+          <button data-days="30" class="${state.days === 30 ? 'on' : ''}">30天</button>
+          <button data-days="90" class="${state.days === 90 ? 'on' : ''}">90天</button>
+        </span>
+      </div>
+      <canvas id="consChart"></canvas>
+    </div>
+
+    <div class="list">
+      ${trips.slice(0, 30).map(tripItem).join('')}
+    </div>`;
+}
+
+function tripItem(t) {
+  return `
+    <div class="item">
+      <div class="item-top">
+        <span class="item-time">${fmtTime(t.startTime)}</span>
+        <span class="item-amt">${fmt(t.distanceKm, 1)} km</span>
+      </div>
+      <div class="item-main">${esc(t.startPlace || '起点')} → ${esc(t.endPlace || '终点')}</div>
+      <div class="item-tags">
+        <span class="tag a">${fmt(t.energyKwh, 2)} kWh</span>
+        <span class="tag w">${fmt(t.consumption, 1)} kWh/100km</span>
+        ${t.durationMinutes ? `<span class="tag">${fmtDuration(t.durationMinutes)}</span>` : ''}
+      </div>
+    </div>`;
+}
+
+/* ═══════════════════════════════════════════════
+   视图：充电
+   ═══════════════════════════════════════════════ */
+function renderCharges() {
+  const sum = state.summary;
+  const records = state.records;
+
+  if (!sum || !sum.totalCount) {
+    return `
+      <div class="empty">
+        <div class="ico">${SVG.bolt}</div>
+        <div>还没有充电消费记录</div>
+        <div style="margin-top:8px;font-size:11.5px">
+          导入支付宝 / 微信账单后，这里会自动归集各服务商的充电消费
+        </div>
+      </div>
+      ${soonCard()}`;
+  }
+
+  const maxAmt = Math.max(...(sum.byProvider || []).map((p) => p.amount || 0), 1);
+
+  return `
+    <div class="summary-hero">
+      <div class="lbl">累计充电消费</div>
+      <div class="big">${fmt(sum.totalAmount, 2)}<span class="u">元</span></div>
+      <div class="summary-sub">
+        <div>
+          <div class="v">${sum.totalCount}</div>
+          <div class="k">笔数</div>
+        </div>
+        <div>
+          <div class="v">${sum.totalEnergyKwh ? fmt(sum.totalEnergyKwh, 1) : '--'}</div>
+          <div class="k">总电量 kWh</div>
+        </div>
+        <div>
+          <div class="v">${sum.avgUnitPrice ? fmt(sum.avgUnitPrice, 2) : '--'}</div>
+          <div class="k">均价 元/kWh</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">服务商分布</div>
+      <div class="pbar">
+        ${(sum.byProvider || []).map((p) => {
+          const color = PROVIDER_COLORS[p.provider] || PROVIDER_COLORS.other;
+          const pct = ((p.amount || 0) / maxAmt) * 100;
+          return `<div class="pbar-row">
+            <div class="pbar-head">
+              <span class="pbar-name">${esc(p.providerName || p.provider || '其他')}</span>
+              <span class="pbar-amt">${fmt(p.amount, 2)} 元</span>
+            </div>
+            <div class="pbar-track">
+              <div class="pbar-fill" style="width:${pct}%;background:${color}"></div>
+            </div>
+            <div class="pbar-sub">${p.count} 笔</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <div class="chart-box">
+      <div class="card-title">月度消费趋势</div>
+      <canvas id="monthChart"></canvas>
+    </div>
+
+    <div class="card-title" style="padding:4px 2px 0">消费明细</div>
+    <div class="list">
+      ${records.slice(0, 40).map(chargeItem).join('')}
+    </div>
+
+    ${soonCard()}`;
+}
+
+function chargeItem(r) {
+  const color = PROVIDER_COLORS[r.provider] || PROVIDER_COLORS.other;
+  return `
+    <div class="item">
+      <div class="item-top">
+        <span class="item-time">${fmtTime(r.timestamp)}</span>
+        <span class="item-amt" style="color:${color}">${fmt(r.amount, 2)} 元</span>
+      </div>
+      <div class="item-main">${esc(r.merchant || '未知商户')}</div>
+      <div class="item-tags">
+        <span class="tag p">${esc(r.providerName || r.provider || '其他')}</span>
+        ${r.channel ? `<span class="tag">${r.channel === 'alipay' ? '支付宝' : r.channel === 'wechat' ? '微信' : r.channel}</span>` : ''}
+      </div>
+    </div>`;
+}
+
+function soonCard() {
+  return `
+    <div class="soon">
+      <span class="ico">${SVG.money}</span>
+      <div>
+        <div class="t">电费测算</div>
+        <div class="d">动态电价 · 智能充电 · 费用预算</div>
+      </div>
+      <span class="soon-badge">即将上线</span>
+    </div>`;
+}
+
+/* ═══════════════════════════════════════════════
+   视图：设置
+   ═══════════════════════════════════════════════ */
+function renderSettings() {
+  const h = state.health;
+  const online = !!h;
+
+  return `
+    <div class="card">
+      <div class="card-title">服务连接</div>
+      <div class="mini-row" style="padding:5px 0">
+        <span class="mini-label">服务地址</span>
+        <span class="mini-val" style="font-size:12px">${esc(API)}</span>
+      </div>
+      <div class="mini-row" style="padding:5px 0">
+        <span class="mini-label">连接状态</span>
+        <span class="mini-val" style="font-size:12px;color:${online ? 'var(--qing-bi)' : 'var(--zhu-sha)'}">
+          ${online ? '● 已连接' : '● 未连接'}
+        </span>
+      </div>
+      ${h ? `
+      <div class="mini-row" style="padding:5px 0">
+        <span class="mini-label">数据模式</span>
+        <span class="mini-val" style="font-size:12px">${h.mode === 'mock' ? '模拟数据' : '真实接口'}</span>
+      </div>
+      <div class="mini-row" style="padding:5px 0">
+        <span class="mini-label">极氪账号</span>
+        <span class="mini-val" style="font-size:12px">${h.configured ? '已配置' : '未配置'}</span>
+      </div>
+      <div class="mini-row" style="padding:5px 0">
+        <span class="mini-label">车控指令</span>
+        <span class="mini-val" style="font-size:12px">${h.allowCommands ? '已开启' : '已禁用'}</span>
+      </div>` : ''}
+    </div>
+
+    ${h && h.missingKeys && h.missingKeys.length ? `
+    <div class="card">
+      <div class="card-title">待配置项</div>
+      <div style="font-size:12px;color:var(--text-2);line-height:1.9">
+        ${h.missingKeys.map((k) => `<div>· <code style="font-size:11px">${esc(k)}</code></div>`).join('')}
+      </div>
+      <div style="font-size:11.5px;color:var(--text-3);margin-top:10px;line-height:1.6">
+        填入 <code>.env</code> 后重启服务即可切换到真实数据。
+      </div>
+    </div>` : ''}
+
+    <div class="card">
+      <div class="card-title">账号与凭据</div>
+      <div class="soon" style="background:var(--surface-alt)">
+        <span class="ico">${SVG.phone}</span>
+        <div>
+          <div class="t">极氪账号登录</div>
+          <div class="d">手机号 + 短信验证码</div>
+        </div>
+        <span class="soon-badge">原生版提供</span>
+      </div>
+      <div class="soon" style="background:var(--surface-alt);margin-top:10px">
+        <span class="ico">${SVG.file}</span>
+        <div>
+          <div class="t">导入账单</div>
+          <div class="d">支付宝 / 微信 CSV</div>
+        </div>
+        <span class="soon-badge">原生版提供</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">关于</div>
+      <div style="font-size:11.5px;color:var(--text-3);line-height:1.8">
+        极氪看板 · 设计预览版<br>
+        数据来自非官方接口，与极氪官方无关联<br>
+        仅供个人自用
+      </div>
+    </div>`;
+}
+
+/* ═══════════════════════════════════════════════
+   渲染调度
+   ═══════════════════════════════════════════════ */
+const TITLES = {
+  dash: ['车况', '车辆实时状态'],
+  trips: ['行程', '里程与能耗统计'],
+  charges: ['充电', '跨服务商消费汇总'],
+  settings: ['设置', '服务与账号配置'],
+};
+
+function render() {
+  const [title, sub] = TITLES[state.tab];
+  $('#pageTitle').textContent = title;
+  $('#pageSub').textContent = state.loading ? '正在加载…' : sub;
+
+  const view = $('#view');
+  const html = {
+    dash: renderDashboard,
+    trips: renderTrips,
+    charges: renderCharges,
+    settings: renderSettings,
+  }[state.tab]();
+
+  view.innerHTML = html;
+
+  // 图表延后绘制（需等布局完成）
+  requestAnimationFrame(() => {
+    if (state.tab === 'trips') {
+      const c = $('#consChart');
+      if (c && state.trend.length) {
+        drawLineChart(c,
+          state.trend.map((p) => ({
+            v: p.consumption,
+            label: String(p.date).slice(5),
+          })),
+          { height: 168, decimals: 0 });
+      }
+    }
+    if (state.tab === 'charges') {
+      const c = $('#monthChart');
+      if (c && state.summary && state.summary.monthly) {
+        const m = [...state.summary.monthly].reverse();
+        drawLineChart(c,
+          m.map((x) => ({ v: x.amount, label: fmtMonth(x.month) })),
+          { height: 168, decimals: 0, fillTop: 'rgba(93,138,126,.28)' });
+      }
+    }
+  });
+}
+
+/* ═══════════════════════════════════════════════
+   数据加载
+   ═══════════════════════════════════════════════ */
+state.loading = false;
+state.lastRefresh = null;
+
+async function loadHealth() {
+  try {
+    state.health = await api('/api/health');
+    const badge = $('#modeBadge');
+    badge.textContent = state.health.mode === 'mock' ? '模拟数据' : '真实数据';
+  } catch {
+    state.health = null;
+    $('#modeBadge').textContent = '未连接';
+  }
+}
+
+async function loadStatus() {
+  try {
+    state.status = await api('/api/vehicle/status');
+    const d = new Date();
+    state.lastRefresh = String(d.getHours()).padStart(2, '0') + ':' +
+                       String(d.getMinutes()).padStart(2, '0');
+  } catch (e) {
+    console.warn('状态加载失败', e);
+  }
+}
+
+async function loadTrips() {
+  try {
+    const [trips, trend] = await Promise.all([
+      api('/api/trips?days=' + state.days),
+      api('/api/energy/trend?days=' + state.days),
+    ]);
+    state.trips = trips || [];
+    state.trend = trend || [];
+  } catch (e) {
+    console.warn('行程加载失败', e);
+    state.trips = [];
+    state.trend = [];
+  }
+}
+
+async function loadCharges() {
+  try {
+    const [summary, records] = await Promise.all([
+      api('/api/charges/summary?months=6'),
+      api('/api/charges/records?limit=50'),
+    ]);
+    state.summary = summary;
+    state.records = records || [];
+  } catch (e) {
+    console.warn('充电数据加载失败', e);
+    state.summary = null;
+    state.records = [];
+  }
+}
+
+async function loadAll() {
+  state.loading = true;
+  render();
+  await Promise.all([loadHealth(), loadStatus(), loadTrips(), loadCharges()]);
+  state.loading = false;
+  render();
+}
+
+/* ═══════════════════════════════════════════════
+   交互
+   ═══════════════════════════════════════════════ */
+document.querySelector('.tabbar').addEventListener('click', (e) => {
+  const btn = e.target.closest('.tab');
+  if (!btn) return;
+  state.tab = btn.dataset.tab;
+  document.querySelectorAll('.tab').forEach((b) =>
+    b.classList.toggle('on', b === btn));
+  render();
+});
+
+document.addEventListener('click', (e) => {
+  // 车控
+  const ctrl = e.target.closest('.ctrl');
+  if (ctrl) {
+    sendCommand(ctrl.dataset.cmd);
+    return;
+  }
+  // 时间区间切换
+  const seg = e.target.closest('.seg button');
+  if (seg) {
+    state.days = parseInt(seg.dataset.days, 10);
+    loadTrips().then(render);
+  }
+});
+
+async function sendCommand(cmd) {
+  try {
+    const res = await api('/api/vehicle/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: cmd }),
+    });
+    toast(res.message || '指令已下发');
+    setTimeout(loadStatus, 1200);
+  } catch (e) {
+    toast('指令失败：' + e.message);
+  }
+}
+
+/* ═══════════════════════════════════════════════
+   启动
+   ═══════════════════════════════════════════════ */
+loadAll();
+
+// 轮询：充电中 60 秒，否则 5 分钟
+let pollTimer;
+function schedulePoll() {
+  clearTimeout(pollTimer);
+  const interval = (state.status && state.status.isCharging) ? 60000 : 300000;
+  pollTimer = setTimeout(async () => {
+    await loadStatus();
+    render();
+    schedulePoll();
+  }, interval);
+}
+setTimeout(schedulePoll, 5000);
+
+// 页面回到前台时刷新
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) loadAll();
+});
+</script>
+</body>
+</html>

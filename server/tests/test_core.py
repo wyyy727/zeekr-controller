@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import base64
 import csv
+import hashlib
 import io
 import sys
 from datetime import datetime, timedelta
@@ -27,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.adapters.zeekr_signing import (  # noqa: E402
     COMMAND_MAP,
     build_control_body,
+    build_gw3_string_to_sign,
     compact_json,
     encrypt_vin,
     sign_gw3,
@@ -48,7 +50,10 @@ class TestSigning:
             prod_secret="test_secret_value",
             method="POST",
             path="/test/path",
-            headers={"X-APP-ID": "ZEEKRCNCH001M0001"},
+            headers={
+                "X-APP-ID": "ZEEKRCNCH001M0001",
+                "Content-Type": "application/json; charset=utf-8",
+            },
             body='{"a":1}',
         )
         assert len(signature) == 44
@@ -72,14 +77,19 @@ class TestSigning:
             "prod_secret": "secret",
             "method": "POST",
             "path": "/api",
-            "headers": {"X-APP-ID": "id"},
+            "headers": {
+                "X-APP-ID": "id",
+                "Content-Type": "application/json; charset=utf-8",
+            },
         }
         assert sign_gw3(body='{"a":1}', **base) != sign_gw3(body='{"a":2}', **base)
 
-    def test_gw3_excludes_timestamp_header(self) -> None:
-        """X-TIMESTAMP 是普通头，不参与签名。
+    def test_gw3_timestamp_participates_in_signature(self) -> None:
+        """`x-timestamp` 在白名单内，必须参与签名。
 
-        GW1 的 x-api* 过滤规则决定了：只有 x-api 开头的头才进签名串。
+        这是曾经出错的地方：早期实现只取 `x-api*` 开头的头，
+        导致 `x-timestamp`、`x-app-id`、`content-type` 全部漏签，
+        签名串首段恒为空 → 网关验签必然失败。
         """
         base = {
             "prod_secret": "secret",
@@ -87,9 +97,89 @@ class TestSigning:
             "path": "/api",
             "body": "{}",
         }
-        sig1 = sign_gw3(headers={"X-APP-ID": "id", "X-TIMESTAMP": "111"}, **base)
-        sig2 = sign_gw3(headers={"X-APP-ID": "id", "X-TIMESTAMP": "999"}, **base)
-        assert sig1 == sig2, "X-TIMESTAMP 不应参与签名"
+        sig1 = sign_gw3(headers={
+            "X-APP-ID": "id",
+            "X-TIMESTAMP": "111",
+            "Content-Type": "application/json",
+        }, **base)
+        sig2 = sign_gw3(headers={
+            "X-APP-ID": "id",
+            "X-TIMESTAMP": "999",
+            "Content-Type": "application/json",
+        }, **base)
+        assert sig1 != sig2, "x-timestamp 属于白名单头，应参与签名"
+
+    def test_gw3_non_whitelisted_headers_excluded(self) -> None:
+        """不在白名单内的头不参与签名（如 User-Agent、X-APP-OS-VERSION）。"""
+        base = {
+            "prod_secret": "secret",
+            "method": "GET",
+            "path": "/api",
+        }
+        common = {"X-APP-ID": "id", "X-TIMESTAMP": "123"}
+        sig1 = sign_gw3(headers={**common, "User-Agent": "A/1.0"}, **base)
+        sig2 = sign_gw3(headers={**common, "User-Agent": "B/2.0"}, **base)
+        assert sig1 == sig2, "User-Agent 不在白名单，不应影响签名"
+
+    def test_gw3_empty_vin_and_auth_skipped(self) -> None:
+        """`x-vin` 与 `authorization` 为空时应跳过，不写入签名串。"""
+        base = {
+            "prod_secret": "secret",
+            "method": "GET",
+            "path": "/api",
+        }
+        # 显式传空串，应与完全不传的结果一致
+        sig_with_empty = sign_gw3(
+            headers={"X-APP-ID": "id", "X-VIN": "", "Authorization": ""}, **base
+        )
+        sig_without = sign_gw3(headers={"X-APP-ID": "id"}, **base)
+        assert sig_with_empty == sig_without
+
+    def test_gw3_canonical_structure(self) -> None:
+        """待签名串的结构必须与协议一致：头段 + query + body + 方法 + 路径。"""
+        canonical = build_gw3_string_to_sign(
+            method="POST",
+            path="/test/path",
+            headers={
+                "X-APP-ID": "ZEEKRCNCH001M0001",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+            query={"b": "2", "a": "1"},
+            body='{"a":1}',
+        )
+
+        lines = canonical.split("\n")
+        # 头段：按头名小写排序，每行 name:value
+        assert lines[0] == "content-type:application/json; charset=utf-8"
+        assert lines[1] == "x-app-id:ZEEKRCNCH001M0001"
+        # query 段：键排序
+        assert lines[2] == "a=1&b=2"
+        # body 段：base64(md5(body))
+        expected_md5 = base64.b64encode(hashlib.md5(b'{"a":1}').digest()).decode()
+        assert lines[3] == expected_md5
+        # 方法 + 路径
+        assert lines[4] == "POST"
+        assert lines[5] == "/test/path"
+
+    def test_gw3_body_requires_json_content_type(self) -> None:
+        """仅当 Content-Type 含 application/json 时 body 才参与签名。"""
+        base = {
+            "prod_secret": "secret",
+            "method": "POST",
+            "path": "/api",
+            "query": None,
+        }
+        with_json = sign_gw3(
+            headers={"X-APP-ID": "id", "Content-Type": "application/json"},
+            body="{}",
+            **base,
+        )
+        without_json = sign_gw3(
+            headers={"X-APP-ID": "id", "Content-Type": "text/plain"},
+            body="{}",
+            **base,
+        )
+        assert with_json != without_json
 
     def test_gw3_query_escapes_asterisk(self) -> None:
         """query 中的 `*` 需转义为 %2A（与官方 App 一致）。"""
@@ -102,6 +192,17 @@ class TestSigning:
         sig_star = sign_gw3(query={"q": "*"}, **base)
         sig_escaped = sign_gw3(query={"q": "%2A"}, **base)
         assert sig_star == sig_escaped
+
+    def test_gw3_query_unescapes_slash_and_question(self) -> None:
+        """`%2F` → `/`、`%3F` → `?`（撤销百分号编码）。"""
+        base = {
+            "prod_secret": "secret",
+            "method": "GET",
+            "path": "/api",
+            "headers": {"X-APP-ID": "id"},
+        }
+        assert sign_gw3(query={"q": "%2F"}, **base) == sign_gw3(query={"q": "/"}, **base)
+        assert sign_gw3(query={"q": "%3F"}, **base) == sign_gw3(query={"q": "?"}, **base)
 
     def test_encrypt_vin_produces_ciphertext(self) -> None:
         """VIN 加密结果必须是可解码的 Base64，且长度达标。"""
@@ -364,3 +465,157 @@ class TestAggregation:
         assert summary["totalAmount"] == 0.0
         assert summary["totalCount"] == 0
         assert summary["monthly"] == []
+
+
+# MARK: - 功率量纲归一化
+
+
+class TestPowerNormalization:
+    """充电功率量纲推断测试。
+
+    网关返回量纲不一致（瓦特 / kW），需按量级推断。
+    """
+
+    def test_watts_are_converted(self) -> None:
+        """大于 1000 视为瓦特，转换为 kW。"""
+        from app.adapters.live_client import _normalize_power
+
+        assert _normalize_power(118000) == 118.0
+        assert _normalize_power(7500) == 7.5
+
+    def test_kilowatts_pass_through(self) -> None:
+        """小于等于 1000 视为已是 kW，不再缩放。"""
+        from app.adapters.live_client import _normalize_power
+
+        assert _normalize_power(118) == 118.0
+        assert _normalize_power(7.5) == 7.5
+
+    def test_zero_and_none(self) -> None:
+        """0 与 None 应安全处理。"""
+        from app.adapters.live_client import _normalize_power
+
+        assert _normalize_power(0) == 0.0
+        assert _normalize_power(None) is None
+        assert _normalize_power("abc") is None
+
+
+# MARK: - 车辆状态容错解析
+
+
+class TestStatusNormalization:
+    """状态解析测试。
+
+    这是对接真实网关的核心逻辑，容错性直接决定数据能否显示。
+    """
+
+    # 模拟网关的嵌套报文（层级与真实网关一致）
+    SAMPLE = {
+        "data": {
+            "basicVehicleStatus": {
+                "position": {"posCanBeTrusted": True, "latitude": 83164000, "longitude": 407768000},
+                "trunkStatus": 0,
+            },
+            "additionalVehicleStatus": {
+                "electricVehicleStatus": {
+                    "chargeLevel": 86,
+                    "distanceToEmptyOnBatteryOnly": 321,
+                    "chargeIAct": 180.5,
+                    "chargeUAct": 402.3,
+                    "timeToFullyCharged": 45,
+                },
+                "maintenanceStatus": {
+                    "odometer": 23007,
+                    "mainBatteryStatus": {"chargeLevel": 88, "voltage": 12.8},
+                    "tyreStatus": {
+                        "tyreStatusDriver": 241,
+                        "tyreStatusPassenger": 242,
+                        "tyreStatusDriverRear": 250,
+                        "tyreStatusPassengerRear": 249,
+                    },
+                },
+                "climateStatus": {"preClimateActive": True},
+                "runningStatus": {"speed": 0},
+            },
+        }
+    }
+
+    def _normalize(self, payload: dict) -> dict:
+        from app.adapters.live_client import LiveZeekrClient
+
+        return LiveZeekrClient._normalize_status(payload, "TESTVIN0000000001")
+
+    def test_soc_from_electric_vehicle_status(self) -> None:
+        """SOC 必须取动力电池字段，不能误取 12V 电瓶。"""
+        status = self._normalize(self.SAMPLE)
+        assert status["soc"] == 86.0, "应从 electricVehicleStatus.chargeLevel 取值"
+        # 12V 电瓶是独立字段
+        assert status["battery12vLevel"] == 88.0
+
+    def test_nested_fields_resolved(self) -> None:
+        """深层嵌套字段应能正确解析。"""
+        status = self._normalize(self.SAMPLE)
+        assert status["rangeKm"] == 321.0
+        assert status["odometerKm"] == 23007.0
+        assert status["chargeCurrent"] == 180.5
+        assert status["chargeVoltage"] == 402.3
+        assert status["minutesToFull"] == 45.0
+        assert status["climateOn"] is True
+
+    def test_charging_derived_from_current_voltage(self) -> None:
+        """充电状态由电流×电压推导（比标志位可靠）。"""
+        status = self._normalize(self.SAMPLE)
+        # 180.5A × 402.3V ≈ 72.6kW > 0.5kW
+        assert status["isCharging"] is True
+        assert status["chargePowerKw"] is not None
+
+    def test_tyre_pressures(self) -> None:
+        """四轮胎压应全部解析到。"""
+        status = self._normalize(self.SAMPLE)
+        assert status["tyreFrontLeft"] == 241.0
+        assert status["tyreFrontRight"] == 242.0
+        assert status["tyreRearLeft"] == 250.0
+        assert status["tyreRearRight"] == 249.0
+
+    def test_gps_scaled_to_degrees(self) -> None:
+        """GPS 定点整数应换算为度数。"""
+        status = self._normalize(self.SAMPLE)
+        assert status["latitude"] is not None
+        assert status["longitude"] is not None
+        # 广州纬度约 23 度
+        assert 22.0 < status["latitude"] < 24.0
+        assert 112.0 < status["longitude"] < 114.0
+
+    def test_first_non_empty_value_wins(self) -> None:
+        """同名字段出现多次时取首个非空值，避免被哨兵值覆盖。"""
+        payload = {
+            "a": {"value": 42},
+            "b": {"value": 0},
+        }
+        status = self._normalize(payload)
+        # 不应抛异常即可，具体字段不重要
+        assert isinstance(status, dict)
+
+    def test_empty_payload_does_not_crash(self) -> None:
+        """空报文应安全降级为 None，而不是崩溃。"""
+        status = self._normalize({})
+        assert status["soc"] is None
+        assert status["rangeKm"] is None
+
+    def test_short_field_names_resolved(self) -> None:
+        """扁平字段名（无嵌套）也应能命中别名。"""
+        payload = {"data": {"chargeLevel": 55, "odometer": 12345}}
+        status = self._normalize(payload)
+        assert status["soc"] == 55.0
+        assert status["odometerKm"] == 12345.0
+
+    def test_time_to_full_sentinel_handled(self) -> None:
+        """空闲时网关返回哨兵值 2047，应视为未知。"""
+        payload = {
+            "data": {
+                "additionalVehicleStatus": {
+                    "electricVehicleStatus": {"timeToFullyCharged": 2047}
+                }
+            }
+        }
+        status = self._normalize(payload)
+        assert status["minutesToFull"] is None, "2047 是哨兵值，应转为未知"

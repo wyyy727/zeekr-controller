@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -85,4 +86,34 @@ def register_routers() -> None:
     app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
 
 
+def mount_preview() -> None:
+    """挂载设计预览页（Safari 可访问）。
+
+    用于在没有 Mac 无法编译 iOS App 时，先验证界面设计与配色。
+    预览页复用同一套接口，是原生版的「所见即所得」参照。
+    """
+    from fastapi.responses import FileResponse, RedirectResponse
+    from fastapi.staticfiles import StaticFiles
+
+    # 预览页位于项目根目录的 preview/（server/ 的上一级）
+    preview_dir = Path(__file__).resolve().parent.parent.parent / "preview"
+    index_file = preview_dir / "index.html"
+
+    if not index_file.exists():
+        logger.warning("预览页不存在，跳过挂载：%s", index_file)
+        return
+
+    @app.get("/", include_in_schema=False)
+    async def root() -> RedirectResponse:
+        return RedirectResponse(url="/preview")
+
+    @app.get("/preview", include_in_schema=False)
+    async def preview() -> FileResponse:
+        return FileResponse(index_file)
+
+    app.mount("/preview", StaticFiles(directory=preview_dir), name="preview")
+    logger.info("设计预览页已挂载：http://<服务地址>/preview")
+
+
 register_routers()
+mount_preview()

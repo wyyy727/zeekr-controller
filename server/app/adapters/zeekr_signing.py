@@ -33,8 +33,33 @@ GW1_HOST = "https://api-gw-toc.zeekrlife.com"
 GW2_HOST = "https://api.zeekrline.com"
 GW3_HOST = "https://snc-tsp-api.zeekrlife.com"
 
-# GW3 所有端点（含登录）都必须使用此 app id，网关按它查签名密钥
+# GW3 参与签名的请求头白名单。
+#
+# 注意：**不是所有请求头都参与签名**，也**不是只有 x-api* 参与**。
+# 必须严格按此白名单过滤，否则签名串与网关预期不一致，会返回
+# `079025 Signature authentication failed`。
+#
+# 不在白名单内的头（如 User-Agent、X-APP-OS-VERSION）照常发送，但不参与签名。
+GW3_SIGNED_HEADERS = frozenset({
+    "x-app-id",
+    "content-type",
+    "x-api-signature-nonce",
+    "x-timestamp",
+    "x-api-signature-version",
+    "x-project-id",
+    "authorization",
+    "accept-language",
+    "x-vin",
+    "x-device-id",
+    "x-platform",
+})
+
+# 签名的 App ID —— GW3 所有端点（含登录）都必须使用此值，
+# 网关按它查签名密钥，用错直接报签名失败
 GW3_APP_ID = "ZEEKRCNCH001M0001"
+
+# 签名协议版本
+GW3_SIGNATURE_VERSION = "2.0"
 
 # 与官方 App 保持一致的客户端标识
 APP_VERSION = "5.0.5"
@@ -100,6 +125,73 @@ def sign_gw1(params: dict[str, Any], body: str = "") -> dict[str, str]:
 # MARK: - GW3 签名（HMAC-SHA256）
 
 
+def _escape_query_value(value: Any) -> str:
+    """GW3 query 值转义。
+
+    规则（复刻官方 App 行为）：
+    - `*` → `%2A`（星号必须编码）
+    - `%2F` → `/`（撤销斜杠的百分号编码）
+    - `%3F` → `?`（撤销问号的百分号编码）
+    """
+    text = str(value)
+    return text.replace("*", "%2A").replace("%2F", "/").replace("%3F", "?")
+
+
+def build_gw3_string_to_sign(
+    method: str,
+    path: str,
+    headers: dict[str, str],
+    query: dict[str, str] | None = None,
+    body: str | None = None,
+) -> str:
+    """构造 GW3 待签名字符串（canonical）。
+
+    格式为四段拼接：
+
+        head_part + query_part + body_part + METHOD + "\\n" + path
+
+    1. **head_part**：白名单头中每个 `小写头名:值\\n`，按头名小写排序。
+       `x-vin` 与 `authorization` 为空时跳过，其余白名单头即使为空也写入。
+    2. **query_part**：键排序后用 `&` 连接的 `k=v`，有值时末尾加 `\\n`。
+    3. **body_part**：`base64(md5(body))`，末尾加 `\\n`；
+       仅当 body 存在且 Content-Type 含 `application/json` 时写入。
+    4. **method + "\\n" + path**：方法大写，无末尾换行。
+
+    关键约束：参与签名的 body 字节必须与实际发送的字节**完全一致**，
+    因此必须使用紧凑 JSON 序列化，并以 `content=` 发送原文。
+    """
+    # 1. 白名单头，按头名小写排序，每行 `name:value\n`
+    lines: list[str] = []
+    for key in sorted(headers, key=str.lower):
+        lower = key.lower()
+        if lower not in GW3_SIGNED_HEADERS:
+            continue
+        value = headers[key]
+        # x-vin 与 authorization 为空时跳过（网关不要求签名空值）
+        if lower in ("x-vin", "authorization") and not value:
+            continue
+        lines.append(f"{lower}:{value}\n")
+    head_part = "".join(lines)
+
+    # 2. query
+    query_part = ""
+    if query:
+        escaped = {k: _escape_query_value(v) for k, v in query.items()}
+        query_part = "&".join(f"{k}={escaped[k]}" for k in sorted(escaped)) + "\n"
+
+    # 3. body（仅 JSON 请求体参与）
+    body_part = ""
+    content_type = (
+        headers.get("Content-Type") or headers.get("content-type") or ""
+    ).lower()
+    if body is not None and "application/json" in content_type:
+        body_md5 = hashlib.md5(body.encode("utf-8")).digest()
+        body_part = base64.b64encode(body_md5).decode("ascii") + "\n"
+
+    # 4. 方法 + 路径
+    return head_part + query_part + body_part + method.upper() + "\n" + path
+
+
 def sign_gw3(
     prod_secret: str,
     method: str,
@@ -110,55 +202,25 @@ def sign_gw3(
 ) -> str:
     """GW3 请求签名。
 
-    `X-SIGNATURE = base64(HMAC-SHA256(prod_secret, stringToSign))`，
-    其中 stringToSign 的构造顺序为：
-
-        1. 所有 `x-api*` 开头的头，按「小写头名:值」升序排列，换行连接
-        2. query 参数按 key 排序，以 `k=v` 用 `&` 连接
-        3. 请求体 MD5 十六进制（无请求体时为空串）
-        4. HTTP 方法（大写）
-        5. URL 路径
-
-    注意：`X-TIMESTAMP` 是普通头，**不参与签名**。
+    `X-SIGNATURE = base64(HMAC-SHA256(prod_secret, stringToSign))`
+    —— 注意摘要以 **Base64** 编码（44 字符），不是 hex。
 
     Args:
         prod_secret: X-SIGNATURE 的 HMAC 密钥
         method: HTTP 方法
-        path: URL 路径（不含 host）
-        headers: 请求头
+        path: URL 路径（不含 host 与 query）
+        headers: 请求头（仅白名单内的参与签名）
         query: 查询参数
         body: 请求体原文（须与实际发送的字节逐字节一致）
 
     Returns:
-        Base64 编码的签名串（44 字符）
+        Base64 编码的签名串
     """
-    # 1. x-api* 头，小写名:值，升序
-    api_headers = sorted(
-        (k.lower(), v) for k, v in headers.items() if k.lower().startswith("x-api")
-    )
-    header_part = "\n".join(f"{k}:{v}" for k, v in api_headers)
-
-    # 2. query，按 key 排序
-    query_part = ""
-    if query:
-        # `*` 需转义为 %2A，与官方 App 一致
-        escaped = {k: str(v).replace("*", "%2A") for k, v in query.items()}
-        query_part = "&".join(f"{k}={escaped[k]}" for k in sorted(escaped))
-
-    # 3. body md5
-    body_md5 = _md5_hex(body) if body else ""
-
-    string_to_sign = "\n".join([
-        header_part,
-        query_part,
-        body_md5,
-        method.upper(),
-        path,
-    ])
+    canonical = build_gw3_string_to_sign(method, path, headers, query, body)
 
     digest = hmac.new(
         prod_secret.encode("utf-8"),
-        string_to_sign.encode("utf-8"),
+        canonical.encode("utf-8"),
         hashlib.sha256,
     ).digest()
 
@@ -176,16 +238,21 @@ def build_gw3_headers(
 ) -> dict[str, str]:
     """构造 GW3 完整请求头（含签名）。
 
-    注意签名与发送的字节必须一致，因此请求体须用紧凑 JSON 序列化。
+    仅白名单内的头参与签名（见 `GW3_SIGNED_HEADERS`）；
+    `User-Agent` 等会照常发送但不参与签名。
+
+    注意签名与发送的字节必须完全一致，因此请求体须用紧凑 JSON 序列化，
+    并以 `content=` 发送原文（用 `json=` 会因序列化差异导致验签失败）。
     """
     headers: dict[str, str] = {
         "X-APP-ID": GW3_APP_ID,
+        "X-API-SIGNATURE-VERSION": GW3_SIGNATURE_VERSION,
+        "X-TIMESTAMP": str(int(time.time() * 1000)),
+        "X-API-SIGNATURE-NONCE": _nonce(),
+        "Content-Type": "application/json; charset=utf-8",
+        # 以下为参与传输但不参与签名的头
         "X-APP-OS-VERSION": APP_OS_VERSION,
         "User-Agent": USER_AGENT,
-        "Content-Type": "application/json; charset=utf-8",
-        "X-TIMESTAMP": str(int(time.time() * 1000)),
-        # 带横线的 UUID nonce
-        "X-NONCE": _nonce(),
     }
 
     if authorization:
@@ -193,7 +260,7 @@ def build_gw3_headers(
     if encrypted_vin:
         headers["X-VIN"] = encrypted_vin
 
-    signature = sign_gw3(
+    headers["X-SIGNATURE"] = sign_gw3(
         prod_secret=prod_secret,
         method=method,
         path=path,
@@ -201,7 +268,6 @@ def build_gw3_headers(
         query=query,
         body=body,
     )
-    headers["X-SIGNATURE"] = signature
 
     return headers
 

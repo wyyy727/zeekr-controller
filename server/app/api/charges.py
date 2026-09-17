@@ -56,6 +56,14 @@ async def import_charges(
     if source not in ("auto", "alipay", "wechat"):
         raise HTTPException(status_code=400, detail="source 只能为 auto / alipay / wechat")
 
+    # 扩展名白名单 —— 避免无意义的大文件解析开销
+    filename = (file.filename or "").lower()
+    if filename and not filename.endswith((".csv", ".txt")):
+        raise HTTPException(
+            status_code=400,
+            detail="仅支持 CSV / TXT 格式的账单文件（支付宝与微信均可导出 CSV）",
+        )
+
     raw = await file.read()
     if not raw:
         raise HTTPException(status_code=400, detail="上传的文件为空")

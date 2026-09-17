@@ -168,6 +168,11 @@ final class APIClient {
             throw ApiError.transport(underlying: URLError(.badServerResponse))
         }
         guard (200..<300).contains(http.statusCode) else {
+            // FastAPI 的错误体形如 {"detail": "..."}，
+            // 优先把服务端的中文提示透出来，比「HTTP 500」有用得多
+            if let detail = Self.extractDetail(from: data) {
+                throw ApiError.server(message: detail)
+            }
             throw ApiError.http(statusCode: http.statusCode)
         }
 
@@ -182,6 +187,17 @@ final class APIClient {
         } catch {
             throw ApiError.decoding(underlying: error)
         }
+    }
+
+    /// 从错误响应体中提取 `detail` 字段（FastAPI 的错误格式）
+    private static func extractDetail(from data: Data) -> String? {
+        struct ErrorBody: Decodable { let detail: String? }
+        guard let body = try? JSONDecoder().decode(ErrorBody.self, from: data),
+              let detail = body.detail,
+              !detail.isEmpty else {
+            return nil
+        }
+        return detail
     }
 
     private func mimeType(for filename: String) -> String {
