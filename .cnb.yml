@@ -1,0 +1,22 @@
+# ═══════════════════════════════════════════════════════════
+# CNB 云原生构建 —— Linux Swift 6.1 类型检查
+# ───────────────────────────────────────────────────────────
+# CNB 官方构建节点为 Linux（macOS 仅支持自托管 Mac 构建机），
+# 无法跑真实 iOS 26 SDK 编译。本流水线在 Linux 上用真实 Swift 6.1
+# 编译器做语法解析 + 类型检查，SwiftUI/Charts 由 ci/ 桩替代：
+#   · 能抓：语法/类型/参数/拼写/访问控制/MainActor 隔离错误
+#   · 抓不了：仅 iOS SDK 存在的 API 语义（由 GitHub Actions
+#     macos-26 工作流覆盖，见 .github/workflows/build-ios.yml）
+# ═══════════════════════════════════════════════════════════
+main:
+  push:
+    - name: swift-typecheck
+      runner:
+        cpus: 8
+      docker:
+        image: swift:6.1-noble
+      stages:
+        - name: Swift 语法与类型检查
+          script: bash ci/typecheck.sh
+        - name: 结果
+          script: echo "✅ Linux Swift 6.1 类型检查通过"
