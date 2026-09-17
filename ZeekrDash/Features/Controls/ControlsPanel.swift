@@ -533,7 +533,7 @@ private struct ControlButton: View {
         if action.kind == .toggle && action.isOn {
             return Theme.accent(scheme).opacity(0.88)
         }
-        if isDisabled {
+        if !isEnabled {
             return Theme.surfaceAlt(scheme).opacity(0.5)
         }
         return Theme.surfaceAlt(scheme)
@@ -568,7 +568,7 @@ private struct ControlButton: View {
         if action.kind == .toggle {
             text += action.isOn ? "，已开启" : "，已关闭"
         }
-        if isDisabled { text += "，不可用" }
+        if !isEnabled { text += "，不可用" }
         return text
     }
 }

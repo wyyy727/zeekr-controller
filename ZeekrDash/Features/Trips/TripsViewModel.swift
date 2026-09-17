@@ -40,11 +40,12 @@ final class TripsViewModel {
     /// 图表 Y 轴范围，留出上下边距让曲线不贴边
     var consumptionRange: ClosedRange<Double> {
         let values = trend.compactMap(\.consumption)
-        guard let min = values.min(), let max = values.max(), min < max else {
+        // 注意：不要用 min / max 作局部变量名，会遮蔽 Swift 全局的 min(_:_:) / max(_:_:)
+        guard let lowest = values.min(), let highest = values.max(), lowest < highest else {
             return 10...25
         }
-        let padding = (max - min) * 0.15
-        return max(0, min - padding)...(max + padding)
+        let padding = (highest - lowest) * 0.15
+        return Swift.max(0, lowest - padding)...(highest + padding)
     }
 
     // MARK: - 加载

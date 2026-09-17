@@ -268,6 +268,13 @@ struct ChargeMonthlyStat: Codable, Identifiable {
     var amount: Double?
     var energyKwh: Double?
     var count: Int?
+
+    /// 图表 X 轴用的短标签：`2026-03` → `3 月`（与预览 spec 的 fmtMonth 一致）
+    var shortMonth: String {
+        let parts = month.split(separator: "-")
+        guard parts.count == 2, let m = Int(parts[1]) else { return month }
+        return "\(m) 月"
+    }
 }
 
 /// 服务商维度统计
@@ -277,6 +284,9 @@ struct ChargeProviderStat: Codable, Identifiable {
     var amount: Double?
     var energyKwh: Double?
     var count: Int?
+
+    /// 图表 Y 轴用的展示名，回落到「其他」
+    var displayName: String { provider?.displayName ?? "其他" }
 }
 
 // MARK: - 车控指令
