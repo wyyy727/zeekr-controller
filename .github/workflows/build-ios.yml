@@ -1,0 +1,81 @@
+name: Build iOS App (unsigned IPA)
+
+# 用途：在没有 Mac 的情况下，借 GitHub 的 macOS runner 编译出未签名 IPA。
+# 未签名 IPA 可通过 AltStore / SideStore / Sideloadly 自签安装到 iPhone。
+#
+# ⚠️ 本工作流只做编译，不接触任何极氪密钥。仓库里也不含真实凭据。
+
+on:
+  workflow_dispatch:        # 手动触发
+  push:
+    branches: [main]
+    paths:
+      - 'ZeekrDash/**'
+      - 'project.yml'
+      - '.github/workflows/build-ios.yml'
+
+jobs:
+  build:
+    name: Build unsigned IPA
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 选择 Xcode 版本
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+
+      - name: 安装 XcodeGen
+        run: |
+          brew install xcodegen
+          xcodegen --version
+
+      - name: 生成 Xcode 工程
+        run: xcodegen generate
+
+      - name: 编译（不签名）
+        run: |
+          xcodebuild \
+            -project ZeekrDash.xcodeproj \
+            -scheme ZeekrDash \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: 打包成未签名 IPA
+        run: |
+          set -e
+          APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" -maxdepth 1 | head -1)
+          echo "找到 App: $APP_PATH"
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          zip -qry ZeekrDash-unsigned.ipa Payload
+          ls -lh ZeekrDash-unsigned.ipa
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZeekrDash-unsigned-ipa
+          path: ZeekrDash-unsigned.ipa
+          retention-days: 30
+
+      - name: 输出摘要
+        if: always()
+        run: |
+          echo "## 构建结果" >> $GITHUB_STEP_SUMMARY
+          if [ -f ZeekrDash-unsigned.ipa ]; then
+            SIZE=$(du -h ZeekrDash-unsigned.ipa | cut -f1)
+            echo "✅ 构建成功，IPA 大小：$SIZE" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "在页面底部 **Artifacts** 处下载 \`ZeekrDash-unsigned-ipa\`。" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "该 IPA 未签名，需用 AltStore / SideStore / Sideloadly 自签后安装。" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ 构建失败，请查看上方日志。" >> $GITHUB_STEP_SUMMARY
+          fi
