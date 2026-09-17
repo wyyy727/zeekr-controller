@@ -15,31 +15,26 @@ struct TripsView: View {
     @State private var model = TripsViewModel()
 
     var body: some View {
+        // 页面标题与底部导航重复，已移除；顶部只保留右上角「模拟数据」玻璃徽标
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: Metrics.sectionSpacing) {
-                    rangePicker
+            ScreenContainer(modeText: "模拟数据") {
+                rangePicker
 
-                    if model.isLoading && model.trend.isEmpty {
-                        LoadingView(text: "正在加载行程数据")
-                            .padding(.top, 60)
-                    } else if let error = model.errorMessage, model.trend.isEmpty {
-                        errorState(error)
-                    } else {
-                        if !model.trend.isEmpty {
-                            consumptionChart
-                            distanceChart
-                        }
-                        summaryCard
-                        tripList
+                if model.isLoading && model.trend.isEmpty {
+                    LoadingView(text: "正在加载行程数据")
+                        .padding(.top, 60)
+                } else if let error = model.errorMessage, model.trend.isEmpty {
+                    errorState(error)
+                } else {
+                    if !model.trend.isEmpty {
+                        consumptionChart
+                        distanceChart
                     }
+                    summaryCard
+                    tripList
                 }
-                .padding(.horizontal, Metrics.screenPadding)
-                .padding(.bottom, 24)
             }
-            .background(Theme.background(scheme))
-            .navigationTitle("行程")
-            .navigationBarTitleDisplayMode(.large)
+            .toolbar(.hidden, for: .navigationBar)
             .refreshable { await model.load(days: model.selectedDays) }
         }
         .task { await model.load(days: model.selectedDays) }

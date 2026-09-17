@@ -18,26 +18,21 @@ struct SettingsView: View {
     @State private var showCodeSheet = false
 
     var body: some View {
+        // 页面标题与底部导航重复，已移除；顶部只保留右上角「模拟数据」玻璃徽标
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: Metrics.sectionSpacing) {
-                    connectionSection
-                    if model.isMock {
-                        mockNotice
-                    } else {
-                        accountSection
-                    }
-                    pollingSection
-                    commandSection
-                    diagnosticsSection
-                    aboutSection
+            ScreenContainer(modeText: "模拟数据") {
+                connectionSection
+                if model.isMock {
+                    mockNotice
+                } else {
+                    accountSection
                 }
-                .padding(.horizontal, Metrics.screenPadding)
-                .padding(.bottom, 24)
+                pollingSection
+                commandSection
+                diagnosticsSection
+                aboutSection
             }
-            .background(Theme.background(scheme))
-            .navigationTitle("设置")
-            .navigationBarTitleDisplayMode(.large)
+            .toolbar(.hidden, for: .navigationBar)
             .task { await model.checkHealth(baseURL: settings.baseURL) }
             .sheet(isPresented: $showCodeSheet) {
                 SMSCodeSheet(model: model, phone: model.pendingPhone)
@@ -417,7 +412,7 @@ private struct SMSCodeSheet: View {
             }
             .background(Theme.background(scheme))
             .navigationTitle("输入验证码")
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("取消") { dismiss() }

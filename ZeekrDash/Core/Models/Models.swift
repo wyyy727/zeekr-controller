@@ -282,39 +282,89 @@ struct ChargeProviderStat: Codable, Identifiable {
 // MARK: - 车控指令
 
 /// 车控指令类型
+///
+/// 命名与服务端 `/api/vehicle/command` 的 `command` 字段一一对应。
+/// 前 8 项为原有指令，其余为车控面板 15 按钮所需的补全项。
 enum VehicleCommand: String, Codable, CaseIterable {
+    // 门锁
     case lock       = "lock"
     case unlock     = "unlock"
+    // 空调
     case climateOn  = "climateOn"
     case climateOff = "climateOff"
+    // 远程操作 · 原有
     case flash      = "flash"
     case honk       = "honk"
     case chargeStart = "chargeStart"
     case chargeStop  = "chargeStop"
+    // 车控 · 状态开关型
+    case defrost    = "defrost"
+    case wheelHeat  = "wheelHeat"
+    case seatHeat   = "seatHeat"
+    case ventSeat   = "ventSeat"
+    // 远程操作 · 补全
+    case closeWindows = "closeWindows"
+    case sunshade     = "sunshade"
+    case sentinel     = "sentinel"
+    // 场景
+    case tripPlan   = "tripPlan"
+    case carFinder  = "carFinder"
+    case refresh    = "refresh"
 
     var displayName: String {
         switch self {
-        case .lock:        return "锁车"
-        case .unlock:      return "解锁"
-        case .climateOn:   return "开空调"
-        case .climateOff:  return "关空调"
-        case .flash:       return "闪灯"
-        case .honk:        return "鸣笛"
-        case .chargeStart: return "开始充电"
-        case .chargeStop:  return "结束充电"
+        case .lock:         return "锁车"
+        case .unlock:       return "解锁"
+        case .climateOn:    return "开空调"
+        case .climateOff:   return "关空调"
+        case .flash:        return "闪灯"
+        case .honk:         return "鸣笛"
+        case .chargeStart:  return "开始充电"
+        case .chargeStop:   return "结束充电"
+        case .defrost:      return "前除霜"
+        case .wheelHeat:    return "方向盘加热"
+        case .seatHeat:     return "座椅加热"
+        case .ventSeat:     return "座椅通风"
+        case .closeWindows: return "关车窗"
+        case .sunshade:     return "遮阳帘"
+        case .sentinel:     return "哨兵模式"
+        case .tripPlan:     return "出行规划"
+        case .carFinder:    return "寻车"
+        case .refresh:      return "立即刷新"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .lock:        return "lock.fill"
-        case .unlock:      return "lock.open.fill"
-        case .climateOn:   return "snowflake"
-        case .climateOff:  return "snowflake"
-        case .flash:       return "light.beacon.max.fill"
-        case .honk:        return "speaker.wave.3.fill"
-        case .chargeStart: return "bolt.fill"
-        case .chargeStop:  return "bolt.slash.fill"
+        case .lock:         return "lock.fill"
+        case .unlock:       return "lock.open.fill"
+        case .climateOn:    return "snowflake"
+        case .climateOff:   return "snowflake"
+        case .flash:        return "headlight.high.beam"
+        case .honk:         return "speaker.wave.2"
+        case .chargeStart:  return "bolt.fill"
+        case .chargeStop:   return "bolt.slash.fill"
+        case .defrost:      return "snowflake.circle"
+        case .wheelHeat:    return "steeringwheel"
+        case .seatHeat:     return "car.seat.forward.and.heat.waves"
+        case .ventSeat:     return "wind"
+        case .closeWindows: return "car.window.left"
+        case .sunshade:     return "sun.max"
+        case .sentinel:     return "shield.lefthalf.filled"
+        case .tripPlan:     return "point.topleft.down.to.point.bottomright.curvepath"
+        case .carFinder:    return "location.circle"
+        case .refresh:      return "arrow.clockwise"
+        }
+    }
+
+    /// 是否为状态开关型指令（由车况回读驱动状态）
+    var isToggle: Bool {
+        switch self {
+        case .lock, .unlock, .climateOn, .climateOff,
+             .defrost, .wheelHeat, .seatHeat, .ventSeat, .sentinel:
+            return true
+        default:
+            return false
         }
     }
 }

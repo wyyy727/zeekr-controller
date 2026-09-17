@@ -18,50 +18,25 @@ struct ChargesView: View {
     @State private var showClearConfirm = false
 
     var body: some View {
+        // 页面标题与底部导航重复，已移除；顶部只保留右上角「模拟数据」玻璃徽标
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: Metrics.sectionSpacing) {
-                    if model.isLoading && model.summary == nil {
-                        LoadingView(text: "正在加载消费数据")
-                            .padding(.top, 60)
-                    } else if model.totalCount == 0 {
-                        emptyState
-                    } else {
-                        totalCard
-                        providerChart
-                        monthlyChart
-                        recordList
-                    }
-
-                    // 电费相关高级功能先占位（老板要求暂搁置）
-                    upcomingSection
+            ScreenContainer(modeText: "模拟数据", trailingAccessory: { historyMenu }) {
+                if model.isLoading && model.summary == nil {
+                    LoadingView(text: "正在加载消费数据")
+                        .padding(.top, 60)
+                } else if model.totalCount == 0 {
+                    emptyState
+                } else {
+                    totalCard
+                    providerChart
+                    monthlyChart
+                    recordList
                 }
-                .padding(.horizontal, Metrics.screenPadding)
-                .padding(.bottom, 24)
-            }
-            .background(Theme.background(scheme))
-            .navigationTitle("充电")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button {
-                            showImporter = true
-                        } label: {
-                            Label("导入账单", systemImage: "square.and.arrow.down")
-                        }
 
-                        Button(role: .destructive) {
-                            showClearConfirm = true
-                        } label: {
-                            Label("清空数据", systemImage: "trash")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                }
+                // 电费相关高级功能先占位（老板要求暂搁置）
+                upcomingSection
             }
-            .refreshable { await model.load() }
+            .toolbar(.hidden, for: .navigationBar)
             .fileImporter(
                 isPresented: $showImporter,
                 allowedContentTypes: [.commaSeparatedText, .plainText, .spreadsheet],
@@ -81,22 +56,40 @@ struct ChargesView: View {
             } message: {
                 Text("此操作不可撤销，建议先导出备份")
             }
-            .overlay(alignment: .bottom) {
-                if let toast = model.toast {
-                    Text(toast)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(ChineseColor.xiangYaBai)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(ChineseColor.xuanQing.opacity(0.94))
-                        .clipShape(Capsule())
-                        .padding(.bottom, 20)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-            }
-            .animation(.easeInOut(duration: 0.25), value: model.toast)
         }
+        .overlay(alignment: .bottom) {
+            if let toast = model.toast {
+                ToastBubble(text: toast)
+                    .padding(.bottom, 110)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: model.toast)
         .task { await model.load() }
+    }
+
+    // MARK: - 账单操作菜单
+
+    private var historyMenu: some View {
+        Menu {
+            Button {
+                showImporter = true
+            } label: {
+                Label("导入账单", systemImage: "square.and.arrow.down")
+            }
+
+            Button(role: .destructive) {
+                showClearConfirm = true
+            } label: {
+                Label("清空数据", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 17))
+                .foregroundStyle(Theme.textSecondary(scheme))
+                .frame(width: Metrics.minTouchTarget, height: 32)
+                .contentShape(Rectangle())
+        }
     }
 
     // MARK: - 总额卡片

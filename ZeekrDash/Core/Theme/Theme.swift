@@ -30,56 +30,56 @@ extension Color {
 enum ChineseColor {
 
     // MARK: 青色系（主色）
-    /// 天青 —— 主色
-    static let tianQing = Color(hex: 0x7FB3A8)
+    /// 天青 —— 主色·清爽天蓝
+    static let tianQing = Color(hex: 0x2E8BC0)
     /// 天青（深）—— 主色强调态
-    static let tianQingDeep = Color(hex: 0x5D8A7E)
-    /// 竹青 —— 次色
-    static let zhuQing = Color(hex: 0x789262)
-    /// 青碧 —— 清新点缀
-    static let qingBi = Color(hex: 0x48C0A3)
-    /// 缥色 —— 淡青背景
-    static let piaoSe = Color(hex: 0xE8F4F1)
+    static let tianQingDeep = Color(hex: 0x1C6FA8)
+    /// 竹青 —— 安全色系
+    static let zhuQing = Color(hex: 0x16B89A)
+    /// 青碧 —— 安全 / 正常
+    static let qingBi = Color(hex: 0x16B89A)
+    /// 缥色 —— 淡天蓝底
+    static let piaoSe = Color(hex: 0xE8F2FA)
 
     // MARK: 蓝色系
     /// 靛蓝 —— 主色（深）
-    static let dianLan = Color(hex: 0x4C6E91)
-    /// 靛青 —— 强调蓝
-    static let dianQing = Color(hex: 0x177CB0)
+    static let dianLan = Color(hex: 0x3A6EA5)
+    /// 靛青 —— 充电 / 强调
+    static let dianQing = Color(hex: 0x1E7FC2)
     /// 藏青 —— 深色背景
-    static let cangQing = Color(hex: 0x3B4A6B)
+    static let cangQing = Color(hex: 0x2C3E5C)
     /// 群青 —— 辅助蓝
     static let qunQing = Color(hex: 0x4C8DAE)
 
     // MARK: 红色系（告警 / 强调）
     /// 朱砂 —— 告警色
-    static let zhuSha = Color(hex: 0xE23A28)
+    static let zhuSha = Color(hex: 0xE5483B)
     /// 胭脂 —— 深红强调
-    static let yanZhi = Color(hex: 0x9D2933)
+    static let yanZhi = Color(hex: 0xC0392B)
     /// 妃色 —— 柔和红
     static let feiSe = Color(hex: 0xF6B8B0)
 
     // MARK: 黄色系（强调 / 充电状态）
     /// 藤黄 —— 强调色
-    static let tengHuang = Color(hex: 0xFFB61E)
+    static let tengHuang = Color(hex: 0xFFB020)
     /// 缃色 —— 柔和黄
-    static let xiangSe = Color(hex: 0xF0C239)
+    static let xiangSe = Color(hex: 0xF4B400)
     /// 缇色 —— 暖橙
-    static let tiSe = Color(hex: 0xF0A35E)
+    static let tiSe = Color(hex: 0xF2994A)
 
     // MARK: 中性色
-    /// 月白 —— 浅色背景
-    static let yueBai = Color(hex: 0xEEF7F2)
-    /// 象牙白 —— 卡片背景
-    static let xiangYaBai = Color(hex: 0xFFFBF0)
-    /// 缟色 —— 次级背景
-    static let gaoSe = Color(hex: 0xF2ECDE)
+    /// 月白 —— 背景·冷中性白
+    static let yueBai = Color(hex: 0xF3F5F7)
+    /// 象牙白 —— 卡片·纯白
+    static let xiangYaBai = Color(hex: 0xFFFFFF)
+    /// 缟色 —— 冷灰
+    static let gaoSe = Color(hex: 0xEDF1F4)
     /// 墨色 —— 主文字
-    static let moSe = Color(hex: 0x252726)
+    static let moSe = Color(hex: 0x1B1F24)
     /// 玄青 —— 次级文字
-    static let xuanQing = Color(hex: 0x3D3B4F)
+    static let xuanQing = Color(hex: 0x4A4E57)
     /// 黛色 —— 弱化文字
-    static let daiSe = Color(hex: 0x4A4266)
+    static let daiSe = Color(hex: 0x5B6472)
 
     // MARK: 语义色
     /// 电量充足 / 正常
@@ -99,29 +99,29 @@ enum Theme {
 
     // MARK: 背景层级
     static func background(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: 0x1A1C1B) : ChineseColor.yueBai
+        scheme == .dark ? Color(hex: 0x14171C) : ChineseColor.yueBai
     }
     static func surface(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: 0x242726) : ChineseColor.xiangYaBai
+        scheme == .dark ? Color(hex: 0x1E2228) : ChineseColor.xiangYaBai
     }
     static func surfaceAlt(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: 0x2E312F) : ChineseColor.gaoSe
+        scheme == .dark ? Color(hex: 0x272C33) : ChineseColor.gaoSe
     }
 
     // MARK: 文字层级
     static func textPrimary(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: 0xEDEFEC) : ChineseColor.moSe
+        scheme == .dark ? Color(hex: 0xECEFF3) : ChineseColor.moSe
     }
     static func textSecondary(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: 0xA5A9A4) : ChineseColor.xuanQing.opacity(0.62)
+        scheme == .dark ? Color(hex: 0x9AA3AE) : ChineseColor.xuanQing.opacity(0.62)
     }
     static func textTertiary(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: 0x6E726D) : ChineseColor.daiSe.opacity(0.42)
+        scheme == .dark ? Color(hex: 0x626B76) : ChineseColor.daiSe.opacity(0.42)
     }
 
     // MARK: 主色（随明暗微调，保证对比度）
     static func accent(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? ChineseColor.tianQing : ChineseColor.tianQingDeep
+        scheme == .dark ? Color(hex: 0x4DA3DC) : ChineseColor.tianQingDeep
     }
     static func accentSecondary(_ scheme: ColorScheme) -> Color {
         scheme == .dark ? ChineseColor.qunQing : ChineseColor.dianLan
@@ -135,9 +135,9 @@ enum Theme {
     /// 电量状态色映射
     static func socColor(_ soc: Double) -> Color {
         switch soc {
-        case ..<20: return ChineseColor.statusBad
-        case ..<50: return ChineseColor.statusWarn
-        default:    return ChineseColor.statusGood
+        case ..<30: return ChineseColor.zhuSha      // 朱砂 #E5483B
+        case ..<50: return ChineseColor.tengHuang   // 藤黄 #FFB020
+        default:    return ChineseColor.qingBi      // 青碧 #16B89A
         }
     }
 }

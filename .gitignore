@@ -53,3 +53,7 @@ Thumbs.db
 
 .server.pid
 .server.log
+
+# ─────────── 预览页副本（唯一来源是 preview/index.html）───────────
+# 历史上曾出现过同步副本，易与主文件不一致，不再保留
+zeekr-dashboard-设计预览.html

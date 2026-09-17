@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="theme-color" content="#EEF7F2">
+<meta name="theme-color" content="#F3F5F7">
 <title>极氪看板 · 设计预览</title>
 <style>
 /* ═══════════════════════════════════════════════
@@ -13,26 +13,26 @@
    色值参考 zhongguose.com（中科院《色谱》1957）
    ═══════════════════════════════════════════════ */
 :root {
-  --tian-qing:      #7FB3A8;  /* 天青 · 主色 */
-  --tian-qing-deep: #5D8A7E;  /* 天青·深 */
-  --zhu-qing:       #789262;  /* 竹青 */
-  --qing-bi:        #48C0A3;  /* 青碧 */
-  --piao-se:        #E8F4F1;  /* 缥色 */
-  --dian-lan:       #4C6E91;  /* 靛蓝 */
-  --dian-qing:      #177CB0;  /* 靛青 · 充电 */
-  --cang-qing:      #3B4A6B;  /* 藏青 */
+  --tian-qing:      #2E8BC0;  /* 天青 → 清爽天蓝 · 主色 */
+  --tian-qing-deep: #1C6FA8;  /* 天青·深 */
+  --zhu-qing:       #16B89A;  /* 竹青 → 青碧同系清绿 · 安全色 */
+  --qing-bi:        #16B89A;  /* 青碧 · 安全/正常 */
+  --piao-se:        #E8F2FA;  /* 缥色 → 淡天蓝底，不再发绿 */
+  --dian-lan:       #3A6EA5;  /* 靛蓝 */
+  --dian-qing:      #1E7FC2;  /* 靛青 · 充电/主强调（清爽蓝） */
+  --cang-qing:      #2C3E5C;  /* 藏青 */
   --qun-qing:       #4C8DAE;  /* 群青 */
-  --zhu-sha:        #E23A28;  /* 朱砂 · 告警 */
-  --yan-zhi:        #9D2933;  /* 胭脂 */
-  --teng-huang:     #FFB61E;  /* 藤黄 · 强调 */
-  --xiang-se:       #F0C239;  /* 缃色 */
-  --ti-se:          #F0A35E;  /* 缇色 */
-  --yue-bai:        #EEF7F2;  /* 月白 · 背景 */
-  --xiang-ya-bai:   #FFFBF0;  /* 象牙白 · 卡片 */
-  --gao-se:         #F2ECDE;  /* 缟色 */
-  --mo-se:          #252726;  /* 墨 · 主文字 */
-  --xuan-qing:      #3D3B4F;  /* 玄青 · 次文字 */
-  --dai-se:         #4A4266;  /* 黛色 */
+  --zhu-sha:        #E5483B;  /* 朱砂 · 告警（更干净的红） */
+  --yan-zhi:        #C0392B;  /* 胭脂 */
+  --teng-huang:     #FFB020;  /* 藤黄 · 强调（明亮琥珀） */
+  --xiang-se:       #F4B400;  /* 缃色 */
+  --ti-se:          #F2994A;  /* 缇色 */
+  --yue-bai:        #F3F5F7;  /* 月白 → 冷调中性白，不再发绿 */
+  --xiang-ya-bai:   #FFFFFF;  /* 象牙白 → 纯白卡片，更干净 */
+  --gao-se:         #EDF1F4;  /* 缟色 → 冷灰 */
+  --mo-se:          #1B1F24;  /* 墨 · 主文字（去掉绿味） */
+  --xuan-qing:      #4A4E57;  /* 玄青 · 次文字 */
+  --dai-se:         #5B6472;  /* 黛色 */
 
   --card-radius: 16px;
   --card-padding: 16px;
@@ -43,70 +43,298 @@
   --surface: var(--xiang-ya-bai);
   --surface-alt: var(--gao-se);
   --text-1: var(--mo-se);
-  --text-2: rgba(61, 59, 79, .62);
-  --text-3: rgba(74, 66, 102, .42);
+  --text-2: rgba(27, 31, 36, .58);
+  --text-3: rgba(91, 100, 114, .42);
   --accent: var(--tian-qing-deep);
-  --separator: rgba(37, 39, 38, .08);
+  --separator: rgba(27, 31, 36, .07);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1A1C1B;
-    --surface: #242726;
-    --surface-alt: #2E312F;
-    --text-1: #EDEFEC;
-    --text-2: #A5A9A4;
-    --text-3: #6E726D;
-    --accent: var(--tian-qing);
+    --bg: #14171C;
+    --surface: #1E2228;
+    --surface-alt: #272C33;
+    --text-1: #ECEFF3;
+    --text-2: #9AA3AE;
+    --text-3: #626B76;
+    --accent: #4DA3DC;
     --separator: rgba(255, 255, 255, .08);
   }
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+
+/* ═══════════════════════════════════════════════
+   iOS 26 Liquid Glass · 液态玻璃设计系统
+   ───────────────────────────────────────────────
+   还原四个核心特征：
+   ① 背景折射     backdrop-filter blur + saturate
+   ② 高光边线     内描边 + inset 高光，模拟玻璃棱边
+   ③ 厚度折射     多层 box-shadow，不是一层薄片
+   ④ 动态响应     滚动/按压时改变透明度与高光位置
+   ═══════════════════════════════════════════════ */
+
+/* ── 玻璃基色：受光面 / 背光面 ── */
+.glass {
+  position: relative;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  /* 厚度：外阴影撑起层次，内描边勾勒棱边 */
+  box-shadow:
+    0 1px 0 0 var(--glass-edge),                    /* 顶部受光亮线 */
+    0 -1px 0 0 var(--glass-edge-dim) inset,         /* 底部背光暗线 */
+    0 8px 32px -8px var(--glass-shadow),            /* 投影厚度 */
+    inset 0 1px 0 0 var(--glass-highlight);         /* 内侧高光 */
+}
+
+/* 高光斜扫：玻璃表面那道流动的反光 */
+.glass::before {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  padding: 1px;                                   /* 用 padding 做 1px 描边 */
+  background: linear-gradient(
+    145deg,
+    var(--glass-stroke-strong) 0%,
+    var(--glass-stroke-weak) 38%,
+    transparent 62%,
+    var(--glass-stroke-weak) 100%
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* 内层漫射光：让玻璃有"体积"而不是一张贴纸 */
+.glass::after {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    120% 80% at 50% -20%,
+    var(--glass-glow) 0%,
+    transparent 60%
+  );
+  pointer-events: none;
+}
+
+/* ── 玻璃在浅色 / 深色下的参数 ── */
+:root {
+  --glass-blur: 24px;
+  --glass-saturate: 190%;
+  --glass-bg: rgba(255, 255, 255, .62);
+  --glass-edge: rgba(255, 255, 255, .85);
+  --glass-edge-dim: rgba(0, 0, 0, .045);
+  --glass-highlight: rgba(255, 255, 255, .70);
+  --glass-shadow: rgba(20, 30, 45, .16);
+  --glass-stroke-strong: rgba(255, 255, 255, .95);
+  --glass-stroke-weak: rgba(255, 255, 255, .30);
+  --glass-glow: rgba(255, 255, 255, .55);
+  /* 卡片内部小件：半透明亚光，避免玻璃叠玻璃导致层级混乱 */
+  --glass-inner: rgba(255, 255, 255, .52);
+  --glass-inner-2: rgba(255, 255, 255, .34);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --glass-bg: rgba(38, 43, 51, .58);
+    --glass-edge: rgba(255, 255, 255, .16);
+    --glass-edge-dim: rgba(255, 255, 255, .05);
+    --glass-highlight: rgba(255, 255, 255, .12);
+    --glass-shadow: rgba(0, 0, 0, .50);
+    --glass-stroke-strong: rgba(255, 255, 255, .34);
+    --glass-stroke-weak: rgba(255, 255, 255, .10);
+    --glass-glow: rgba(255, 255, 255, .16);
+    --glass-inner: rgba(255, 255, 255, .09);
+    --glass-inner-2: rgba(255, 255, 255, .055);
+  }
+}
+
+/* ── 玻璃强度分级（模拟 iOS 的 regular / clear 两档）── */
+.glass--thick { --glass-bg: rgba(255, 255, 255, .78); --glass-blur: 30px; }
+.glass--thin  { --glass-bg: rgba(255, 255, 255, .42); --glass-blur: 16px; }
+@media (prefers-color-scheme: dark) {
+  .glass--thick { --glass-bg: rgba(38, 43, 51, .74); --glass-blur: 30px; }
+  .glass--thin  { --glass-bg: rgba(38, 43, 51, .38); --glass-blur: 16px; }
+}
+
+/* ── 滚动响应：下滑时玻璃变实，回顶时变透（iOS 26 行为）── */
+body.is-scrolled .glass--adaptive {
+  --glass-bg: rgba(255, 255, 255, .80);
+  --glass-blur: 30px;
+}
+@media (prefers-color-scheme: dark) {
+  body.is-scrolled .glass--adaptive { --glass-bg: rgba(38, 43, 51, .78); }
+}
+
+/* ── 不支持 backdrop-filter 时降级为不透明底，保证可读性 ── */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass { background: var(--surface); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .glass--thin { background: var(--surface-alt); }
+}
+
+/* ── 玻璃按钮：点击时玻璃"压下去"，高光偏移 ── */
+.glass-btn {
+  position: relative; overflow: hidden;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-edge);
+  box-shadow: 0 4px 16px -6px var(--glass-shadow), inset 0 1px 0 0 var(--glass-highlight);
+  transition: transform .2s cubic-bezier(.34,1.56,.64,1),
+              box-shadow .2s ease, background .2s ease;
+}
+.glass-btn:active {
+  transform: scale(.94);
+  box-shadow: 0 2px 8px -4px var(--glass-shadow), inset 0 2px 6px 0 var(--glass-edge-dim);
+}
+
+/* ── 减少动态效果 ── */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
 
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
   background: var(--bg);
   color: var(--text-1);
-  padding-bottom: calc(88px + env(safe-area-inset-bottom));
+  padding-bottom: calc(96px + env(safe-area-inset-bottom));
   transition: background .2s;
+  position: relative;
+  overflow-x: hidden;
 }
 
-/* ─────────── 顶部状态栏 ─────────── */
-.topbar {
-  position: sticky; top: 0; z-index: 20;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: saturate(180%) blur(20px);
-  -webkit-backdrop-filter: saturate(180%) blur(20px);
-  border-bottom: 1px solid var(--separator);
-  padding: calc(env(safe-area-inset-top) + 10px) var(--screen-padding) 10px;
+/* 氛围光斑层 —— 玻璃的折射感来自背景有东西可折射。
+   固定在底层，随页面滚动保持不动，模拟 iOS 壁纸透过玻璃的效果。 */
+body::before {
+  content: '';
+  position: fixed; inset: -10%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(38% 26% at 18% 12%, var(--aura-1) 0%, transparent 68%),
+    radial-gradient(34% 24% at 84% 22%, var(--aura-2) 0%, transparent 66%),
+    radial-gradient(44% 30% at 62% 88%, var(--aura-3) 0%, transparent 70%),
+    radial-gradient(30% 22% at 8% 76%, var(--aura-4) 0%, transparent 68%);
+  filter: blur(6px);
 }
-.topbar h1 {
-  margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.3px;
-}
-.topbar .sub {
-  font-size: 11px; color: var(--text-3); margin-top: 3px;
-}
-.topbar .row { display: flex; align-items: center; justify-content: space-between; }
-.badge-mode {
-  font-size: 10px; padding: 3px 8px; border-radius: 20px;
-  background: var(--piao-se); color: var(--tian-qing-deep); font-weight: 600;
+:root {
+  --aura-1: rgba(46, 139, 192, .16);
+  --aura-2: rgba(22, 184, 154, .13);
+  --aura-3: rgba(77, 163, 220, .14);
+  --aura-4: rgba(242, 153, 74, .10);
 }
 @media (prefers-color-scheme: dark) {
-  .badge-mode { background: rgba(127,179,168,.15); color: var(--tian-qing); }
+  :root {
+    --aura-1: rgba(46, 139, 192, .22);
+    --aura-2: rgba(22, 184, 154, .16);
+    --aura-3: rgba(30, 127, 194, .20);
+    --aura-4: rgba(242, 153, 74, .12);
+  }
+}
+
+/* ─────────── 顶部悬浮徽标（Liquid Glass 胶囊）───────────
+   页面大标题已与底部导航重复，故移除 —— 此处只保留数据来源徽标，
+   做成悬浮玻璃胶囊，不再占据整条吸顶栏。 */
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; justify-content: flex-end;
+  background: transparent;
+  border: none; box-shadow: none;
+  padding: calc(env(safe-area-inset-top) + 8px) var(--screen-padding) 8px;
+  /* 胶囊上方的渐变遮罩，滚动时内容不会从徽标旁边"硬切"出来 */
+  pointer-events: none;
+}
+.topbar::before {
+  content: '';
+  position: absolute; left: 0; right: 0; top: 0;
+  height: 100%;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--bg) 92%, transparent) 0%,
+    color-mix(in srgb, var(--bg) 72%, transparent) 62%,
+    transparent 100%
+  );
+  -webkit-mask: none;
+  backdrop-filter: blur(10px) saturate(160%);
+  -webkit-backdrop-filter: blur(10px) saturate(160%);
+  z-index: -1;
+  pointer-events: none;
+}
+/* 移除旧的高光扫线与标题样式 */
+.topbar::after { display: none; }
+body.is-scrolled .topbar::before {
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--bg) 96%, transparent) 0%,
+    color-mix(in srgb, var(--bg) 84%, transparent) 60%,
+    transparent 100%
+  );
+}
+/* 模式徽标：悬浮玻璃胶囊 */
+.badge-mode {
+  position: relative; pointer-events: auto;
+  font-size: 11px; padding: 5px 12px; border-radius: 20px;
+  background: var(--glass-bg); color: var(--tian-qing-deep); font-weight: 600;
+  border: 1px solid var(--glass-stroke-weak);
+  backdrop-filter: blur(18px) saturate(190%);
+  -webkit-backdrop-filter: blur(18px) saturate(190%);
+  box-shadow:
+    inset 0 1px 0 0 var(--glass-highlight),
+    0 4px 16px -8px var(--glass-shadow);
+  display: inline-flex; align-items: center; gap: 5px;
+}
+/* 状态圆点：模拟数据为琥珀色、真实数据为青碧、未连接为灰 */
+.badge-mode::before {
+  content: '';
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--teng-huang);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--teng-huang) 22%, transparent);
+}
+.badge-mode[data-mode="live"]::before {
+  background: var(--qing-bi);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--qing-bi) 22%, transparent);
+}
+.badge-mode[data-mode="offline"]::before {
+  background: var(--text-3);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--text-3) 18%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+  .badge-mode { color: var(--tian-qing); }
 }
 
 /* ─────────── 容器 ─────────── */
 .wrap { padding: var(--screen-padding); display: flex; flex-direction: column; gap: var(--gap); }
 
-/* ─────────── 卡片 ─────────── */
+/* ─────────── 卡片（Liquid Glass 卡片层）─────────── */
 .card {
-  background: var(--surface);
+  position: relative;
+  /* 卡片玻璃比导航层更实（内容可读性优先），近似 iOS 的 regular 材质 */
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   border-radius: var(--card-radius);
   padding: var(--card-padding);
+  border: 1px solid var(--glass-stroke-weak);
+  box-shadow:
+    inset 0 1px 0 0 var(--glass-highlight),
+    0 6px 24px -12px var(--glass-shadow);
+  transition: box-shadow .25s ease, transform .25s cubic-bezier(.34,1.56,.64,1);
+}
+/* 卡片顶部高光扫线，呼应玻璃受光面 */
+.card::before {
+  content: '';
+  position: absolute; top: 0; left: 12%; right: 12%; height: 1px;
+  border-radius: 1px;
+  background: linear-gradient(
+    90deg, transparent, var(--glass-stroke-strong) 50%, transparent
+  );
+  opacity: .8; pointer-events: none;
 }
 .card-title {
   font-size: 15px; font-weight: 600; margin: 0 0 12px;
@@ -137,6 +365,46 @@ body {
   color: var(--dian-qing); font-size: 15px;
 }
 
+/* ── 低电量警示效果 ────────────────────────────
+   中档（30~50%）藤黄：仅换色 + 轻微光晕，提示但不打扰
+   低档（<30%）朱砂：环体呼吸脉冲 + 外发光 + 「电量偏低」标签 */
+.ring-wrap--mid .ring-fg {
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--teng-huang) 42%, transparent));
+}
+.ring-wrap--low .ring-fg {
+  filter: drop-shadow(0 0 7px color-mix(in srgb, var(--zhu-sha) 55%, transparent));
+}
+/* 呼吸脉冲：环体明暗与半径交替，模拟"心跳"警示 */
+.ring-pulse {
+  transform-origin: 50% 50%;
+  animation: ringPulse 1.6s ease-in-out infinite;
+}
+@keyframes ringPulse {
+  0%, 100% { opacity: 1;    transform: scale(1); }
+  50%      { opacity: .55;  transform: scale(1.035); }
+}
+/* 环内数字同步脉冲，强化注意力 */
+.ring-wrap--low .ring-num { animation: ringNumPulse 1.6s ease-in-out infinite; }
+@keyframes ringNumPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .68; }
+}
+/* 「电量偏低」胶囊标签，贴在环下方 */
+.ring-alert {
+  position: absolute; left: 50%; bottom: -7px; transform: translateX(-50%);
+  font-size: 10px; font-weight: 600; white-space: nowrap;
+  padding: 2px 9px; border-radius: 10px;
+  color: #fff;
+  background: var(--zhu-sha);
+  box-shadow: 0 2px 8px -2px color-mix(in srgb, var(--zhu-sha) 60%, transparent);
+  animation: alertIn .35s cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes alertIn { from { opacity: 0; transform: translateX(-50%) scale(.8); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .ring-pulse, .ring-wrap--low .ring-num, .ring-alert { animation: none !important; }
+}
+
 .hero-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 9px; }
 .hero-name { font-size: 15px; font-weight: 600; line-height: 1.2; }
 .hero-plate { font-size: 12px; color: var(--text-3); margin-top: 2px; }
@@ -152,7 +420,7 @@ body {
   background: color-mix(in srgb, var(--piao-se) 55%, var(--surface));
 }
 @media (prefers-color-scheme: dark) {
-  .card-charging { background: rgba(127,179,168,.10); }
+  .card-charging { background: rgba(77,163,220,.10); }
 }
 .charge-head {
   display: flex; align-items: center; gap: 6px;
@@ -176,7 +444,8 @@ body {
 /* ─────────── 统计卡头部 ─────────── */
 .stat .head .ic-sm { opacity: .75; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
-.stat { background: var(--surface); border-radius: var(--card-radius); padding: 13px 14px; }
+.stat { background: var(--glass-inner); border-radius: var(--card-radius); padding: 13px 14px;
+  box-shadow: inset 0 1px 0 0 var(--glass-highlight); }
 .stat .head {
   display: flex; align-items: center; gap: 5px;
   font-size: 11.5px; color: var(--text-3); margin-bottom: 7px;
@@ -188,21 +457,27 @@ body {
 .stat .val .u { font-size: 11px; font-weight: 400; color: var(--text-3); margin-left: 3px; }
 
 /* ─────────── 胎压 ─────────── */
-.tyre-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
+/* ─────────── 胎压（紧凑横排，一行四列）─────────── */
+.tyre-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
 .tyre {
-  background: var(--surface-alt); border-radius: 10px;
-  padding: 10px 4px; text-align: center;
+  background: var(--glass-inner-2); border-radius: 10px;
+  padding: 9px 3px; text-align: center;
+  box-shadow: inset 0 1px 0 0 var(--glass-highlight);
 }
 .tyre .v {
-  font-size: 17px; font-weight: 500; font-variant-numeric: tabular-nums;
+  font-size: 16px; font-weight: 600; line-height: 1.15;
+  font-variant-numeric: tabular-nums;
 }
-.tyre .k { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+.tyre .k { font-size: 10px; color: var(--text-3); margin-bottom: 3px; }
 .tyre.warn .v { color: var(--zhu-sha); }
 
 /* ─────────── 车身状态 chip ─────────── */
 .chip {
   display: flex; align-items: center; gap: 9px;
-  background: var(--surface-alt); border-radius: 11px; padding: 11px 12px;
+  background: var(--glass-inner-2); border-radius: 11px; padding: 11px 12px;
 }
   /* 车身状态 chip —— 每种状态给独立语义色，不滥用告警色 */
   .chip .ico {
@@ -215,60 +490,221 @@ body {
   .chip .s { font-size: 13px; font-weight: 500; margin-top: 1px; }
 
   /* 正常/安全 —— 青碧 */
-  .chip.good .ico { background: rgba(72,192,163,.14); color: var(--qing-bi); }
+  .chip.good .ico { background: rgba(22,184,154,.14); color: var(--qing-bi); }
   .chip.good .s { color: var(--qing-bi); }
 
   /* 需要注意 —— 朱砂（仅用于真正的异常） */
-  .chip.bad .ico { background: rgba(226,58,40,.13); color: var(--zhu-sha); }
+  .chip.bad .ico { background: rgba(229,72,59,.13); color: var(--zhu-sha); }
   .chip.bad .s { color: var(--zhu-sha); }
 
   /* 中性状态 —— 天青（空调开关等非异常状态） */
-  .chip.mid .ico { background: rgba(93,138,126,.14); color: var(--tian-qing-deep); }
+  .chip.mid .ico { background: rgba(28,111,168,.14); color: var(--tian-qing-deep); }
   .chip.mid .s { color: var(--tian-qing-deep); }
 
   /* 关闭态 —— 灰调，明确表示「非异常但未启用」 */
-  .chip.off .ico { background: rgba(74,66,102,.09); color: var(--text-3); }
+  .chip.off .ico { background: rgba(91,100,114,.10); color: var(--text-3); }
   .chip.off .s { color: var(--text-2); }
   /* 关闭态的 chip 本体压暗一档，避免与卡片底色糊在一起 */
-  .chip.off { background: rgba(74,66,102,.045); }
+  .chip.off { background: rgba(91,100,114,.05); }
 
-/* ─────────── 车控按钮 ─────────── */
+/* ─────────── 车控按钮（含完整按压 / 下发 / 成功动效）─────────── */
 .ctrl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap); }
+.ctrl-grid + .ctrl-grid { margin-top: var(--gap); }
+
 .ctrl {
-  background: var(--surface-alt); border: none; border-radius: 13px;
-  padding: 14px 6px; min-height: 76px;
+  position: relative; overflow: hidden;
+  /* 车控按钮走玻璃质感，与卡片同层 */
+  background: var(--glass-bg);
+  backdrop-filter: blur(14px) saturate(180%);
+  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  border: 1px solid var(--glass-stroke-weak); border-radius: 13px;
+  padding: 14px 6px; min-height: 82px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px;
   font-family: inherit; font-size: 12px; color: var(--text-1);
-  cursor: pointer; transition: transform .12s, background .15s, color .15s;
+  cursor: pointer; -webkit-user-select: none; user-select: none;
+  box-shadow: inset 0 1px 0 0 var(--glass-highlight);
+  transition: transform .16s cubic-bezier(.34,1.56,.64,1),
+              background .18s ease, color .18s ease, box-shadow .18s ease;
 }
-.ctrl svg { width: 22px; height: 22px; }
-.ctrl:active { transform: scale(.95); background: var(--piao-se); color: var(--tian-qing-deep); }
+
+/* 图标：按压时轻微下沉 + 回弹 */
+.ctrl .ico {
+  display: flex; align-items: center; justify-content: center;
+  transition: transform .28s cubic-bezier(.34,1.56,.64,1);
+}
+.ctrl svg { width: 22px; height: 22px; display: block; }
+.ctrl-txt { display: flex; flex-direction: column; align-items: center; gap: 1px; line-height: 1.15; }
+.ctrl-sub { font-size: 9.5px; color: var(--text-3); transition: color .18s ease; }
+
+/* ① 按压反馈：下沉 + 微缩 + 玻璃内凹 */
+.ctrl:active {
+  transform: scale(.93);
+  background: color-mix(in srgb, var(--tian-qing) 14%, var(--glass-bg));
+  color: var(--tian-qing-deep);
+  box-shadow: inset 0 2px 8px var(--glass-edge-dim);
+}
+.ctrl:active .ico { transform: scale(.86) translateY(1px); }
+.ctrl:active .ctrl-sub { color: color-mix(in srgb, var(--tian-qing-deep) 70%, transparent); }
+
+/* ② 涟漪：点击处扩散，纯 CSS 变量驱动 */
+.ctrl .ripple {
+  position: absolute; border-radius: 50%; pointer-events: none;
+  background: currentColor; opacity: .22;
+  transform: translate(-50%, -50%) scale(0);
+  animation: ctrlRipple .55s cubic-bezier(.22,.61,.36,1) forwards;
+}
+@keyframes ctrlRipple {
+  to { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+}
+
+/* ③ 开关型：开启态用主色玻璃块，保留透光感 */
+.ctrl--toggle.on {
+  background: color-mix(in srgb, var(--accent) 88%, transparent);
+  color: #fff;
+  border-color: color-mix(in srgb, #fff 32%, transparent);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255,255,255,.34),
+    0 4px 16px -6px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.ctrl--toggle.on .ico svg { stroke-width: 2; }
+.ctrl--toggle.on .ctrl-sub { color: rgba(255,255,255,.78); }
+.ctrl--toggle.on:active { background: var(--tian-qing-deep); }
+
+/* ④ 瞬时动作用菱形角标，和开关型区分开 */
+.ctrl--action::after {
+  content: ''; position: absolute; top: 7px; right: 7px;
+  width: 4px; height: 4px; border-radius: 50%;
+  background: var(--text-3); opacity: .45;
+}
+.ctrl--action:active::after { opacity: 0; }
+
+/* ⑤ 场景型：横向铺开、带副标题 */
+.ctrl--scene { min-height: 74px; }
+.ctrl--scene .ico svg { width: 20px; height: 20px; }
+
+/* ⑥ 禁用态（如未插枪时不能开充） */
 .ctrl[disabled] { opacity: .38; pointer-events: none; }
 
-/* ─────────── 底部 Tab ─────────── */
+/* ⑦ 下发中：转圈遮罩，锁定重复点击 */
+.ctrl-spin {
+  position: absolute; inset: 0;
+  display: none; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--surface-alt) 78%, transparent);
+  backdrop-filter: blur(1px);
+}
+.ctrl--toggle.on .ctrl-spin { background: color-mix(in srgb, var(--accent) 78%, transparent); }
+.ctrl-spin::after {
+  content: ''; width: 17px; height: 17px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--text-3) 35%, transparent);
+  border-top-color: var(--accent);
+  animation: ctrlSpin .7s linear infinite;
+}
+.ctrl--toggle.on .ctrl-spin::after {
+  border-color: rgba(255,255,255,.35); border-top-color: #fff;
+}
+@keyframes ctrlSpin { to { transform: rotate(360deg); } }
+
+.ctrl.busy { pointer-events: none; }
+.ctrl.busy .ctrl-spin { display: flex; }
+
+/* ⑧ 成功反馈：对勾弹出 + 按钮轻弹，1 秒后自动复位 */
+.ctrl-ok {
+  position: absolute; inset: 0;
+  display: none; align-items: center; justify-content: center;
+  background: var(--qing-bi); color: #fff;
+}
+.ctrl-ok svg { width: 24px; height: 24px; }
+.ctrl.done .ctrl-ok { display: flex; animation: ctrlOk .38s cubic-bezier(.34,1.56,.64,1); }
+.ctrl.done { animation: ctrlBounce .42s cubic-bezier(.34,1.56,.64,1); }
+@keyframes ctrlOk { from { opacity: 0; transform: scale(.7); } to { opacity: 1; transform: scale(1); } }
+@keyframes ctrlBounce {
+  0% { transform: scale(.93); }
+  55% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+/* ⑨ 失败反馈：朱砂红抖动 */
+.ctrl.fail .ctrl-ok { background: var(--zhu-sha); }
+.ctrl.fail { animation: ctrlShake .4s; }
+@keyframes ctrlShake {
+  0%,100% { transform: translateX(0); }
+  20% { transform: translateX(-5px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
+
+/* 分组小标题 + 右上角状态提示 */
+.ctrl-sep {
+  display: flex; align-items: center; gap: 9px;
+  font-size: 11px; color: var(--text-3); font-weight: 500;
+  margin: 16px 0 10px;
+}
+.ctrl-sep::after { content: ''; flex: 1; height: 1px; background: var(--separator); }
+.ctrl-hint { font-size: 11px; color: var(--text-3); font-weight: 400; }
+
+/* 尊重系统「减弱动态效果」 */
+@media (prefers-reduced-motion: reduce) {
+  .ctrl, .ctrl .ico, .ctrl-ok, .ctrl-ok svg { animation: none !important; transition-duration: .01ms !important; }
+  .ctrl .ripple { display: none; }
+}
+
+/* ─────────── 底部 Tab（Liquid Glass 悬浮胶囊）───────────
+   iOS 26 的 tab bar 不再是通栏，而是悬浮的玻璃胶囊，
+   两侧留出间隙，能透出下方滚动内容。 */
 .tabbar {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
   display: flex;
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
-  backdrop-filter: saturate(180%) blur(20px);
-  -webkit-backdrop-filter: saturate(180%) blur(20px);
-  border-top: 1px solid var(--separator);
-  padding-bottom: env(safe-area-inset-bottom);
+  /* 外层留白，让胶囊浮起来 */
+  padding: 0 14px calc(env(safe-area-inset-bottom) + 10px);
+  background: transparent;
+  pointer-events: none;                    /* 空白区不挡内容 */
+}
+/* 真正的玻璃胶囊 */
+.tabbar-inner {
+  flex: 1; display: flex; pointer-events: auto;
+  border-radius: 26px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-edge);
+  box-shadow:
+    0 1px 0 0 var(--glass-edge) inset,
+    inset 0 1px 0 0 var(--glass-highlight),
+    0 8px 28px -10px var(--glass-shadow);
+  overflow: hidden;
 }
 .tab {
-  flex: 1; border: none; background: none; font-family: inherit;
-  padding: 9px 2px 7px; min-height: 56px;
+  flex: 1; position: relative; border: none; background: none; font-family: inherit;
+  padding: 9px 2px 8px; min-height: 54px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   font-size: 10px; color: var(--text-3); cursor: pointer;
-  transition: color .15s;
+  transition: color .18s ease, transform .2s cubic-bezier(.34,1.56,.64,1);
 }
-.tab svg { width: 22px; height: 22px; display: block; }
+.tab svg { width: 22px; height: 22px; display: block; transition: transform .24s cubic-bezier(.34,1.56,.64,1); }
+.tab:active svg { transform: scale(.86); }
 .tab.on { color: var(--accent); font-weight: 600; }
+.tab.on svg { transform: scale(1.06); }
+/* 选中态：玻璃上的高光药丸背景 */
+.tab.on::before {
+  content: '';
+  position: absolute; inset: 5px 8px;
+  border-radius: 18px;
+  background: var(--glass-highlight);
+  box-shadow: inset 0 0 0 1px var(--glass-stroke-weak);
+  z-index: -1;
+  animation: tabPill .3s cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes tabPill { from { opacity: 0; transform: scale(.82); } to { opacity: 1; transform: scale(1); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .tab.on::before { animation: none; }
+}
 
 /* ─────────── 图表 ─────────── */
-.chart-box { background: var(--surface); border-radius: var(--card-radius); padding: var(--card-padding); }
+.chart-box { background: var(--glass-bg); border-radius: var(--card-radius); padding: var(--card-padding); }
 .seg {
-  display: inline-flex; background: var(--surface-alt);
+  display: inline-flex; background: var(--glass-inner-2);
   border-radius: 9px; padding: 2px; gap: 2px;
 }
 .seg button {
@@ -277,13 +713,13 @@ body {
   padding: 5px 13px; border-radius: 7px; cursor: pointer;
   transition: background .15s, color .15s;
 }
-.seg button.on { background: var(--surface); color: var(--text-1); font-weight: 600; }
+.seg button.on { background: var(--glass-inner); color: var(--text-1); font-weight: 600; }
 canvas { display: block; width: 100%; }
 
 /* ─────────── 行程 / 消费列表 ─────────── */
 .list { display: flex; flex-direction: column; gap: var(--gap); }
 .item {
-  background: var(--surface); border-radius: var(--card-radius);
+  background: var(--glass-bg); border-radius: var(--card-radius);
   padding: 13px 14px;
 }
 .item-top {
@@ -299,11 +735,11 @@ canvas { display: block; width: 100%; }
 .item-tags { display: flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
 .tag {
   font-size: 10.5px; padding: 3px 8px; border-radius: 6px;
-  background: var(--surface-alt); color: var(--text-2);
+  background: var(--glass-inner-2); color: var(--text-2);
 }
-.tag.p { background: rgba(127,179,168,.16); color: var(--tian-qing-deep); font-weight: 600; }
+.tag.p { background: rgba(28,111,168,.14); color: var(--tian-qing-deep); font-weight: 600; }
 @media (prefers-color-scheme: dark) {
-  .tag.p { background: rgba(127,179,168,.20); color: var(--tian-qing); }
+  .tag.p { background: rgba(77,163,220,.20); color: var(--tian-qing); }
 }
 .tag.a { background: rgba(23,124,176,.14); color: var(--dian-qing); }
 .tag.w { background: rgba(240,194,57,.20); color: #A8791A; }
@@ -314,17 +750,17 @@ canvas { display: block; width: 100%; }
 .pbar-head { display: flex; justify-content: space-between; font-size: 12.5px; }
 .pbar-name { color: var(--text-2); }
 .pbar-amt { font-weight: 600; font-variant-numeric: tabular-nums; }
-.pbar-track { height: 7px; background: var(--surface-alt); border-radius: 4px; overflow: hidden; }
+.pbar-track { height: 7px; background: var(--glass-inner-2); border-radius: 4px; overflow: hidden; }
 .pbar-fill { height: 100%; border-radius: 4px; transition: width .7s cubic-bezier(.4,0,.2,1); }
 .pbar-sub { font-size: 10.5px; color: var(--text-3); }
 
 /* ─────────── 汇总大卡 ─────────── */
 .summary-hero {
-  /* 同色系渐变：天青·深 → 靛青，保持中国传统色的青调，不用偏冷的靛蓝 */
-  background: linear-gradient(135deg, var(--tian-qing-deep) 0%, #4A8085 52%, var(--dian-qing) 100%);
+  /* 清爽天蓝渐变：天青·深 → 天青 → 靛青，统一蓝色系，干净通透 */
+  background: linear-gradient(135deg, var(--tian-qing-deep) 0%, var(--tian-qing) 52%, var(--dian-qing) 100%);
   border-radius: var(--card-radius); padding: 18px var(--card-padding);
   color: #fff;
-  box-shadow: 0 6px 20px -10px rgba(93,138,126,.55);
+  box-shadow: 0 6px 20px -10px rgba(28,111,168,.45);
 }
 .summary-hero .lbl { font-size: 11.5px; opacity: .82; }
 .summary-hero .big {
@@ -346,7 +782,7 @@ canvas { display: block; width: 100%; }
 .empty .ico { font-size: 40px; opacity: .35; margin-bottom: 12px; }
 .soon {
   display: flex; align-items: center; gap: 11px;
-  background: var(--surface); border-radius: var(--card-radius); padding: 14px;
+  background: var(--glass-bg); border-radius: var(--card-radius); padding: 14px;
   opacity: .62;
 }
 .soon .ico { font-size: 21px; }
@@ -354,7 +790,7 @@ canvas { display: block; width: 100%; }
 .soon .d { font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
 .soon-badge {
   margin-left: auto; font-size: 10px; padding: 3px 8px; border-radius: 6px;
-  background: var(--surface-alt); color: var(--text-3); white-space: nowrap;
+  background: var(--glass-inner-2); color: var(--text-3); white-space: nowrap;
 }
 
 /* ─────────── 页脚 ─────────── */
@@ -379,18 +815,13 @@ canvas { display: block; width: 100%; }
 <body>
 
 <header class="topbar">
-  <div class="row">
-    <div>
-      <h1 id="pageTitle">车况</h1>
-      <div class="sub" id="pageSub">正在连接服务…</div>
-    </div>
-    <span class="badge-mode" id="modeBadge">预览</span>
-  </div>
+  <span class="badge-mode" id="modeBadge">预览</span>
 </header>
 
 <main class="wrap" id="view"></main>
 
 <nav class="tabbar">
+  <div class="tabbar-inner">
   <button class="tab on" data-tab="dash">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <path d="M5 17h14M5 17a2 2 0 0 1-2-2v-3.5L5 6h14l2 5.5V15a2 2 0 0 1-2 2M5 17v2M19 17v2"/>
@@ -413,6 +844,7 @@ canvas { display: block; width: 100%; }
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
     </svg>设置
   </button>
+  </div>
 </nav>
 
 <div class="toast" id="toast"></div>
@@ -427,6 +859,9 @@ const API = (location.origin.startsWith('http') && location.port !== '5500')
   ? location.origin
   : 'http://localhost:8765';
 
+/* 演示模式：后端未接真车时，车控指令走本地模拟，保证动效链路可视 */
+const DEMO = true;
+
 const state = {
   tab: 'dash',
   status: null,
@@ -436,6 +871,115 @@ const state = {
   records: [],
   days: 30,
   health: null,
+  seeded: false,
+};
+
+/* ═══════════════════════════════════════════════
+   预览兜底数据：2026 款焕新极氪 001（真实感演示）
+   仅当后端未连接时启用，不影响接真实数据后的逻辑
+   ═══════════════════════════════════════════════ */
+const MOCK = {
+  status: {
+    nickname: '焕新 001',
+    modelName: 'ZEEKR 001',
+    plateNo: '沪A·D8821',
+    soc: 68,
+    rangeKm: 510,
+    odometerKm: 8642,
+    interiorTemp: 23.5,
+    exteriorTemp: 26.5,
+    avgConsumption: 15.8,
+    battery12vVoltage: 13.2,
+    tyreFrontLeft: 250, tyreFrontRight: 248,
+    tyreRearLeft: 252, tyreRearRight: 249,
+    tyreWarning: false,
+    isLocked: true,
+    isCharging: false,
+    climateOn: false,
+    trunkOpen: false,
+    windows: { driver: false, passenger: false, rearLeft: false, rearRight: false },
+  },
+  trips: [
+    { startTime: '2026-09-17 08:15', startPlace: '家 · 锦绣江南', endPlace: '公司 · 张江高科', distanceKm: 12.4, energyKwh: 2.10, consumption: 16.9, durationMinutes: 28 },
+    { startTime: '2026-09-16 18:40', startPlace: '公司 · 张江高科', endPlace: '家 · 锦绣江南', distanceKm: 13.1, energyKwh: 1.90, consumption: 14.5, durationMinutes: 32 },
+    { startTime: '2026-09-15 09:02', startPlace: '家 · 锦绣江南', endPlace: '万象城', distanceKm: 8.6, energyKwh: 1.40, consumption: 16.3, durationMinutes: 22 },
+    { startTime: '2026-09-14 21:10', startPlace: '万象城', endPlace: '家 · 锦绣江南', distanceKm: 9.2, energyKwh: 1.30, consumption: 14.1, durationMinutes: 25 },
+    { startTime: '2026-09-13 08:20', startPlace: '家 · 锦绣江南', endPlace: '公司 · 张江高科', distanceKm: 12.0, energyKwh: 2.00, consumption: 16.7, durationMinutes: 30 },
+    { startTime: '2026-09-12 15:18', startPlace: '家 · 锦绣江南', endPlace: '青浦奥特莱斯', distanceKm: 38.5, energyKwh: 6.10, consumption: 15.8, durationMinutes: 45 },
+    { startTime: '2026-09-12 19:52', startPlace: '青浦奥特莱斯', endPlace: '家 · 锦绣江南', distanceKm: 39.2, energyKwh: 5.80, consumption: 14.8, durationMinutes: 48 },
+    { startTime: '2026-09-10 08:35', startPlace: '家 · 锦绣江南', endPlace: '公司 · 张江高科', distanceKm: 11.9, energyKwh: 2.00, consumption: 16.8, durationMinutes: 27 },
+    { startTime: '2026-09-09 18:58', startPlace: '公司 · 张江高科', endPlace: '家 · 锦绣江南', distanceKm: 12.7, energyKwh: 1.80, consumption: 14.2, durationMinutes: 31 },
+    { startTime: '2026-09-07 09:40', startPlace: '家 · 锦绣江南', endPlace: '虹桥天地', distanceKm: 17.3, energyKwh: 2.60, consumption: 15.0, durationMinutes: 33 },
+  ],
+  trend: [
+    { date: '2026-08-19', consumption: 16.8, distanceKm: 22.0, energyKwh: 3.70 },
+    { date: '2026-08-20', consumption: 17.5, distanceKm: 25.3, energyKwh: 4.43 },
+    { date: '2026-08-21', consumption: 15.2, distanceKm: 38.0, energyKwh: 5.78 },
+    { date: '2026-08-22', consumption: 18.2, distanceKm: 12.5, energyKwh: 2.28 },
+    { date: '2026-08-23', consumption: 16.4, distanceKm: 24.1, energyKwh: 3.95 },
+    { date: '2026-08-24', consumption: 14.8, distanceKm: 39.2, energyKwh: 5.80 },
+    { date: '2026-08-25', consumption: 17.1, distanceKm: 23.0, energyKwh: 3.93 },
+    { date: '2026-08-26', consumption: 16.9, distanceKm: 21.8, energyKwh: 3.68 },
+    { date: '2026-08-27', consumption: 15.6, distanceKm: 31.5, energyKwh: 4.91 },
+    { date: '2026-08-28', consumption: 18.0, distanceKm: 13.2, energyKwh: 2.38 },
+    { date: '2026-08-29', consumption: 16.2, distanceKm: 26.4, energyKwh: 4.28 },
+    { date: '2026-08-30', consumption: 14.1, distanceKm: 40.1, energyKwh: 5.65 },
+    { date: '2026-08-31', consumption: 17.3, distanceKm: 22.9, energyKwh: 3.96 },
+    { date: '2026-09-01', consumption: 16.7, distanceKm: 24.8, energyKwh: 4.14 },
+    { date: '2026-09-02', consumption: 15.9, distanceKm: 28.6, energyKwh: 4.55 },
+    { date: '2026-09-03', consumption: 18.4, distanceKm: 12.0, energyKwh: 2.21 },
+    { date: '2026-09-04', consumption: 16.5, distanceKm: 25.1, energyKwh: 4.14 },
+    { date: '2026-09-05', consumption: 14.9, distanceKm: 37.8, energyKwh: 5.63 },
+    { date: '2026-09-06', consumption: 15.3, distanceKm: 33.2, energyKwh: 5.08 },
+    { date: '2026-09-07', consumption: 17.8, distanceKm: 21.5, energyKwh: 3.83 },
+    { date: '2026-09-08', consumption: 16.4, distanceKm: 23.7, energyKwh: 3.89 },
+    { date: '2026-09-09', consumption: 13.8, distanceKm: 41.0, energyKwh: 5.66 },
+    { date: '2026-09-10', consumption: 16.7, distanceKm: 22.2, energyKwh: 3.71 },
+    { date: '2026-09-11', consumption: 16.1, distanceKm: 24.9, energyKwh: 4.01 },
+    { date: '2026-09-12', consumption: 15.5, distanceKm: 39.5, energyKwh: 6.12 },
+    { date: '2026-09-13', consumption: 16.8, distanceKm: 23.1, energyKwh: 3.88 },
+    { date: '2026-09-14', consumption: 14.6, distanceKm: 35.4, energyKwh: 5.17 },
+    { date: '2026-09-15', consumption: 17.2, distanceKm: 22.6, energyKwh: 3.89 },
+    { date: '2026-09-16', consumption: 16.3, distanceKm: 25.0, energyKwh: 4.08 },
+    { date: '2026-09-17', consumption: 15.7, distanceKm: 13.5, energyKwh: 2.12 },
+  ],
+  summary: {
+    totalAmount: 1286.50,
+    totalCount: 47,
+    totalEnergyKwh: 786.4,
+    avgUnitPrice: 1.64,
+    byProvider: [
+      { provider: 'teld', providerName: '特来电', amount: 354.20, count: 14 },
+      { provider: 'zeekr', providerName: '极氪极充', amount: 286.40, count: 8 },
+      { provider: 'starCharge', providerName: '星星充电', amount: 241.80, count: 11 },
+      { provider: 'stateGrid', providerName: '国家电网', amount: 198.50, count: 7 },
+      { provider: 'eCharging', providerName: '小桔充电', amount: 132.10, count: 5 },
+      { provider: 'other', providerName: '其他', amount: 73.50, count: 2 },
+    ],
+    monthly: [
+      { month: '2026-04', amount: 198.30 },
+      { month: '2026-05', amount: 226.50 },
+      { month: '2026-06', amount: 254.10 },
+      { month: '2026-07', amount: 201.80 },
+      { month: '2026-08', amount: 242.60 },
+      { month: '2026-09', amount: 163.20 },
+    ],
+  },
+  records: [
+    { timestamp: '2026-09-16 21:30', amount: 38.50, merchant: '特来电-浦东世纪公园站', provider: 'teld', providerName: '特来电', channel: 'wechat' },
+    { timestamp: '2026-09-14 19:42', amount: 32.10, merchant: '极氪极充-万象城', provider: 'zeekr', providerName: '极氪极充', channel: 'alipay' },
+    { timestamp: '2026-09-12 15:20', amount: 45.80, merchant: '星星充电-青浦奥特莱斯', provider: 'starCharge', providerName: '星星充电', channel: 'wechat' },
+    { timestamp: '2026-09-09 20:15', amount: 28.40, merchant: '小桔充电-虹桥枢纽', provider: 'eCharging', providerName: '小桔充电', channel: 'alipay' },
+    { timestamp: '2026-09-07 18:55', amount: 33.20, merchant: '国家电网-e充电(静安)', provider: 'stateGrid', providerName: '国家电网', channel: 'wechat' },
+    { timestamp: '2026-09-05 22:10', amount: 41.60, merchant: '特来电-张江高科', provider: 'teld', providerName: '特来电', channel: 'alipay' },
+    { timestamp: '2026-09-02 19:30', amount: 36.90, merchant: '极氪极充-大宁', provider: 'zeekr', providerName: '极氪极充', channel: 'wechat' },
+    { timestamp: '2026-08-30 20:45', amount: 29.70, merchant: '星星充电-中山公园', provider: 'starCharge', providerName: '星星充电', channel: 'alipay' },
+    { timestamp: '2026-08-27 21:05', amount: 31.20, merchant: '特来电-陆家嘴', provider: 'teld', providerName: '特来电', channel: 'wechat' },
+    { timestamp: '2026-08-24 18:30', amount: 27.40, merchant: '小桔充电-徐家汇', provider: 'eCharging', providerName: '小桔充电', channel: 'alipay' },
+    { timestamp: '2026-08-21 19:50', amount: 34.80, merchant: '国家电网-e充电(浦东)', provider: 'stateGrid', providerName: '国家电网', channel: 'wechat' },
+    { timestamp: '2026-08-18 20:20', amount: 38.10, merchant: '极氪极充-前滩', provider: 'zeekr', providerName: '极氪极充', channel: 'alipay' },
+  ],
+  health: { mode: 'mock', configured: true, allowCommands: true, missingKeys: [] },
 };
 
 /* ═══════════════════════════════════════════════
@@ -473,8 +1017,12 @@ function fmtMonth(ym) {
   const p = String(ym).split('-');
   return p.length === 2 ? parseInt(p[1], 10) + ' 月' : ym;
 }
+/* 电量配色阈值（中国传统色）：
+   ≥50%  青碧 #16B89A —— 电量充裕
+   30~50% 藤黄 #FFB020 —— 电量中等，建议留意
+   <30%  朱砂 #E5483B —— 电量偏低，需尽快补能 */
 function socColor(soc) {
-  if (soc < 20) return 'var(--zhu-sha)';
+  if (soc < 30) return 'var(--zhu-sha)';
   if (soc < 50) return 'var(--teng-huang)';
   return 'var(--qing-bi)';
 }
@@ -483,12 +1031,52 @@ function esc(s) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/* 演示模式：车控指令不发真实请求，本地模拟下发耗时并回执成功，
+   以便完整预览按压 → 转圈 → 对勾 的动效链路 */
+const CTRL_LABELS = {
+  lock: '车辆已上锁', unlock: '车辆已解锁',
+  climateOn: '空调已开启', climateOff: '空调已关闭',
+  defrost: '前风挡除霜已开启', wheelHeat: '方向盘加热已开启',
+  seatHeat: '座椅加热已开启', ventSeat: '座椅通风已开启',
+  flash: '已闪灯', honk: '已鸣笛',
+  closeWindows: '车窗已关闭', sunshade: '遮阳帘已展开',
+  chargeStart: '已开始充电', chargeStop: '已结束充电',
+  sentinel: '哨兵模式已开启',
+  tripPlan: '出行规划已下发', carFinder: '车辆位置已推送', refresh: '车况已刷新',
+};
+
 async function api(path, opts) {
+  if (DEMO && path === '/api/vehicle/command') {
+    const cmd = JSON.parse((opts && opts.body) || '{}').command;
+    await new Promise((r) => setTimeout(r, 620));   // 模拟下发耗时
+    applyDemoCommand(cmd);
+    return { success: true, message: CTRL_LABELS[cmd] || '指令已下发' };
+  }
   const res = await fetch(API + path, opts);
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const json = await res.json();
   if (!json.success) throw new Error(json.error || '服务端返回失败');
   return json.data;
+}
+
+/* 演示模式下让车况随指令联动，开关状态才有真实感 */
+function applyDemoCommand(cmd) {
+  const s = state.status;
+  if (!s) return;
+  switch (cmd) {
+    case 'lock':      s.isLocked = true; break;
+    case 'unlock':    s.isLocked = false; break;
+    case 'climateOn': s.climateOn = true; break;
+    case 'climateOff':s.climateOn = false; break;
+    case 'closeWindows':
+      s.windows = { driver: false, passenger: false, rearLeft: false, rearRight: false };
+      break;
+    case 'chargeStart': s.isCharging = true; break;
+    case 'chargeStop':  s.isCharging = false; break;
+  }
+  const d = new Date();
+  state.lastRefresh = String(d.getHours()).padStart(2, '0') + ':' +
+                      String(d.getMinutes()).padStart(2, '0');
 }
 
 let toastTimer;
@@ -510,11 +1098,16 @@ function socRing(soc, charging, size = 132, lw = 11) {
   const offset = c * (1 - pct / 100);
   const color = charging ? 'var(--dian-qing)' : socColor(pct);
 
+  // 低电量分级：<30% 高危、30~50% 提醒（充电中不触发，此时主色为蓝）
+  const level = charging ? null : (pct < 30 ? 'low' : (pct < 50 ? 'mid' : null));
+  // 低电量时环体加呼吸脉冲，并用同色光晕强化警示
+  const ringCls = ['ring-fg', level === 'low' ? 'ring-pulse' : ''].filter(Boolean).join(' ');
+
   return `
-  <div class="ring-wrap" style="width:${size}px;height:${size}px">
+  <div class="ring-wrap${level ? ' ring-wrap--' + level : ''}" style="width:${size}px;height:${size}px">
     <svg width="${size}" height="${size}">
       <circle class="ring-bg" cx="${size / 2}" cy="${size / 2}" r="${r}" stroke-width="${lw}"/>
-      <circle class="ring-fg" cx="${size / 2}" cy="${size / 2}" r="${r}" stroke-width="${lw}"
+      <circle class="${ringCls}" cx="${size / 2}" cy="${size / 2}" r="${r}" stroke-width="${lw}"
               stroke="${color}"
               stroke-dasharray="${c.toFixed(2)}"
               stroke-dashoffset="${offset.toFixed(2)}"/>
@@ -526,6 +1119,7 @@ function socRing(soc, charging, size = 132, lw = 11) {
       <div class="ring-label">${charging ? '充电中' : '剩余电量'}</div>
     </div>
     ${charging ? `<div class="ring-bolt">${SVG.bolt}</div>` : ''}
+    ${level === 'low' ? `<div class="ring-alert">电量偏低</div>` : ''}
   </div>`;
 }
 
@@ -557,7 +1151,7 @@ function drawLineChart(canvas, points, opts = {}) {
   max += span * 0.12;
 
   const stroke = opts.color || getComputedStyle(document.documentElement)
-    .getPropertyValue('--tian-qing-deep').trim() || '#5D8A7E';
+    .getPropertyValue('--tian-qing-deep').trim() || '#1C6FA8';
   const gridColor = 'rgba(128,128,128,.16)';
   const textColor = opts.textColor || 'rgba(128,128,128,.9)';
 
@@ -584,8 +1178,8 @@ function drawLineChart(canvas, points, opts = {}) {
 
   // 面积渐变
   const grad = ctx.createLinearGradient(0, padT, 0, padT + h);
-  grad.addColorStop(0, opts.fillTop || 'rgba(127,179,168,.30)');
-  grad.addColorStop(1, 'rgba(127,179,168,0)');
+  grad.addColorStop(0, opts.fillTop || 'rgba(46,139,192,.30)');
+  grad.addColorStop(1, 'rgba(46,139,192,0)');
 
   ctx.beginPath();
   points.forEach((p, i) => {
@@ -656,14 +1250,29 @@ const SVG = {
   clock:  '<svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
   car:    '<svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 16h14M5 16a2 2 0 0 1-2-2v-3l2-5h14l2 5v3a2 2 0 0 1-2 2M5 16v2M19 16v2"/><circle cx="7.5" cy="13" r="1.1"/><circle cx="16.5" cy="13" r="1.1"/></svg>',
   money:  '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M15 9.5c0-1.4-1.3-2.2-3-2.2s-3 .8-3 2.2 1.3 1.9 3 2.3 3 .9 3 2.3-1.3 2.2-3 2.2-3-.8-3-2.2"/></svg>',
+  // —— 车门锁 / 充电口盖（zeekr_ha lock 实体）——
+  carLock:   '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 14h18M3 14a2 2 0 0 1 .6-1.5L7 9h10l3.4 3.5A2 2 0 0 1 21 14M3 14v3M21 14v3"/><circle cx="7.5" cy="14" r="1.1" fill="currentColor" stroke="none"/><circle cx="16.5" cy="14" r="1.1" fill="currentColor" stroke="none"/><rect x="8.6" y="5.6" width="6.8" height="2.2" rx=".8"/></svg>',
+  carUnlock: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 14h18M3 14a2 2 0 0 1 .6-1.5L7 9h10l3.4 3.5A2 2 0 0 1 21 14M3 14v3M21 14v3"/><circle cx="7.5" cy="14" r="1.1" fill="currentColor" stroke="none"/><circle cx="16.5" cy="14" r="1.1" fill="currentColor" stroke="none"/><path d="M8.6 6.6a2 2 0 0 1 3.6-.9"/></svg>',
+  chargePort:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="12" r="4"/><path d="M12 12h9M8 8v8M5.6 9.6l4.8 4.8"/></svg>',
+  // —— zeekr_ha switch 实体对应图标 ——
+  defrost:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9M12 3l-2 2M12 3l2 2M6.5 20h11"/></svg>',
+  wheelHeat:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="12" r="8"/><circle cx="11" cy="12" r="2.6"/><path d="M11 9.4V6.2M8.6 13.4l-2 2.6M13.4 13.4l2 2.6"/><path d="M18.5 4.2c.9-.9 2.1-.9 2.6-.2s.2 1.7-.6 2.4"/></svg>',
+  shield: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7.5 3v5.5c0 4.6-3.1 8.4-7.5 9.5-4.4-1.1-7.5-4.9-7.5-9.5V6L12 3z"/><path d="M9.2 12.2l2 2 3.6-3.8"/></svg>',
+  sunshade:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 5h17"/><path d="M4.5 5c0 5 3 9 7.5 9s7.5-4 7.5-9"/><path d="M9.5 14.2l-1.2 5.3M14.5 14.2l1.2 5.3M12 14.6V20"/></svg>',
+  seats:  '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4.5h1.8a1.8 1.8 0 0 1 1.8 1.8v5.2H8a2 2 0 0 1-2-2V6.5a2 2 0 0 1 2-2z"/><path d="M6 11.5h5.6v3.2a1.8 1.8 0 0 1-1.8 1.8H8a2 2 0 0 1-2-2v-3z"/><path d="M13 19.5h7"/><path d="M16.5 15.5v4"/><path d="M15 6.5h2M15 9h2"/></svg>',
+  vent:   '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4.5h1.8a1.8 1.8 0 0 1 1.8 1.8v5.2H8a2 2 0 0 1-2-2V6.5a2 2 0 0 1 2-2z"/><path d="M6 11.5h5.6v3.2a1.8 1.8 0 0 1-1.8 1.8H8a2 2 0 0 1-2-2v-3z"/><path d="M13.5 6.5c1.6 0 1.6 2 3.2 2"/><path d="M13.5 10c1.6 0 1.6 2 3.2 2"/><path d="M19.5 9l2-1.2M19.5 12l2-1.2"/></svg>',
+  refresh:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4.5h-4.5"/></svg>',
+  heat:   '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0z"/><path d="M12 9v7"/></svg>',
+  pin:    '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-5.6 7-11a7 7 0 1 0-14 0c0 5.4 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg>',
+  check:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
 };
 const PROVIDER_COLORS = {
-  zeekr: '#5D8A7E',
-  teld: '#177CB0',
-  starCharge: '#F0A35E',
-  stateGrid: '#4C6E91',
-  eCharging: '#789262',
-  other: '#9A9A9A',
+  zeekr: '#1E7FC2',
+  teld: '#2E8BC0',
+  starCharge: '#F2994A',
+  stateGrid: '#4C8DAE',
+  eCharging: '#16B89A',
+  other: '#94A3B2',
 };
 
 /* ═══════════════════════════════════════════════
@@ -705,8 +1314,8 @@ function renderDashboard() {
   const tyre = (label, v) => {
     const bad = v !== null && v !== undefined && (v < 220 || v > 280);
     return `<div class="tyre${bad ? ' warn' : ''}">
+      <div class="k">${label}</div>
       <div class="v">${fmt(v, 0)}</div>
-      <div class="k">${label} kPa</div>
     </div>`;
   };
 
@@ -732,11 +1341,32 @@ function renderDashboard() {
   const climateOn = s.climateOn === true;
   const winClosed = !hasOpenWindow(s);
   const trunkClosed = s.trunkOpen !== true;
+  const locked = s.isLocked === true;
 
-  const ctrlBtn = (cmd, label, icon) => `
-    <button class="ctrl" data-cmd="${cmd}">
-      <span class="ico">${icon}</span>${label}
+  // ── 车控按钮：三种形态 ──────────────────────────
+  // 1) toggle：开关型（对应 zeekr_ha 的 switch / lock），显示目标动作，
+  //    由服务端返回的 vehicle_status 驱动 .on 状态与图标方向
+  // 2) action：瞬时动作（对应 button 实体），点击后给一次性脉冲反馈
+  // 3) scene ：场景型（组合指令），同样是一次性动作
+  const ctrlBtn = (o) => {
+    const cls = [
+      'ctrl',
+      `ctrl--${o.kind || 'action'}`,
+      o.on ? 'on' : '',
+      o.danger ? 'danger' : '',
+      o.wide ? 'wide' : '',
+    ].filter(Boolean).join(' ');
+    const sub = o.sub ? `<span class="ctrl-sub">${o.sub}</span>` : '';
+    return `
+    <button class="${cls}" data-cmd="${o.cmd}" data-label="${o.label}"
+            aria-pressed="${o.kind === 'toggle' ? String(!!o.on) : 'false'}"
+            ${o.disabled ? 'disabled' : ''}>
+      <span class="ico">${o.icon}</span>
+      <span class="ctrl-txt">${o.label}${sub}</span>
+      <span class="ctrl-spin" aria-hidden="true"></span>
+      <span class="ctrl-ok" aria-hidden="true">${SVG.check}</span>
     </button>`;
+  };
 
   return `
     <div class="card">
@@ -783,7 +1413,7 @@ function renderDashboard() {
 
     <div class="card">
       <div class="card-title">
-        <span>胎压</span>
+        <span>胎压 <span style="font-size:11px;font-weight:400;color:var(--text-3)">kPa</span></span>
         ${s.tyreWarning ? '<span style="font-size:11px;color:var(--zhu-sha);font-weight:500">异常</span>' : ''}
       </div>
       <div class="tyre-grid">
@@ -805,14 +1435,64 @@ function renderDashboard() {
     </div>
 
     <div class="card">
-      <div class="card-title">快捷车控</div>
+      <div class="card-title">
+        <span>快捷车控</span>
+        <span class="ctrl-hint">${locked ? '车辆已上锁' : '车辆未上锁'}</span>
+      </div>
+
       <div class="ctrl-grid">
-        ${ctrlBtn('lock', '锁车', SVG.lock)}
-        ${ctrlBtn('unlock', '解锁', SVG.unlock)}
-        ${ctrlBtn('climateOn', '开空调', SVG.snow)}
-        ${ctrlBtn('flash', '闪灯', SVG.light)}
-        ${ctrlBtn('honk', '鸣笛', SVG.horn)}
-        ${ctrlBtn('chargeStop', '结束充电', SVG.plug)}
+        ${ctrlBtn({
+          cmd: locked ? 'unlock' : 'lock',
+          label: locked ? '解锁' : '锁车',
+          sub: locked ? '当前已锁' : '当前未锁',
+          icon: locked ? SVG.carUnlock : SVG.carLock,
+          kind: 'toggle', on: locked,
+        })}
+        ${ctrlBtn({
+          cmd: climateOn ? 'climateOff' : 'climateOn',
+          label: climateOn ? '关空调' : '开空调',
+          sub: climateOn ? '运行中' : '已关闭',
+          icon: SVG.snow, kind: 'toggle', on: climateOn,
+        })}
+        ${ctrlBtn({
+          cmd: 'defrost', label: '前除霜', sub: '风挡除雾',
+          icon: SVG.defrost, kind: 'toggle',
+        })}
+        ${ctrlBtn({
+          cmd: 'wheelHeat', label: '方向盘', sub: '加热',
+          icon: SVG.wheelHeat, kind: 'toggle',
+        })}
+        ${ctrlBtn({
+          cmd: 'seatHeat', label: '座椅加热', sub: '主 / 副驾',
+          icon: SVG.seats, kind: 'toggle',
+        })}
+        ${ctrlBtn({
+          cmd: 'ventSeat', label: '座椅通风', sub: '主 / 副驾',
+          icon: SVG.vent, kind: 'toggle',
+        })}
+      </div>
+
+      <div class="ctrl-sep">远程操作</div>
+
+      <div class="ctrl-grid">
+        ${ctrlBtn({ cmd: 'flash', label: '闪灯', icon: SVG.light, kind: 'action' })}
+        ${ctrlBtn({ cmd: 'honk', label: '鸣笛', icon: SVG.horn, kind: 'action' })}
+        ${ctrlBtn({ cmd: 'closeWindows', label: '关车窗', icon: SVG.window, kind: 'action' })}
+        ${ctrlBtn({ cmd: 'sunshade', label: '遮阳帘', icon: SVG.sunshade, kind: 'action' })}
+        ${ctrlBtn({
+          cmd: charging ? 'chargeStop' : 'chargeStart',
+          label: charging ? '结束充电' : '开始充电',
+          icon: SVG.plug, kind: 'action', disabled: !charging && !s.chargeGunConnected,
+        })}
+        ${ctrlBtn({ cmd: 'sentinel', label: '哨兵模式', icon: SVG.shield, kind: 'toggle' })}
+      </div>
+
+      <div class="ctrl-sep">场景</div>
+
+      <div class="ctrl-grid ctrl-grid--scene">
+        ${ctrlBtn({ cmd: 'tripPlan', label: '出行规划', sub: '预设出发时间', icon: SVG.route, kind: 'scene' })}
+        ${ctrlBtn({ cmd: 'carFinder', label: '寻车', sub: '定位车辆', icon: SVG.pin, kind: 'scene' })}
+        ${ctrlBtn({ cmd: 'refresh', label: '立即刷新', sub: '同步车况', icon: SVG.refresh, kind: 'scene' })}
       </div>
     </div>
 
@@ -1075,18 +1755,7 @@ function renderSettings() {
 /* ═══════════════════════════════════════════════
    渲染调度
    ═══════════════════════════════════════════════ */
-const TITLES = {
-  dash: ['车况', '车辆实时状态'],
-  trips: ['行程', '里程与能耗统计'],
-  charges: ['充电', '跨服务商消费汇总'],
-  settings: ['设置', '服务与账号配置'],
-};
-
 function render() {
-  const [title, sub] = TITLES[state.tab];
-  $('#pageTitle').textContent = title;
-  $('#pageSub').textContent = state.loading ? '正在加载…' : sub;
-
   const view = $('#view');
   const html = {
     dash: renderDashboard,
@@ -1116,7 +1785,7 @@ function render() {
         const m = [...state.summary.monthly].reverse();
         drawLineChart(c,
           m.map((x) => ({ v: x.amount, label: fmtMonth(x.month) })),
-          { height: 168, decimals: 0, fillTop: 'rgba(93,138,126,.28)' });
+          { height: 168, decimals: 0, fillTop: 'rgba(46,139,192,.28)' });
       }
     }
   });
@@ -1128,14 +1797,22 @@ function render() {
 state.loading = false;
 state.lastRefresh = null;
 
+/* 徽标：文本 + data-mode（驱动状态圆点配色） */
+function setModeBadge(text, mode) {
+  const badge = $('#modeBadge');
+  if (!badge) return;
+  badge.textContent = text;
+  badge.dataset.mode = mode;
+}
+
 async function loadHealth() {
   try {
     state.health = await api('/api/health');
-    const badge = $('#modeBadge');
-    badge.textContent = state.health.mode === 'mock' ? '模拟数据' : '真实数据';
+    const live = state.health.mode !== 'mock';
+    setModeBadge(live ? '真实数据' : '模拟数据', live ? 'live' : 'mock');
   } catch {
     state.health = null;
-    $('#modeBadge').textContent = '未连接';
+    setModeBadge('未连接', 'offline');
   }
 }
 
@@ -1146,7 +1823,7 @@ async function loadStatus() {
     state.lastRefresh = String(d.getHours()).padStart(2, '0') + ':' +
                        String(d.getMinutes()).padStart(2, '0');
   } catch (e) {
-    console.warn('状态加载失败', e);
+    if (!state.seeded) console.warn('状态加载失败', e);
   }
 }
 
@@ -1160,8 +1837,13 @@ async function loadTrips() {
     state.trend = trend || [];
   } catch (e) {
     console.warn('行程加载失败', e);
-    state.trips = [];
-    state.trend = [];
+    if (state.seeded) {
+      state.trips = MOCK.trips;
+      state.trend = MOCK.trend.slice(-state.days);
+    } else {
+      state.trips = [];
+      state.trend = [];
+    }
   }
 }
 
@@ -1175,15 +1857,35 @@ async function loadCharges() {
     state.records = records || [];
   } catch (e) {
     console.warn('充电数据加载失败', e);
-    state.summary = null;
-    state.records = [];
+    if (!state.seeded) {
+      state.summary = null;
+      state.records = [];
+    }
   }
+}
+
+function seedMock() {
+  state.seeded = true;
+  state.status = MOCK.status;
+  state.trips = MOCK.trips;
+  state.trend = MOCK.trend.slice(-state.days);
+  state.summary = MOCK.summary;
+  state.records = MOCK.records;
+  state.health = MOCK.health;
+  const d = new Date();
+  state.lastRefresh = String(d.getHours()).padStart(2, '0') + ':' +
+                     String(d.getMinutes()).padStart(2, '0');
+  setModeBadge('模拟数据', 'mock');
 }
 
 async function loadAll() {
   state.loading = true;
   render();
   await Promise.all([loadHealth(), loadStatus(), loadTrips(), loadCharges()]);
+  // 预览/演示模式：服务端未连接，或服务端本身处于 mock 态时，
+  // 统一呈现贴近真车的演示数据；只有服务端切到 live（真实车机）才用真实数据。
+  const isLive = !!(state.health && state.health.mode === 'live');
+  if (!isLive) seedMock();
   state.loading = false;
   render();
 }
@@ -1203,8 +1905,9 @@ document.querySelector('.tabbar').addEventListener('click', (e) => {
 document.addEventListener('click', (e) => {
   // 车控
   const ctrl = e.target.closest('.ctrl');
-  if (ctrl) {
-    sendCommand(ctrl.dataset.cmd);
+  if (ctrl && !ctrl.disabled) {
+    spawnRipple(ctrl, e);
+    sendCommand(ctrl);
     return;
   }
   // 时间区间切换
@@ -1215,17 +1918,52 @@ document.addEventListener('click', (e) => {
   }
 });
 
-async function sendCommand(cmd) {
+/* 点击处生成涟漪 —— 纯视觉反馈，不参与业务 */
+function spawnRipple(btn, e) {
+  const r = btn.getBoundingClientRect();
+  const size = Math.max(r.width, r.height) * 1.9;
+  const span = document.createElement('span');
+  span.className = 'ripple';
+  span.style.width = span.style.height = size + 'px';
+  span.style.left = ((e.clientX ?? r.left + r.width / 2) - r.left) + 'px';
+  span.style.top = ((e.clientY ?? r.top + r.height / 2) - r.top) + 'px';
+  btn.appendChild(span);
+  setTimeout(() => span.remove(), 600);
+}
+
+/* 车控指令：三段式反馈 —— 下发中转圈 → 成功对勾 / 失败抖动 */
+async function sendCommand(btn) {
+  const cmd = btn.dataset.cmd;
+  const label = btn.dataset.label || '指令';
+  const isToggle = btn.classList.contains('ctrl--toggle');
+
+  if (btn.classList.contains('busy')) return;
+  btn.classList.add('busy');
+
   try {
     const res = await api('/api/vehicle/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ command: cmd }),
     });
-    toast(res.message || '指令已下发');
-    setTimeout(loadStatus, 1200);
-  } catch (e) {
-    toast('指令失败：' + e.message);
+
+    // 成功：对勾脉冲
+    btn.classList.add('done');
+    // 开关型先本地乐观翻转，再以服务端真实状态校正
+    if (isToggle) btn.classList.toggle('on');
+    toast(res.message || (label + '已下发'));
+
+    setTimeout(() => {
+      btn.classList.remove('done', 'busy');
+      // 拉取真实车况以校正开关状态
+      loadStatus().then(render);
+    }, 950);
+  } catch (err) {
+    btn.classList.add('done', 'fail');
+    toast(label + '失败：' + err.message);
+    setTimeout(() => {
+      btn.classList.remove('done', 'fail', 'busy');
+    }, 900);
   }
 }
 
@@ -1234,14 +1972,30 @@ async function sendCommand(cmd) {
    ═══════════════════════════════════════════════ */
 loadAll();
 
-// 轮询：充电中 60 秒，否则 5 分钟
+/* 滚动响应：下滑超过一屏的 6% 时，顶栏玻璃变实
+   —— 对应 iOS 26 从 scrollEdge 到 inline 的过渡行为 */
+let lastScrolled = false;
+function syncScrollState() {
+  const scrolled = window.scrollY > 24;
+  if (scrolled !== lastScrolled) {
+    lastScrolled = scrolled;
+    document.body.classList.toggle('is-scrolled', scrolled);
+  }
+}
+window.addEventListener('scroll', syncScrollState, { passive: true });
+syncScrollState();
+
+// 轮询：仅真实车机（live）模式下刷新，充电中 60 秒，否则 5 分钟
 let pollTimer;
 function schedulePoll() {
   clearTimeout(pollTimer);
   const interval = (state.status && state.status.isCharging) ? 60000 : 300000;
   pollTimer = setTimeout(async () => {
-    await loadStatus();
-    render();
+    const isLive = !!(state.health && state.health.mode === 'live');
+    if (isLive) {
+      await loadStatus();
+      render();
+    }
     schedulePoll();
   }, interval);
 }

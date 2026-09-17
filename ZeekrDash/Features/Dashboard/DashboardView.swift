@@ -15,41 +15,35 @@ struct DashboardView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
+        // 页面标题与底部导航重复，已移除；顶部只保留右上角「模拟数据」玻璃徽标
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: Metrics.sectionSpacing) {
-                    if let status = store.vehicleStatus {
-                        headerCard(status)
+            ScreenContainer(modeText: "模拟数据") {
+                if let status = store.vehicleStatus {
+                    headerCard(status)
 
-                        if status.isCharging == true {
-                            chargingCard(status)
-                        }
-
-                        metricsGrid(status)
-                        tyreCard(status)
-                        statusCard(status)
-                        ControlsPanel()
-                        footerNote
-                    } else if store.isLoading {
-                        LoadingView(text: "正在获取车辆状态")
-                            .padding(.top, 60)
-                    } else {
-                        emptyState
+                    if status.isCharging == true {
+                        chargingCard(status)
                     }
+
+                    metricsGrid(status)
+                    tyreCard(status)
+                    // 「车身状态」保持 2×2，不随胎压一起改横排
+                    statusCard(status)
+                    ControlsPanel()
+                    footerNote
+                } else if store.isLoading {
+                    LoadingView(text: "正在获取车辆状态")
+                        .padding(.top, 60)
+                } else {
+                    emptyState
                 }
-                .padding(.horizontal, Metrics.screenPadding)
-                .padding(.bottom, 24)
-            }
-            .background(Theme.background(scheme))
-            .navigationTitle("车况")
-            .navigationBarTitleDisplayMode(.large)
-            .refreshable { await store.refresh() }
-            .overlay(alignment: .top) {
+
                 if let message = store.errorMessage, store.hasData {
                     ErrorBanner(message: message, onRetry: { store.errorMessage = nil })
-                        .padding(.horizontal, Metrics.screenPadding)
                 }
             }
+            .toolbar(.hidden, for: .navigationBar)
+            .refreshable { await store.refresh() }
         }
         .onAppear { store.startPolling() }
         .onChange(of: scenePhase) { _, phase in
@@ -194,11 +188,18 @@ struct DashboardView: View {
 
     private func tyreCard(_ status: VehicleStatus) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text("胎压")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary(scheme))
+
+                // 单位从每格重复四次提到标题旁
+                Text("kPa")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textTertiary(scheme))
+
                 Spacer()
+
                 if status.tyreWarning == true {
                     Label("异常", systemImage: "exclamationmark.triangle.fill")
                         .font(.system(size: 11, weight: .medium))
@@ -206,11 +207,10 @@ struct DashboardView: View {
                 }
             }
 
-            HStack(spacing: Metrics.sectionSpacing) {
+            // 一行四列：标签在上、数值在下
+            LazyVGrid(columns: tyreColumns, spacing: 8) {
                 tyreItem("左前", status.tyreFrontLeft)
                 tyreItem("右前", status.tyreFrontRight)
-            }
-            HStack(spacing: Metrics.sectionSpacing) {
                 tyreItem("左后", status.tyreRearLeft)
                 tyreItem("右后", status.tyreRearRight)
             }
@@ -220,21 +220,27 @@ struct DashboardView: View {
         .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
     }
 
+    private var tyreColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
+    }
+
     private func tyreItem(_ position: String, _ value: Double?) -> some View {
         // 正常胎压区间（kPa）—— 低于 220 或高于 280 视为异常
         let isAbnormal = value.map { $0 < 220 || $0 > 280 } ?? false
 
-        return VStack(spacing: 4) {
+        return VStack(spacing: 3) {
+            Text(position)
+                .font(.system(size: 10))
+                .foregroundStyle(Theme.textTertiary(scheme))
+
             Text(value.map { String(format: "%.0f", $0) } ?? "--")
-                .font(.system(size: 17, weight: .medium, design: .rounded))
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
                 .foregroundStyle(isAbnormal ? ChineseColor.statusBad : Theme.textPrimary(scheme))
                 .monospacedDigit()
-            Text("\(position) kPa")
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.textTertiary(scheme))
         }
-        .frame(maxWidth: .infinity, minHeight: 52)
-        .background(Theme.surfaceAlt(scheme))
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity)
+        .background(Theme.surfaceAlt(scheme).opacity(0.55))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 

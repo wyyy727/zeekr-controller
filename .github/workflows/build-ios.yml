@@ -17,15 +17,27 @@ on:
 jobs:
   build:
     name: Build unsigned IPA
-    runs-on: macos-14
-    timeout-minutes: 30
+    # iOS 26 SDK 需要 macOS 26 runner + Xcode 26（macos-14 / Xcode 15.4 编不了）
+    runs-on: macos-26
+    timeout-minutes: 40
 
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
 
       - name: 选择 Xcode 版本
-        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+        run: |
+          # 优先使用已装的最新 Xcode 26，避免硬编码版本号随镜像更新而失效
+          XCODE_APP=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE_APP" ]; then
+            echo "::error::未找到 Xcode 26，当前镜像可能尚未提供 iOS 26 SDK"
+            ls -d /Applications/Xcode*.app
+            exit 1
+          fi
+          echo "选用 $XCODE_APP"
+          sudo xcode-select -s "$XCODE_APP"
+          xcodebuild -version
+          echo "iOS SDK 版本：$(xcrun --sdk iphoneos --show-sdk-version)"
 
       - name: 安装 XcodeGen
         run: |

@@ -20,6 +20,11 @@ final class AppStore {
     var errorMessage: String?
     var lastRefresh: Date?
 
+    /// 全局 Toast 文案（车控指令回执等），由 RootView 统一呈现
+    var toast: String?
+
+    private var toastTask: Task<Void, Never>?
+
     /// 是否已成功拿到过数据
     var hasData: Bool { vehicleStatus != nil }
 
@@ -92,6 +97,19 @@ final class AppStore {
         } catch {
             errorMessage = error.localizedDescription
             return nil
+        }
+    }
+
+    // MARK: - 全局提示
+
+    /// 展示一条底部 Toast，2.2 秒后自动消失
+    func showToast(_ message: String) {
+        toast = message
+        toastTask?.cancel()
+        toastTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_200_000_000)
+            guard !Task.isCancelled else { return }
+            self?.toast = nil
         }
     }
 }
