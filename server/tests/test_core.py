@@ -27,10 +27,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.adapters.zeekr_signing import (  # noqa: E402
     COMMAND_MAP,
+    UNVERIFIED_COMMANDS,
+    ServiceID,
+    ServiceIDUnverified,
     build_control_body,
     build_gw3_string_to_sign,
     compact_json,
     encrypt_vin,
+    is_supported_command,
+    is_verified_command,
     sign_gw3,
 )
 from app.bills.aggregator import build_summary, extract_charges  # noqa: E402
@@ -234,14 +239,129 @@ class TestSigning:
         assert result == '{"a":1,"b":"中文"}'
 
     def test_command_map_covers_all_commands(self) -> None:
-        """命令映射表应覆盖前端声明的全部指令。"""
+        """命令映射表应覆盖前端声明的全部指令（车控面板 15 按钮 + 空调/充电开关）。"""
         expected = {
-            "lock", "unlock", "climateOn", "climateOff",
-            "flash", "honk", "chargeStart", "chargeStop",
+            # 门锁
+            "lock", "unlock",
+            # 空调
+            "climateOn", "climateOff",
+            # 车控面板 · 状态开关型
+            "defrost", "wheelHeat", "seatHeat", "ventSeat",
+            # 车控面板 · 远程操作
+            "flash", "honk", "closeWindows", "sunshade",
+            "chargeStart", "chargeStop", "sentinel",
+            # 车控面板 · 场景
+            "tripPlan", "carFinder", "refresh",
         }
         assert set(COMMAND_MAP.keys()) == expected
         for command, trio in COMMAND_MAP.items():
             assert len(trio) == 3, f"{command} 应为 (serviceId, key, value) 三元组"
+            service_id, key, value = trio
+            assert service_id and key and value, f"{command} 的三元组不能有空值"
+
+    def test_is_supported_command(self) -> None:
+        """已知指令放行，未知指令必须拒绝 —— 不能对未知指令伪造成功。
+
+        注意：本函数只表达「认不认识」，未验证指令同样为 True。
+        能否上真车由 `is_verified_command` 判定，见 TestCommandTrustBoundary。
+        """
+        assert is_supported_command("unlock")
+        assert is_supported_command("sentinel")
+        assert not is_supported_command("launchMissiles")
+
+
+# MARK: - 车控指令可信度分级
+
+
+class TestCommandTrustBoundary:
+    """已验证 / 未验证 serviceId 的隔离测试。
+
+    这是安全底线：serviceId 是可远程触发真实车辆动作的报文内容，
+    把「按字母缩写猜的」与「有逆向依据的」混在一起，后续维护者将无法
+    分辨哪些能上真车。以下断言用于锁死这条边界。
+    """
+
+    # 合作方逆向成果（RexzeLu/zeekr_ha、borconi/openzeekr）中的已知值。
+    # 这些值是外部事实，应当保持不变 —— 若本测试失败，说明有人改动了
+    # 已验证 serviceId，必须重新核对逆向来源，而不是改断言。
+    KNOWN_VERIFIED = {
+        "LOCK": "RDL",
+        "UNLOCK": "RDU",
+        "CLIMATE": "ZAF",
+        "WINDOW": "RWS",
+        "HORN_LIGHT": "RHL",
+        "CHARGE": "RCS",
+    }
+
+    def test_verified_service_ids_unchanged(self) -> None:
+        """已验证的 serviceId 必须保持原值（有逆向依据，不可擅改）。"""
+        for name, value in self.KNOWN_VERIFIED.items():
+            assert getattr(ServiceID, name) == value, f"ServiceID.{name} 被改动"
+
+    def test_unverified_service_ids_isolated(self) -> None:
+        """推断值必须全部隔离在 ServiceIDUnverified 中，不得混入 ServiceID。"""
+        assert set(ServiceIDUnverified.__dict__) & set(self.KNOWN_VERIFIED) == set()
+        # 反向确认：这些猜测值确实只在未验证类里
+        assert ServiceIDUnverified.SENTINEL == "ZSM"
+        assert not hasattr(ServiceID, "SENTINEL")
+        assert not hasattr(ServiceID, "DEFROST")
+
+    def test_unverified_commands_match_guessed_service_ids(self) -> None:
+        """凡 serviceId 或参数为推断值的指令，必须被全部标记为未验证。
+
+        口径：`serviceId` 来自 `ServiceIDUnverified`，**或**参数 key/value
+        为推断值（后者包括复用已验证 serviceId 的 tripPlan / closeWindows /
+        carFinder / refresh —— 参数值是猜的，一样不可信）。
+        """
+        assert UNVERIFIED_COMMANDS == frozenset({
+            "defrost", "wheelHeat", "seatHeat", "ventSeat",
+            "sunshade", "sentinel",
+            "tripPlan", "closeWindows", "carFinder", "refresh",
+        })
+
+    def test_unverified_commands_are_subset_of_command_map(self) -> None:
+        """未验证集合必须是 COMMAND_MAP 的子集，否则标记会失效。"""
+        assert UNVERIFIED_COMMANDS <= set(COMMAND_MAP)
+
+    def test_verified_commands_have_no_guessed_service_id(self) -> None:
+        """凡是引用 ServiceIDUnverified 的指令，都必须登记为未验证。"""
+        guessed = {
+            value
+            for name, value in vars(ServiceIDUnverified).items()
+            if name.isupper()
+        }
+        for command, (service_id, _key, _value) in COMMAND_MAP.items():
+            if service_id in guessed:
+                assert command in UNVERIFIED_COMMANDS, (
+                    f"{command} 使用了未验证 serviceId {service_id}，"
+                    "但未登记到 UNVERIFIED_COMMANDS"
+                )
+
+    def test_is_verified_command_rejects_unverified(self) -> None:
+        """`is_verified_command` 必须挡住所有未验证指令。"""
+        assert is_verified_command("lock")
+        assert is_verified_command("flash")
+        # 参数为推断值的三条也须挡住（serviceId 虽已验证）
+        assert not is_verified_command("closeWindows")
+        assert not is_verified_command("carFinder")
+        assert not is_verified_command("refresh")
+        for command in UNVERIFIED_COMMANDS:
+            assert not is_verified_command(command), f"{command} 未验证，不应判定为可下发"
+        assert not is_verified_command("launchMissiles")
+
+    def test_is_supported_semantics_unchanged(self) -> None:
+        """`is_supported_command` 语义不得收窄：未验证指令仍是「已知指令」。
+
+        现有逻辑（mock 放行、live 报「不支持的指令」）依赖该语义。
+        """
+        for command in UNVERIFIED_COMMANDS:
+            assert is_supported_command(command)
+        # 两者的差异恰好就是未验证集合
+        diff = {
+            c for c in COMMAND_MAP
+            if is_supported_command(c) and not is_verified_command(c)
+        }
+        assert diff == set(UNVERIFIED_COMMANDS)
 
 
 # MARK: - 服务商识别

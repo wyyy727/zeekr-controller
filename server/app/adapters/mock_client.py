@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from .base import ZeekrClient
+from .zeekr_signing import COMMAND_MAP
 
 MOCK_VIN = "L6TDEMOCK00000001"
 
@@ -211,11 +212,8 @@ class MockZeekrClient(ZeekrClient):
         params: dict[str, Any] | None = None,
         vin: str | None = None,
     ) -> dict[str, Any]:
-        known = {
-            "lock", "unlock", "climateOn", "climateOff",
-            "flash", "honk", "chargeStart", "chargeStop",
-        }
-        if command not in known:
+        # 指令白名单直接取自 COMMAND_MAP，避免两处定义漂移
+        if command not in COMMAND_MAP:
             return {"success": False, "message": f"不支持的指令: {command}", "command": command}
         return {
             "success": True,
