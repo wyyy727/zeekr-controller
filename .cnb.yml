@@ -20,6 +20,7 @@ main:
           script: bash ci/typecheck.sh
         - name: 结果
           script: echo "✅ Linux Swift 6.1 类型检查通过"
+$:
   api_trigger:
     - name: swift-typecheck
       runner:
