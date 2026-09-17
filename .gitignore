@@ -1,51 +1,55 @@
-# === 敏感信息（绝不入库）===
+# ─────────── 敏感信息（绝不提交）───────────
 .env
 *.env
-session.json
+!.env.example
 zeekr_secrets.json
-secrets*.json
-*.apk
+**/session.json
 
-# === Python ===
+# ─────────── 数据 ───────────
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+server/.server.pid
+server/.server.log
+
+# ─────────── Python ───────────
 __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
 venv/
-env/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 
-# === 数据 ===
-data/
-**/data/*.db
-**/data/*.db-wal
-**/data/*.db-shm
-**/data/*.csv
-**/data/*.xlsx
-!**/data/.gitkeep
-
-# === iOS / Xcode ===
-build/
-DerivedData/
-*.xcuserstate
+# ─────────── Xcode / Swift ───────────
 xcuserdata/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+DerivedData/
+build/
 *.moved-aside
 *.hmap
 *.ipa
 *.dSYM.zip
 *.dSYM
-Pods/
 .swiftpm/
 
-# === 编辑器 ===
+# 由 XcodeGen 生成，不入库（可用 project.yml 复现）
+ZeekrDash.xcodeproj/
+
+# ─────────── 编辑器 / 系统 ───────────
 .DS_Store
+Thumbs.db
 .idea/
 .vscode/
 *.swp
-*~
 
-# === 日志 ===
-*.log
-logs/
+# ─────────── 测试账单样本 ───────────
+*.csv
+!tests/fixtures/*.csv
+
+.server.pid
+.server.log

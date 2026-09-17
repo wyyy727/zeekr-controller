@@ -8,6 +8,7 @@
 import SwiftUI
 
 @Observable
+@MainActor
 final class AppStore {
 
     static let shared = AppStore(settings: SettingsStore.shared)
@@ -34,7 +35,6 @@ final class AppStore {
 
     // MARK: - 手动刷新
 
-    @MainActor
     func refresh() async {
         isLoading = true
         errorMessage = nil
@@ -73,13 +73,11 @@ final class AppStore {
     }
 
     /// 当前轮询间隔：充电中 60 秒，否则按设置（分钟）
-    @MainActor
     private func currentInterval() -> TimeInterval {
         isCharging ? 60 : settings.pollIntervalMinutes * 60
     }
 
     /// 下发车控指令（供车控面板调用）
-    @MainActor
     func send(command: VehicleCommand) async -> CommandResult? {
         do {
             let result: CommandResult = try await APIClient.shared.post(

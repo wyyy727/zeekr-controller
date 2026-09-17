@@ -1,198 +1,268 @@
-# ZeekrDash · 极氪车主自建看板
+# ZeekrDash
 
-为 **2026 款焕新极氪 001** 车主打造的 iOS 原生应用 + 本地服务端。
+> 极氪 001 车主自建车控看板 —— 补齐官方 App 缺失的**能耗统计**与**行程历史**，并把分散在各充电服务商的消费记录汇总起来。
 
-弥补官方 App 在**行程记录**、**能耗统计**、**跨服务商充电消费汇总**上的缺失。
-
----
-
-## 一、项目构成
-
-```
-zeekr-dashboard/
-├── ZeekrDash/          # iOS 原生应用（SwiftUI）
-│   ├── App/            #   入口与根视图
-│   ├── Core/
-│   │   ├── Models/     #   数据模型（双端契约）
-│   │   ├── Network/    #   网络层
-│   │   ├── Store/      #   状态管理
-│   │   ├── Theme/      #   中国传统色设计系统
-│   │   └── Components/ #   复用组件
-│   └── Features/       #   功能页（车况/行程/充电/设置）
-│
-└── server/             # 本地服务端（Python + FastAPI）
-    └── app/
-        ├── adapters/   #   极氪国区接入层（三网关签名）
-        ├── bills/      #   账单解析与服务商识别
-        ├── api/        #   REST 接口
-        └── core/       #   配置与存储
-```
-
-### 为什么需要服务端？
-
-极氪的密钥提取工具链**依赖安卓 APK 逆向**（要用 ADB 从安卓设备拉取 APK，提取 HMAC 密钥与 AES 密钥）。iOS 端无法完成这一步。
-
-因此架构设计为：
-
-> **Python 服务端负责国区登录与数据采集 → iOS App 作为客户端消费数据**
-
-服务端可运行在 Mac 或家中常开设备（NAS / 树莓派等）。
+**目标车型**：2026 款焕新极氪 001　**目标平台**：iOS 17+
 
 ---
 
-## 二、快速开始
+## 为什么做这个
 
-### 2.1 启动服务端
+极氪官方 App 在数据展示上存在明显缺口：
+
+- ❌ 不显示**能耗**数据
+- ❌ 不显示**行程路径历史**
+- ❌ 充电消费分散在极氪、特来电、星星充电、国家电网等多个渠道，无法统一查看
+
+本项目通过社区逆向成果对接极氪国区网关，把数据补齐，并以 iOS 原生 App 呈现。
+
+> **免责声明**：本项目基于社区公开的逆向研究成果，与极氪 / 吉利 / ECARX **无任何关联**。
+> 仅供个人自用学习。逆向与接口调用可能违反服务条款或当地法律，**请自行评估风险**。
+> 密钥、账号、令牌**绝不入库**——请务必遵守。
+
+---
+
+## 架构
+
+```
+┌─────────────────────┐         ┌──────────────────────────────┐
+│   iOS App           │  HTTP   │   Python 服务（本地）          │
+│   SwiftUI           │ ──────> │   FastAPI                    │
+│                     │         │                              │
+│  · 车况卡片          │         │  · 极氪国区网关对接            │
+│  · 行程能耗图        │         │    GW1 短信登录                │
+│  · 充电消费报表      │         │    GW2 数据/指令               │
+│  · 车控面板          │         │    GW3 最新状态/远程控制        │
+│  · 设置              │         │  · 账单解析与归集              │
+└─────────────────────┘         │  · SQLite 存储                │
+                                └──────────────────────────────┘
+```
+
+**为什么需要 Python 服务？**
+
+因为你是 iOS 用户，而极氪的密钥提取工具链**依赖安卓 APK**（要从 App 里逆向出 HMAC 密钥、AES 密钥）。
+iOS 端拿不到这些，所以把签名与加密逻辑放在 Python 侧，iOS App 只做数据消费。
+
+---
+
+## 快速开始
+
+### 第一步：准备密钥（一次性）
+
+密钥是整个项目的前置门槛，需要**一台安卓设备或模拟器**。
+
+1. 从安卓设备拉取极氪 App 的 APK：
+
+   ```bash
+   # 大多数市场的包名（国区同此）
+   adb shell pm path com.zeekr.global
+   adb pull <base.apk 路径> base.apk
+   adb pull <split_config.arm64_v8a.apk 路径> arm64.apk
+   ```
+
+2. 用 [wysie/zeekr_key_extractor](https://github.com/wysie/zeekr_key_extractor) 提取：
+
+   ```bash
+   pip install capstone pyelftools
+   python zeekr_extract_secrets.py base.apk arm64.apk --region CN
+   ```
+
+   会生成 `zeekr_secrets.json`，内含 6 个密钥。
+
+3. **重要**：新建一个**极氪子账号**并把车辆共享给它。
+   极氪每个账号只保留一个会话，用主账号会导致手机 App 被踢下线。
+
+### 第二步：启动服务
 
 ```bash
 cd server
 pip install -r requirements.txt
 
-# 无凭据也能跑：自动进入模拟数据模式
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8765
+# 配置密钥
+cd .. && cp .env.example .env
+# 编辑 .env，填入手机号和 6 个密钥
+
+# 启动
+./scripts/server.sh start
 ```
 
-访问 <http://localhost:8765/docs> 查看接口文档。
+访问 <http://localhost:8765/docs> 可以看到接口文档。
 
-### 2.2 接入真实车辆数据
-
-需要先从**安卓设备**提取 6 个密钥：
+### 第三步：编译 iOS App
 
 ```bash
-# 1. 拉取极氪 App 的 APK
-adb shell pm path com.zeekr.app
-adb pull <base.apk 路径> zeekr_base.apk
-adb pull <split_config.arm64_v8a.apk 路径> zeekr_arm64.apk
+# 安装 XcodeGen（用于生成工程文件）
+brew install xcodegen
 
-# 2. 用社区工具提取（--region CN）
-python zeekr_extract_secrets.py zeekr_base.apk zeekr_arm64.apk --region CN
-```
+# 生成 Xcode 工程
+xcodegen generate
 
-> 提取工具：[wysie/zeekr_key_extractor](https://github.com/wysie/zeekr_key_extractor)
-
-然后把密钥写入环境变量：
-
-```bash
-export ZEEKR_PHONE=13800138000
-export ZEEKR_HMAC_ACCESS_KEY="..."
-export ZEEKR_HMAC_SECRET_KEY="..."
-export ZEEKR_PASSWORD_PUBLIC_KEY="..."
-export ZEEKR_PROD_SECRET="..."
-export ZEEKR_VIN_KEY="..."
-export ZEEKR_VIN_IV="..."
-
-# 车控指令总开关（默认关闭，只读模式）
-export ALLOW_COMMANDS=true
-
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8765
-```
-
-服务启动后，在 iOS App 的「设置」里输入手机号，收短信验证码即可完成登录。
-
-### 2.3 运行 iOS App
-
-```bash
+# 打开
 open ZeekrDash.xcodeproj
 ```
 
-用 Xcode 自签安装到自己的 iPhone：
+1. 在 Xcode 中：**Signing & Capabilities** → 选择你的 Apple ID Team
+2. 连接 iPhone，选择设备，点 **Run**
+3. 手机端：**设置 → 通用 → VPN与设备管理** → 信任你的开发者证书
 
-1. 在 Xcode 中登录 Apple ID（免费账号即可）
-2. 修改 Bundle Identifier 为唯一值
-3. 选择自己的设备作为运行目标，点运行
-4. 首次运行需在 iPhone「设置 → 通用 → VPN与设备管理」中信任开发者证书
+### 第四步：连接服务
 
-> **免费账号签名的有效期是 7 天**，到期后需重新运行一次 Xcode 签名。
+打开 App → 设置 → 填入服务地址：
 
----
+- **模拟器**：`http://localhost:8765`
+- **真机**：`http://<你电脑的局域网IP>:8765`
 
-## 三、功能一览
-
-| 模块 | 能力 |
-|---|---|
-| **车况** | 电量环形进度、续航、总里程、四轮胎压、门窗状态、充电状态（功率/预计充满）、快捷车控 |
-| **行程** | 行程列表（时间/距离/能耗/起终点）、能耗趋势图（7/30/90 天） |
-| **充电** | 跨服务商消费汇总、按服务商/月份统计图、消费明细、账单导入 |
-| **设置** | 服务端地址、极氪账号登录、轮询间隔、车控总开关、连接诊断 |
-
-### 充电消费汇总怎么用
-
-1. 从**支付宝**导出账单：`我的 → 账单 → 开具交易流水证明 → 个人对账`（CSV 格式）
-2. 从**微信**导出账单：`我 → 服务 → 钱包 → 账单 → 常见问题 → 下载账单`（Excel/CSV 格式）
-3. 在 App「充电」页点导入，选择导出的文件
-
-系统会自动识别充电消费并按服务商归类，跨平台去重。
-
-> **注意**：微信账单单次最多导出 **90 天**，历史数据需分批导出后依次导入。
+> 真机需要手机与电脑在**同一 WiFi**下。
 
 ---
 
-## 四、数据源与容错
+## 功能
 
-服务端有两种数据源，自动切换：
-
-| 数据源 | 触发条件 | 用途 |
+| 模块 | 内容 | 状态 |
 |---|---|---|
-| `MockZeekrClient` | 未配置密钥 / 显式指定 | 演示 UI、联调、测试 |
-| `LiveZeekrClient` | 密钥配置齐全 | 真实车辆数据 |
-
-可强制指定：`export DATA_SOURCE=mock`（或 `live`）。
-
-### 极氪国区三网关
-
-| 网关 | 地址 | 签名 | 用途 |
-|---|---|---|---|
-| GW1 | `api-gw-toc.zeekrlife.com` | SHA1 排序签名 | 短信验证码、手机号登录 |
-| GW2 | `api.zeekrline.com` | HMAC-SHA1 | 车辆列表、状态（回退通道） |
-| GW3 | `snc-tsp-api.zeekrlife.com` | HMAC-SHA256 + AES 加密 VIN | 最新状态、远程控制 |
-
-读取优先走 GW3，被拒（`079001`）自动回退 GW2。
+| **车况** | 电量环形图、续航、总里程、四轮胎压、门锁状态、充电状态 | ✅ |
+| **车控** | 锁车/解锁、空调、闪灯、鸣笛、充电控制 | ✅ |
+| **行程** | 行程列表（时间/距离/能耗/起终点）、能耗趋势图（7/30/90 天） | ✅ |
+| **充电** | 跨服务商消费汇总、服务商分布、月度趋势、明细、账单导入 | ✅ |
+| **设置** | 服务地址、极氪账号、轮询间隔、车控总开关、连接诊断 | ✅ |
+| **电费测算** | 动态电价、智能充电、电费预算 | ⏸️ 仅前台占位 |
 
 ---
 
-## 五、重要提示
+## 充电消费汇总怎么用
 
-### 账号安全
+支持**支付宝**和**微信**两个渠道的账单导入。
 
-> **请使用独立的极氪子账号并共享车辆，不要用主账号。**
+### 导出账单
 
-极氪每个账号**只保留一个会话**，任何新登录都会让上一个令牌失效。用主账号会导致手机 App 被挤下线。
+**微信**
+1. 微信 →【我】→【服务】→【钱包】→ 右上角【账单】→【常见问题】→【下载账单】
+2. 用途选「**用于个人对账**」（导出 Excel 格式）
+3. **单次最长 90 天**，历史需分多次申请
+4. 填邮箱 → 约 5 分钟收到加密 ZIP
 
-### 合规声明
+**支付宝**
+1. 支付宝 →【我的】→【账单】→ 右上角筛选 → 账单导出
+2. 同样支持 CSV，按时间范围分批导出
 
-- 本项目基于**社区公开的逆向研究成果**，与极氪 / 吉利**无任何关联**
-- 逆向 APK 在部分司法辖区可能受法律限制，**请自行评估**
-- 仅供**个人自用学习**，不得用于商业用途或访问他人车辆
-- 车辆远程控制存在风险，请确保在安全场景下使用
+### 导入
 
-### 已知限制
+App → 充电页 → 导入账单 → 选择 CSV 文件。系统会自动：
 
-- 部分车型的 GW3 接口需要额外提供 `X-VIN` 令牌（从 App 抓包获取）
-- 极氪 App 升级可能导致密钥失效，需重新提取
-- 行程数据依赖网关支持，部分车型/固件可能返回空
+- 识别**服务商**（极氪极充 / 特来电 / 星星充电 / 国家电网 / e充电）
+- **跨平台去重**（同一笔消费不会重复计入）
+- 自动排除「充电宝」「充电线」等非充电消费
+
+### 识别不准怎么办
+
+关键词匹配无法保证 100% 准确。如果发现误判，编辑：
+
+`server/app/bills/providers.py`
+
+```python
+# 人工修正表：商户名 → 服务商
+MANUAL_OVERRIDES = {
+    "某某充电站": "teld",
+}
+```
 
 ---
 
-## 六、技术栈
+## 常见问题
 
-| 端 | 技术 |
-|---|---|
-| iOS | SwiftUI、Swift Charts、async/await、iOS 17+ |
-| 服务端 | Python 3.11+、FastAPI、httpx、pycryptodome |
-| 存储 | SQLite |
+### 提示「The account is currently logged in elsewhere」
 
-**设计原则**：零第三方前端依赖，代码精简，启动快速。
+极氪 SNCTSP 网关**每个账号只保留一个会话**，新登录会顶掉旧令牌。
+
+- 使用**独立子账号**并共享车辆 ← 推荐做法
+- 服务端遇到此错误会自动重新登录并重试一次
+
+### 车控指令点了没反应
+
+1. 检查 `.env` 里的 `ALLOW_COMMANDS=true`（默认关闭）
+2. 确认 App 设置里的「允许下发控制指令」是开启的
+3. **重要**：HA/服务里配置的手机号，必须和手机上能正常控车的账号**是同一个**
+
+### 实时状态拿不到 / 077001 接口未被授权
+
+国区网关有两代登录接口，发的令牌权限范围不同：
+
+- 旧令牌（`identityType: 5`）只能读车辆列表
+- 新令牌（`identityType: 10` + `tspCode`）才能读状态和下发指令
+
+服务端会在遇到 `079001` 时自动尝试新平台登录，成功后换用新令牌。
+如果持续失败，多半是**账号与该车没有绑定控制权限**。
+
+### 密钥会失效吗
+
+会。极氪 App 升级可能改变密钥的存储方式或轮换密钥。
+
+- 关注 [zeekr_key_extractor](https://github.com/wysie/zeekr_key_extractor) 的版本兼容表
+- 失效后按第一步重新提取即可
 
 ---
 
-## 七、参考项目
+## 项目结构
 
-- [RexzeLu/zeekr_ha](https://github.com/RexzeLu/zeekr_ha) — 国区 +86 短信登录方案（本项目主要参考）
-- [Fryyyyy/zeekr_ev_api](https://github.com/Fryyyyy/zeekr_ev_api) — Python API 库
-- [wysie/zeekr_key_extractor](https://github.com/wysie/zeekr_key_extractor) — 密钥提取工具
-- [solderer-de/ioBroker.zeekr](https://github.com/solderer-de/ioBroker.zeekr) — 能源成本模型参考
-- [borconi/openzeekr](https://github.com/openzeekr/borconi) — 命令 ID 逆向研究
+```
+zeekr-dashboard/
+├── ZeekrDash/                  # iOS App（SwiftUI）
+│   ├── App/                    # 入口与根视图
+│   ├── Core/
+│   │   ├── Models/             # 数据模型（双端契约）
+│   │   ├── Network/            # 网络层
+│   │   ├── Store/              # 状态管理
+│   │   ├── Theme/              # 中国传统色设计系统
+│   │   └── Components/         # 复用组件
+│   └── Features/               # 功能页
+│       ├── Dashboard/          # 车况
+│       ├── Trips/              # 行程
+│       ├── Charges/            # 充电
+│       ├── Controls/           # 车控
+│       └── Settings/           # 设置
+│
+├── server/                     # 服务端（FastAPI）
+│   ├── app/
+│   │   ├── adapters/           # 极氪网关适配层
+│   │   ├── api/                # 接口路由
+│   │   ├── bills/              # 账单解析与归集
+│   │   └── core/               # 配置与存储
+│   └── tests/                  # 测试
+│
+├── scripts/server.sh           # 服务管理脚本
+├── project.yml                 # XcodeGen 工程描述
+└── .env.example                # 环境变量模板
+```
+
+---
+
+## 设计说明
+
+### 配色
+
+采用**中国传统色**体系（参考 [zhongguose.com](https://zhongguose.com/)）：
+
+| 用途 | 色名 | 色值 |
+|---|---|---|
+| 主色 | 天青 | `#7FB3A8` |
+| 主色（深） | 天青·深 | `#5D8A7E` |
+| 强调 | 藤黄 | `#FFB61E` |
+| 告警 | 朱砂 | `#E23A28` |
+| 充电 | 靛青 | `#177CB0` |
+| 背景 | 月白 | `#EEF7F2` |
+| 卡片 | 象牙白 | `#FFFBF0` |
+| 文字 | 墨 | `#252726` |
+
+### 性能取舍
+
+- iOS 端**零第三方依赖**，图表用系统 Swift Charts
+- 服务端 SQLite 单文件，无外部数据库
+- 轮询自适应：充电中 60 秒，空闲 5 分钟
+
+---
 
 ## 许可
 
 MIT
+
+本项目与极氪、吉利、ECARX 无任何关联。使用者需自行承担合规与账号风险。

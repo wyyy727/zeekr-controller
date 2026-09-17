@@ -1,0 +1,52 @@
+# XcodeGen 工程描述文件
+#
+# 用途：从纯文本生成 .xcodeproj，避免手写 pbxproj。
+#
+# 使用方式：
+#   1. 安装 XcodeGen： brew install xcodegen
+#   2. 在项目根目录执行： xcodegen generate
+#   3. 打开生成的 ZeekrDash.xcodeproj
+#
+# 如果你不想装 XcodeGen，也可以直接在 Xcode 里新建一个 iOS App 工程，
+# 然后把 ZeekrDash/ 目录下的所有 .swift 拖进去（勾选 Copy items if needed）。
+
+name: ZeekrDash
+options:
+  bundleIdPrefix: com.zeekrdash
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    DEVELOPMENT_TEAM: ""            # 填入你的 Apple ID Team ID（自签用）
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    SWIFT_STRICT_CONCURRENCY: minimal
+
+targets:
+  ZeekrDash:
+    type: application
+    platform: iOS
+    sources:
+      - path: ZeekrDash
+        excludes:
+          - "**/*.md"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.zeekrdash.app
+        PRODUCT_NAME: ZeekrDash
+        INFOPLIST_KEY_CFBundleDisplayName: 极氪看板
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        # 允许访问本地网络的明文 HTTP（连接自有 Python 服务）
+        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking: YES
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: 用于连接您本机的 ZeekrDash 数据服务，读取车辆状态与充电记录
+        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: 用于在地图上显示车辆当前位置
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1"   # 仅 iPhone

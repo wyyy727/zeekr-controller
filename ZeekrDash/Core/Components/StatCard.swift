@@ -12,13 +12,22 @@ struct StatCard<Content: View>: View {
     @Environment(\.colorScheme) private var scheme
 
     let title: String
+    /// 可选的 SF Symbols 图标
+    var icon: String?
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.footnote)
-                .foregroundStyle(Theme.textSecondary(scheme))
+            HStack(spacing: 4) {
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary(scheme))
+                }
+                Text(title)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textSecondary(scheme))
+            }
 
             content()
         }

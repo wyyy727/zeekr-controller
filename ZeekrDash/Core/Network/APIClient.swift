@@ -88,6 +88,17 @@ final class APIClient {
         return try await run(request)
     }
 
+    // MARK: - 通用 DELETE
+
+    func delete<T: Codable>(_ path: String) async throws -> T {
+        guard let url = URL(string: normalizedBaseURL + path) else { throw ApiError.invalidURL }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+
+        return try await run(request)
+    }
+
     // MARK: - 文件上传（账单导入）
 
     /// multipart/form-data 上传账单文件
