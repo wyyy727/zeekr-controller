@@ -32,3 +32,15 @@ $:
           script: bash ci/typecheck.sh
         - name: 结果
           script: echo "✅ Linux Swift 6.1 类型检查通过"
+
+  web_trigger:
+    - name: swift-typecheck
+      runner:
+        cpus: 8
+      docker:
+        image: swift:6.1-noble
+      stages:
+        - name: Swift 语法与类型检查
+          script: bash ci/typecheck.sh
+        - name: 结果
+          script: echo "✅ Linux Swift 6.1 类型检查通过"
