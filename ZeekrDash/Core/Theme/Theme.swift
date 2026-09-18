@@ -58,6 +58,14 @@ enum ChineseColor {
     static let yanZhi = Color(hex: 0xC0392B)
     /// 妃色 —— 柔和红
     static let feiSe = Color(hex: 0xF6B8B0)
+    /// 珊瑚 —— 「开启中」状态色（车控按钮）
+    ///
+    /// 与朱砂告警红同属红粉系，刻意用明度拉开差距，避免「按钮开着」
+    /// 被读成「按钮异常」。这是深色模式用的本源色；浅色模式需加深
+    /// （对比度 1.91 撑不住浅玻璃底），故经由 `Theme.coral(_:)` 取值。
+    static let shanHu = Color(hex: 0xFA9894)
+    /// 珊瑚（浅色模式加深版）—— 对比度 4.25，压得住浅色玻璃底
+    static let shanHuDeep = Color(hex: 0xC9483F)
 
     // MARK: 黄色系（强调 / 充电状态）
     /// 藤黄 —— 强调色
@@ -125,6 +133,16 @@ enum Theme {
     }
     static func accentSecondary(_ scheme: ColorScheme) -> Color {
         scheme == .dark ? ChineseColor.qunQing : ChineseColor.dianLan
+    }
+
+    // MARK: 状态色（车控按钮的「开启中」）
+    /// 珊瑚 —— 车控按钮开启态的状态色，随明暗取两值。
+    ///
+    /// 浅色模式必须用加深版：本源色 #FA9894 在浅玻璃底上对比度仅 1.91，
+    /// 图标线条会发飘；加深到 #C9483F 后为 4.25。深色模式下本源色
+    /// 本身就是 6.68，直接用即可。
+    static func coral(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? ChineseColor.shanHu : ChineseColor.shanHuDeep
     }
 
     // MARK: 分隔线 / 描边

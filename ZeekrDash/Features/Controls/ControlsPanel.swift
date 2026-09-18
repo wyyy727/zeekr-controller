@@ -13,11 +13,21 @@
 //  ① 按压下沉 scale(0.93) + 图标下沉
 //  ② 弹性回弹 .spring(response: 0.3, dampingFraction: 0.6)
 //  ③ 下发中转圈 loading，期间锁定重复点击
-//  ④ 成功：青碧色对勾遮罩 + 对勾从 0.7 弹出
+//  ④ 成功：图标变青碧 + 弹跳 0.72→1.16→1 + 外圈青碧脉冲
 //  ⑤ 成功：按钮轻弹 0.93 → 1.05 → 1
-//  ⑥ 失败：朱砂色 + 左右 5pt 抖动
+//  ⑥ 失败：图标变朱砂色 + 左右 5pt 抖动
 //  ⑦ Toast 中文回执
 //  ⑧ 尊重 accessibilityReduceMotion
+//
+//  颜色语言（与预览页 preview/index.html 严格对齐）：
+//  四种状态 —— 关闭 / 开启 / 成功 / 失败 —— 的**按钮底色始终不变**，
+//  一律是普通玻璃。状态只靠**图标着色**（+ 开启态文字加粗）传达，
+//  不再有任何整块铺色。这是刻意为之：整块变色在 3 列密集网格里过重，
+//  也会把玻璃质感盖掉。
+//    · 关闭 → 墨色图标
+//    · 开启 → 珊瑚色图标 + 辉光，文字加粗
+//    · 成功 → 青碧色图标 + 弹跳 + 脉冲圈
+//    · 失败 → 朱砂色图标 + 抖动
 //
 //  安全设计：车控需要在「设置」中显式开启总开关，关闭时按钮禁用并给出说明 —— 避免误触。
 //
@@ -33,7 +43,7 @@ struct ControlsPanel: View {
 
     /// 正在下发的按钮（用于转圈与锁定重复点击）
     @State private var pending: ControlAction?
-    /// 刚成功的按钮（对勾遮罩 + 轻弹）
+    /// 刚成功的按钮（图标青碧 + 弹跳脉冲 + 轻弹）
     @State private var succeeded: ControlAction?
     /// 刚失败的按钮（朱砂 + 抖动）
     @State private var failed: ControlAction?
@@ -317,7 +327,7 @@ struct ControlsPanel: View {
         pending = nil
 
         if result?.success == true {
-            // ④+⑤ 成功：对勾遮罩 0.7 弹出 + 按钮轻弹，1 秒后复位
+            // ④+⑤ 成功：图标变青碧 + 弹跳脉冲 + 按钮轻弹，1 秒后复位
             playSuccess(on: action)
             showToast(result?.message ?? "\(action.label)已下发")
         } else {
@@ -446,8 +456,11 @@ private struct ControlButton: View {
     let onTap: () -> Void
 
     @Environment(\.colorScheme) private var scheme
-    /// ④ 对勾从 0.7 弹出
-    @State private var checkShown = false
+    /// 成功时图标弹跳的当前缩放（对应预览页 ctrlIcoPop 的 0.72 → 1.16 → 1）
+    @State private var iconPopScale: CGFloat = 1
+    /// 成功时外圈脉冲圈的缩放与透明度（对应 ctrlPulse）
+    @State private var pulseScale: CGFloat = 0.55
+    @State private var pulseOpacity: Double = 0
 
     private var minHeight: CGFloat {
         action.kind == .scene ? 74 : 82
@@ -455,6 +468,70 @@ private struct ControlButton: View {
 
     private var iconSize: CGFloat {
         action.kind == .scene ? 20 : 22
+    }
+
+    // MARK: 图标着色（状态全靠这里传达）
+
+    /// 图标色优先级：失败 > 成功 > 禁用 > 开启 > 常规。
+    ///
+    /// 失败排在成功之前 —— 与预览页的覆盖顺序一致（网页 catch 分支会同时
+    /// 加 `done` 与 `fail` 两个类，靠 `.ctrl.done:not(.fail)` 让失败胜出）。
+    /// iOS 侧两个状态目前由 `trigger` 保证互斥，但显式写死优先级，
+    /// 不再依赖「另一个变量恰好为 nil」这种隐式前提。
+    private var iconTint: Color {
+        if isFailed { return failureColor }
+        if isSucceeded { return successColor }
+        if !isEnabled { return Theme.textTertiary(scheme) }
+        if isOn { return Theme.coral(scheme) }
+        return Theme.textPrimary(scheme)
+    }
+
+    /// 文字色始终为主文字色，不随状态变化（对齐预览页 `.ctrl { color: var(--text-1) }`）。
+    /// 只有图标着色，文字保持稳定的可读性。
+    private var titleColor: Color {
+        isEnabled ? Theme.textPrimary(scheme) : Theme.textTertiary(scheme)
+    }
+
+    /// 开启态图标外加一层珊瑚辉光
+    private var iconGlow: Color? {
+        guard isEnabled, isOn, !isSucceeded, !isFailed else { return nil }
+        return Theme.coral(scheme).opacity(0.45)
+    }
+
+    private var subColor: Color {
+        isOn ? Theme.textSecondary(scheme) : Theme.textTertiary(scheme)
+    }
+
+    /// 开启态文字加粗，与图标的重量感对齐
+    private var labelWeight: Font.Weight {
+        isOn ? .semibold : .regular
+    }
+
+    /// 成功图标弹跳：0.72 → 1.16 → 1
+    private func playIconPop() {
+        // ⑧ 减弱动效时只呈现静态着色，不播动画
+        guard !reduceMotion else {
+            iconPopScale = 1
+            pulseOpacity = 0
+            return
+        }
+
+        iconPopScale = 0.72
+        pulseScale = 0.55
+        pulseOpacity = 0.7
+
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) {
+            iconPopScale = 1.16
+            pulseScale = 1.05
+            pulseOpacity = 0
+        }
+
+        Task {
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                iconPopScale = 1
+            }
+        }
     }
 
     var body: some View {
@@ -465,8 +542,13 @@ private struct ControlButton: View {
                 ButtonContent(
                     action: action,
                     iconSize: iconSize,
-                    foreground: foreground,
+                    foreground: iconTint,
+                    titleColor: titleColor,
                     subColor: subColor,
+                    labelWeight: labelWeight,
+                    glowColor: iconGlow,
+                    // 成功时图标弹一下（与 ctrlIcoPop 同曲线）
+                    iconScale: isSucceeded ? iconPopScale : 1,
                     reduceMotion: reduceMotion
                 )
                 overlay
@@ -476,15 +558,6 @@ private struct ControlButton: View {
             .background(usesGlass ? Color.clear : background)
             .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
             .glassSurface(isGlass: usesGlass, shape: RoundedRectangle(cornerRadius: 13, style: .continuous))
-            .overlay {
-                if action.kind == .toggle && action.isOn {
-                    RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        .strokeBorder(
-                            ChineseColor.xiangYaBai.opacity(0.32),
-                            lineWidth: 1
-                        )
-                }
-            }
             .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
         }
         // ① 按压下沉由 ButtonStyle 提供，比手势更可靠且不影响点击命中
@@ -497,67 +570,64 @@ private struct ControlButton: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
         .accessibilityAddTraits(action.kind == .toggle && action.isOn ? [.isSelected] : [])
+        // 成功：开启图标弹跳 + 外圈脉冲；每次成功都重新播放
+        .onChange(of: isSucceeded) { _, succeeded in
+            guard succeeded else { return }
+            playIconPop()
+        }
     }
 
-    // MARK: 覆盖层（转圈 / 对勾）
+    // MARK: 覆盖层（转圈 / 成功脉冲圈）
 
+    /// 成功 / 失败不再铺遮罩 —— 颜色只落在图标上（对齐预览页：
+    /// 删掉了 `.ctrl-ok` 整块遮罩，改为图标着色 + 弹跳 + 脉冲圈）。
     @ViewBuilder
     private var overlay: some View {
-        if isSucceeded {
-            // ④ 对勾遮罩：青碧色铺满，对勾从 0.7 弹出
-            ZStack {
-                ChineseColor.qingBi
-
-                Image(systemName: "checkmark")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundStyle(ChineseColor.xiangYaBai)
-                    // 出场从 0.7 弹到 1
-                    .scaleEffect(checkShown ? 1 : 0.7)
-                    .opacity(checkShown ? 1 : 0)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // 每次成功都重新播放：isSucceeded 由 false 变 true 时重置
-            .onAppear {
-                checkShown = false
-                guard !reduceMotion else {
-                    checkShown = true
-                    return
-                }
-                withAnimation(.spring(response: 0.38, dampingFraction: 0.6)) {
-                    checkShown = true
-                }
-            }
-        } else if isPending {
+        if isPending {
             // ③ 下发转圈，遮罩同时锁定重复点击
             ZStack {
-                pendingMask
+                Theme.surfaceAlt(scheme).opacity(0.78)
 
                 ProgressView()
                     .controlSize(.small)
-                    .tint(action.isOn ? ChineseColor.xiangYaBai : Theme.accent(scheme))
+                    .tint(Theme.accent(scheme))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if isFailed {
-            // ⑥ 失败：朱砂色一闪，配合外层左右抖动
-            ChineseColor.zhuSha.opacity(0.16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if isSucceeded && !reduceMotion {
+            // ⑧ 成功后图标外圈扩散一圈青碧描边脉冲。
+            // 对齐预览页 `.ctrl.done:not(.fail) .ico::after`：
+            // 只用描边、不铺底，直径 40pt，从 0.55 扩到 1.05 并淡出。
+            //
+            // 纵向对齐：按钮内容 VStack 被 minHeight 居中，图标（含其
+            // .frame(height: 24) 与上方 12pt padding）中心约在 26pt 处；
+            // 圈顶到按钮顶 6pt 时圆心正好落在此处 —— 所以用 alignment: .top
+            // 加一个刚好一半直径的偏移，不用额外的 padding 硬凑。
+            Circle()
+                .strokeBorder(successColor, lineWidth: 2)
+                .frame(width: 40, height: 40)
+                .scaleEffect(pulseScale)
+                .opacity(pulseOpacity)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .padding(.top, 6)
+                .allowsHitTesting(false)
         }
-    }
-
-    private var pendingMask: Color {
-        if action.kind == .toggle && action.isOn {
-            return Theme.accent(scheme).opacity(0.78)
-        }
-        return Theme.surfaceAlt(scheme).opacity(0.78)
     }
 
     // MARK: 配色
 
-    /// 开关型开启态：主色实心玻璃块，保留透光感
+    /// 开关型且处于开启态
+    private var isOn: Bool {
+        action.kind == .toggle && action.isOn
+    }
+
+    /// 成功态图标色：青碧
+    private var successColor: Color { ChineseColor.qingBi }
+
+    /// 失败态图标色：朱砂（沿用现有告警色）
+    private var failureColor: Color { ChineseColor.zhuSha }
+
+    /// 按钮底色（仅在非玻璃时使用）
     private var background: Color {
-        if action.kind == .toggle && action.isOn {
-            return Theme.accent(scheme).opacity(0.88)
-        }
         if !isEnabled {
             return Theme.surfaceAlt(scheme).opacity(0.5)
         }
@@ -565,27 +635,11 @@ private struct ControlButton: View {
     }
 
     /// 车控按钮走液态玻璃（规格要求 `.regular.interactive()`）。
-    /// 开启态的开关型与禁用态除外 —— 前者已用主色实心块，
-    /// 后者要明确呈现「不可用」，玻璃的通透反而会削弱这个信号。
+    /// 禁用态除外 —— 需明确呈现「不可用」，玻璃的通透反而会削弱这个信号。
+    ///
+    /// 注：开启态不再整块铺主色，因此也一并走玻璃（原来被排除在外）。
     private var usesGlass: Bool {
-        isEnabled && !(action.kind == .toggle && action.isOn)
-    }
-
-    private var foreground: Color {
-        if !isEnabled {
-            return Theme.textTertiary(scheme)
-        }
-        if action.kind == .toggle && action.isOn {
-            return ChineseColor.xiangYaBai
-        }
-        return Theme.textPrimary(scheme)
-    }
-
-    private var subColor: Color {
-        if action.kind == .toggle && action.isOn {
-            return ChineseColor.xiangYaBai.opacity(0.78)
-        }
-        return Theme.textTertiary(scheme)
+        isEnabled
     }
 
     private var accessibilityText: String {
@@ -608,8 +662,17 @@ private struct ButtonContent: View {
 
     let action: ControlAction
     let iconSize: CGFloat
+    /// 图标色（成功 / 失败 / 开启 / 常规四态由父视图决定）
     let foreground: Color
+    /// 按钮主文字色：不随状态变化，始终是主文字色
+    let titleColor: Color
     let subColor: Color
+    /// 开启态文字加粗
+    let labelWeight: Font.Weight
+    /// 开启态图标外发光色；nil 表示不加
+    let glowColor: Color?
+    /// 成功态图标弹跳缩放
+    let iconScale: CGFloat
     let reduceMotion: Bool
 
     @Environment(\.controlIconPressed) private var iconPressed
@@ -621,7 +684,12 @@ private struct ButtonContent: View {
                     size: iconSize,
                     weight: action.kind == .toggle && action.isOn ? .semibold : .regular
                 ))
+                .foregroundStyle(foreground)
+                // 开启态外发光：线条显色面积小，靠辉光从玻璃底上「浮」起来
+                .shadow(color: glowColor ?? .clear, radius: 3)
                 .frame(height: 24)
+                // ⑧ 成功弹跳
+                .scaleEffect(iconScale)
                 // ① 图标同步下沉
                 .scaleEffect(iconPressed ? 0.86 : 1)
                 .offset(y: iconPressed ? 1 : 0)
@@ -633,7 +701,8 @@ private struct ButtonContent: View {
 
             VStack(spacing: 1) {
                 Text(action.label)
-                    .font(.system(size: 12))
+                    .font(.system(size: 12, weight: labelWeight))
+                    .foregroundStyle(titleColor)
                     .lineLimit(1)
 
                 if let sub = action.sub {
@@ -644,7 +713,6 @@ private struct ButtonContent: View {
                 }
             }
         }
-        .foregroundStyle(foreground)
         .padding(.horizontal, 6)
         .padding(.vertical, 12)
     }
