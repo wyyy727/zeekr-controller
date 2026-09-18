@@ -1,13 +1,7 @@
-name: Build iOS App (ad-hoc IPA)
+name: Build iOS App (unsigned IPA)
 
-# 用途：在没有 Mac 的情况下，借 GitHub 的 macOS runner 编译出 ad-hoc 签名 IPA。
-# ad-hoc 签名的 IPA 结构合法，可通过 AltStore / SideStore / Sideloadly 自签安装到 iPhone。
-#
-# 关于签名方式的选择（重要）：
-#   - CODE_SIGNING_REQUIRED=NO  → 完全跳过签名，产出的包缺少 _CodeSignature，
-#                                 自签工具会报 "Invalid file"，不可用。
-#   - CODE_SIGN_IDENTITY="-"    → ad-hoc 签名，Apple 官方支持，无需证书和开发者账号，
-#                                 会生成完整签名结构，自签工具可正常识别。✅ 本工作流采用此项
+# 用途：在没有 Mac 的情况下，借 GitHub 的 macOS runner 编译出未签名 IPA。
+# 未签名 IPA 可通过 AltStore / SideStore / Sideloadly 自签安装到 iPhone。
 #
 # ⚠️ 本工作流只做编译，不接触任何极氪密钥。仓库里也不含真实凭据。
 
@@ -53,88 +47,47 @@ jobs:
       - name: 生成 Xcode 工程
         run: xcodegen generate
 
-      - name: 编译（ad-hoc 签名）
+      - name: 编译（不签名）
         run: |
-          # 用 ad-hoc 签名（CODE_SIGN_IDENTITY="-"）。
-          # ad-hoc 是 Apple 官方支持的签名方式，不需要证书和开发者账号，
-          # 但会生成 _CodeSignature/ 目录，让产出的 IPA 结构合法。
-          #
-          # 为什么不能完全跳过签名：Sideloadly / AltStore 这类自签工具要求
-          # IPA 内部存在签名结构，否则会报 "Invalid file"。
           xcodebuild \
             -project ZeekrDash.xcodeproj \
             -scheme ZeekrDash \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
-            CODE_SIGN_IDENTITY="-" \
-            CODE_SIGNING_REQUIRED=YES \
-            CODE_SIGNING_ALLOWED=YES \
-            CODE_SIGN_ENTITLEMENTS="" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: 校验签名结构
-        run: |
-          set -e
-          APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" -maxdepth 1 | head -1)
-          echo "App 路径: $APP_PATH"
-          echo ""
-          echo "=== 检查签名文件是否生成 ==="
-          if [ -e "$APP_PATH/_CodeSignature/CodeResources" ]; then
-            echo "✅ _CodeSignature/CodeResources 存在"
-          else
-            echo "❌ 缺少 _CodeSignature/CodeResources —— IPA 可能无法被自签工具识别"
-            exit 1
-          fi
-          echo ""
-          echo "=== 签名详情 ==="
-          codesign -dv --verbose=4 "$APP_PATH" 2>&1 || true
-          echo ""
-          echo "=== 验证签名 ==="
-          codesign --verify --verbose=2 "$APP_PATH" 2>&1 || true
-
-      - name: 打包成 IPA
+      - name: 打包成未签名 IPA
         run: |
           set -e
           APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" -maxdepth 1 | head -1)
           echo "找到 App: $APP_PATH"
-          rm -rf Payload
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
-          # 去掉 Finder 附加属性，避免污染签名
-          xattr -cr Payload/ 2>/dev/null || true
-          zip -qry ZeekrDash-adhoc.ipa Payload
-          echo ""
-          echo "=== 产物校验 ==="
-          ls -lh ZeekrDash-adhoc.ipa
-          unzip -l ZeekrDash-adhoc.ipa
-          echo ""
-          unzip -l ZeekrDash-adhoc.ipa | grep -q "_CodeSignature" \
-            && echo "✅ IPA 内含签名结构，可被 Sideloadly / AltStore 识别" \
-            || echo "⚠️ 未检测到 _CodeSignature"
+          zip -qry ZeekrDash-unsigned.ipa Payload
+          ls -lh ZeekrDash-unsigned.ipa
 
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
-          name: ZeekrDash-adhoc-ipa
-          path: ZeekrDash-adhoc.ipa
+          name: ZeekrDash-unsigned-ipa
+          path: ZeekrDash-unsigned.ipa
           retention-days: 30
 
       - name: 输出摘要
         if: always()
         run: |
           echo "## 构建结果" >> $GITHUB_STEP_SUMMARY
-          if [ -f ZeekrDash-adhoc.ipa ]; then
-            SIZE=$(du -h ZeekrDash-adhoc.ipa | cut -f1)
+          if [ -f ZeekrDash-unsigned.ipa ]; then
+            SIZE=$(du -h ZeekrDash-unsigned.ipa | cut -f1)
             echo "✅ 构建成功，IPA 大小：$SIZE" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "在页面底部 **Artifacts** 处下载 \`ZeekrDash-adhoc-ipa\`。" >> $GITHUB_STEP_SUMMARY
+            echo "在页面底部 **Artifacts** 处下载 \`ZeekrDash-unsigned-ipa\`。" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "> **注意**：Artifact 下载得到的是 **zip 包**，必须先解压才能拿到 \`.ipa\` 文件。" >> $GITHUB_STEP_SUMMARY
-            echo "> 直接把 zip 改名成 .ipa 会导致 Sideloadly 报 \`Invalid file\`。" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "该 IPA 为 **ad-hoc 签名**（Apple 官方签名方式，非企业证书），" >> $GITHUB_STEP_SUMMARY
-            echo "已包含签名结构，可用 Sideloadly / AltStore / SideStore 重签后安装到 iPhone。" >> $GITHUB_STEP_SUMMARY
+            echo "该 IPA 未签名，需用 AltStore / SideStore / Sideloadly 自签后安装。" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ 构建失败，请查看上方日志。" >> $GITHUB_STEP_SUMMARY
           fi
