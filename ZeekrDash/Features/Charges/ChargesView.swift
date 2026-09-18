@@ -13,14 +13,15 @@ import UniformTypeIdentifiers
 struct ChargesView: View {
 
     @Environment(\.colorScheme) private var scheme
+    @Environment(AppStore.self) private var store
     @State private var model = ChargesViewModel()
     @State private var showImporter = false
     @State private var showClearConfirm = false
 
     var body: some View {
-        // 页面标题与底部导航重复，已移除；顶部只保留右上角「模拟数据」玻璃徽标
+        // 页面标题与底部导航重复，已移除；顶部右上角为数据来源徽标
         NavigationStack {
-            ScreenContainer(modeText: "模拟数据", trailingAccessory: { historyMenu }) {
+            ScreenContainer(modeText: store.modeBadgeText, trailingAccessory: { historyMenu }) {
                 if model.isLoading && model.summary == nil {
                     LoadingView(text: "正在加载消费数据")
                         .padding(.top, 60)

@@ -815,7 +815,8 @@ canvas { display: block; width: 100%; }
 <body>
 
 <header class="topbar">
-  <span class="badge-mode" id="modeBadge">预览</span>
+  <!-- 数据来源徽标：加载完成后由 syncModeBadge() 决定文案与显隐 -->
+  <span class="badge-mode hidden" id="modeBadge"></span>
 </header>
 
 <main class="wrap" id="view"></main>
@@ -855,11 +856,60 @@ canvas { display: block; width: 100%; }
 /* ═══════════════════════════════════════════════
    配置
    ═══════════════════════════════════════════════ */
-const API = (location.origin.startsWith('http') && location.port !== '5500')
-  ? location.origin
-  : 'http://localhost:8765';
 
-/* 演示模式：后端未接真车时，车控指令走本地模拟，保证动效链路可视 */
+/* 服务端地址来源：
+   ① URL 上显式指定 ?api=xxx 时优先使用（方便在不改代码的情况下切换后端）
+   ② 页面由自有服务端托管（非 5500 预览端口）时用同源地址
+   ③ 其余情况（本地 5500 预览、file:// 打开）回退到 localhost —— 即模拟数据 */
+const QUERY_API = new URLSearchParams(location.search).get('api');
+const API_SOURCE = QUERY_API
+  ? QUERY_API.trim()
+  : ((location.origin.startsWith('http') && location.port !== '5500')
+      ? location.origin
+      : 'http://localhost:8765');
+
+/* 判定地址形态 —— 必须与 iOS 端 EndpointResolver 给出完全一致的结论：
+   地址为空或指向本机回环地址 → 使用内置模拟数据，不请求后端；
+   配置了真实地址 → 先请求后端，失败才回落模拟数据并弹框提示。
+
+   两处容易与 Swift 走岔的边界，这里显式对齐（均为实测结论）：
+   · `http://[::1]:8080` —— Swift 的 URLComponents.host 会**保留**方括号
+     （返回 "[::1]"），Node 的 URL.hostname 同样保留，故回环名单里
+     两种写法都收，避免任何一侧漏判。
+   · `//localhost:8765` —— 没有 `scheme://` 前缀，Swift 的 hasScheme 判为
+     false，补成 `http:////localhost:8765` 后 host 为空（→ unset）；
+     这里同样把 `//` 开头的输入直接判为 unset，保证两边结论一致。 */
+function hasScheme(value) {
+  return /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value);
+}
+
+function resolveEndpointMode(raw) {
+  const value = String(raw ?? '').trim();
+  if (!value) return 'unset';                 // 未配置
+
+  // 以 `//` 开头的协议相对地址：Swift 侧 hasScheme 为 false，补成
+  // `http:////host` 后解析不出 host（→ unset）。这里显式对齐同一结论。
+  if (value.startsWith('//')) return 'unset';
+
+  const candidate = hasScheme(value) ? value : 'http://' + value;
+  let host = '';
+  try {
+    host = new URL(candidate).hostname;
+  } catch {
+    return 'unset';                            // 无法解析，按未配置处理
+  }
+  if (!host) return 'unset';
+
+  // 与 Swift 的回环名单保持一致（含带方括号的 IPv6 写法）
+  const loopback = ['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]'];
+  return loopback.includes(host.toLowerCase()) ? 'loopback' : 'remote';
+}
+
+const ENDPOINT_MODE = resolveEndpointMode(API_SOURCE);
+/* 根本不需要联网：未配置或指向本机时，直接用内置模拟数据 */
+const PREFERS_MOCK = (ENDPOINT_MODE === 'unset' || ENDPOINT_MODE === 'loopback');
+
+/* 演示模式：车控指令不发真实请求，本地模拟下发，保证动效链路可视 */
 const DEMO = true;
 
 const state = {
@@ -871,7 +921,8 @@ const state = {
   records: [],
   days: 30,
   health: null,
-  seeded: false,
+  /* 数据来源：mock（模拟）/ live（真实）/ offline（配置了真实地址但连不上） */
+  mode: PREFERS_MOCK ? 'mock' : 'live',
 };
 
 /* ═══════════════════════════════════════════════
@@ -1046,13 +1097,16 @@ const CTRL_LABELS = {
 };
 
 async function api(path, opts) {
+  // 模拟数据模式：不发起任何网络请求，交由调用方直接使用内置数据
+  if (PREFERS_MOCK) throw new Error('mock 模式：不访问网络');
+
   if (DEMO && path === '/api/vehicle/command') {
     const cmd = JSON.parse((opts && opts.body) || '{}').command;
     await new Promise((r) => setTimeout(r, 620));   // 模拟下发耗时
     applyDemoCommand(cmd);
     return { success: true, message: CTRL_LABELS[cmd] || '指令已下发' };
   }
-  const res = await fetch(API + path, opts);
+  const res = await fetch(API_SOURCE + path, opts);
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const json = await res.json();
   if (!json.success) throw new Error(json.error || '服务端返回失败');
@@ -1681,26 +1735,48 @@ function soonCard() {
    ═══════════════════════════════════════════════ */
 function renderSettings() {
   const h = state.health;
-  const online = !!h;
+
+  /* 状态文案按数据来源区分 —— 与徽标口径保持一致 */
+  const statusText = {
+    live:    '● 已连接',
+    offline: '● 后端不可达，已用模拟数据',
+    mock:    '● 模拟数据模式',
+  }[state.mode];
+
+  const statusColor = {
+    live:    'var(--qing-bi)',
+    offline: 'var(--zhu-sha)',
+    mock:    'var(--teng-huang)',
+  }[state.mode];
+
+  const sourceText = {
+    live:    '真实服务端',
+    offline: '本地模拟数据（后端不可达）',
+    mock:    '本地模拟数据',
+  }[state.mode];
 
   return `
     <div class="card">
       <div class="card-title">服务连接</div>
       <div class="mini-row" style="padding:5px 0">
         <span class="mini-label">服务地址</span>
-        <span class="mini-val" style="font-size:12px">${esc(API)}</span>
+        <span class="mini-val" style="font-size:12px">${esc(API_SOURCE)}</span>
+      </div>
+      <div class="mini-row" style="padding:5px 0">
+        <span class="mini-label">地址形态</span>
+        <span class="mini-val" style="font-size:12px">${ENDPOINT_MODE === 'remote'
+          ? '远程地址'
+          : (ENDPOINT_MODE === 'loopback' ? '本机地址' : '未配置')}</span>
       </div>
       <div class="mini-row" style="padding:5px 0">
         <span class="mini-label">连接状态</span>
-        <span class="mini-val" style="font-size:12px;color:${online ? 'var(--qing-bi)' : 'var(--zhu-sha)'}">
-          ${online ? '● 已连接' : '● 未连接'}
-        </span>
+        <span class="mini-val" style="font-size:12px;color:${statusColor}">${statusText}</span>
+      </div>
+      <div class="mini-row" style="padding:5px 0">
+        <span class="mini-label">数据来源</span>
+        <span class="mini-val" style="font-size:12px">${sourceText}</span>
       </div>
       ${h ? `
-      <div class="mini-row" style="padding:5px 0">
-        <span class="mini-label">数据模式</span>
-        <span class="mini-val" style="font-size:12px">${h.mode === 'mock' ? '模拟数据' : '真实接口'}</span>
-      </div>
       <div class="mini-row" style="padding:5px 0">
         <span class="mini-label">极氪账号</span>
         <span class="mini-val" style="font-size:12px">${h.configured ? '已配置' : '未配置'}</span>
@@ -1710,6 +1786,19 @@ function renderSettings() {
         <span class="mini-val" style="font-size:12px">${h.allowCommands ? '已开启' : '已禁用'}</span>
       </div>` : ''}
     </div>
+
+    ${state.mode !== 'live' ? `
+    <div class="card">
+      <div class="card-title">关于当前数据</div>
+      <div style="font-size:12px;color:var(--text-2);line-height:1.8">
+        ${state.mode === 'mock'
+          ? '服务地址未配置或指向本机，界面展示的是内置模拟数据，<b>不是真实车况</b>。'
+          : '服务地址已配置，但后端当前不可达，已暂时切换为模拟数据，<b>不是真实车况</b>。'}
+      </div>
+      <div style="font-size:11.5px;color:var(--text-3);margin-top:10px;line-height:1.6">
+        在地址后追加 <code>?api=http://你的服务端:8765</code> 可指定后端地址。
+      </div>
+    </div>` : ''}
 
     ${h && h.missingKeys && h.missingKeys.length ? `
     <div class="card">
@@ -1797,22 +1886,43 @@ function render() {
 state.loading = false;
 state.lastRefresh = null;
 
-/* 徽标：文本 + data-mode（驱动状态圆点配色） */
+/* 徽标：文本 + data-mode（驱动状态圆点配色）
+   真实数据无需标识，直接隐藏；只有模拟数据才显示 */
 function setModeBadge(text, mode) {
   const badge = $('#modeBadge');
   if (!badge) return;
+  if (!text) {
+    badge.classList.add('hidden');
+    badge.dataset.mode = mode || '';
+    return;
+  }
+  badge.classList.remove('hidden');
   badge.textContent = text;
   badge.dataset.mode = mode;
 }
 
+/* 按当前 state.mode 刷新徽标 */
+function syncModeBadge() {
+  switch (state.mode) {
+    case 'live':
+      setModeBadge('', 'live');                                   // 真实数据：不显示
+      break;
+    case 'offline':
+      setModeBadge('模拟数据 · 后端不可达', 'offline');
+      break;
+    default:
+      setModeBadge('模拟数据', 'mock');
+  }
+}
+
+/* 各加载器返回是否成功，供 loadAll 统一判定后端可用性 */
 async function loadHealth() {
   try {
     state.health = await api('/api/health');
-    const live = state.health.mode !== 'mock';
-    setModeBadge(live ? '真实数据' : '模拟数据', live ? 'live' : 'mock');
+    return true;
   } catch {
     state.health = null;
-    setModeBadge('未连接', 'offline');
+    return false;
   }
 }
 
@@ -1822,8 +1932,10 @@ async function loadStatus() {
     const d = new Date();
     state.lastRefresh = String(d.getHours()).padStart(2, '0') + ':' +
                        String(d.getMinutes()).padStart(2, '0');
+    return true;
   } catch (e) {
-    if (!state.seeded) console.warn('状态加载失败', e);
+    console.warn('状态加载失败', e);
+    return false;
   }
 }
 
@@ -1835,15 +1947,10 @@ async function loadTrips() {
     ]);
     state.trips = trips || [];
     state.trend = trend || [];
+    return true;
   } catch (e) {
     console.warn('行程加载失败', e);
-    if (state.seeded) {
-      state.trips = MOCK.trips;
-      state.trend = MOCK.trend.slice(-state.days);
-    } else {
-      state.trips = [];
-      state.trend = [];
-    }
+    return false;
   }
 }
 
@@ -1855,17 +1962,14 @@ async function loadCharges() {
     ]);
     state.summary = summary;
     state.records = records || [];
+    return true;
   } catch (e) {
     console.warn('充电数据加载失败', e);
-    if (!state.seeded) {
-      state.summary = null;
-      state.records = [];
-    }
+    return false;
   }
 }
 
 function seedMock() {
-  state.seeded = true;
   state.status = MOCK.status;
   state.trips = MOCK.trips;
   state.trend = MOCK.trend.slice(-state.days);
@@ -1875,19 +1979,55 @@ function seedMock() {
   const d = new Date();
   state.lastRefresh = String(d.getHours()).padStart(2, '0') + ':' +
                      String(d.getMinutes()).padStart(2, '0');
-  setModeBadge('模拟数据', 'mock');
 }
 
+/* 模拟数据模式提示：只在「配置了真实地址却连不上」时弹一次，
+   避免用户误以为界面上的是真实车况 */
+let fallbackNotified = false;
+function notifyFallback(reason) {
+  if (fallbackNotified) return;
+  fallbackNotified = true;
+  toast('连接服务端失败，已切换为模拟数据，当前展示的不是真实车况');
+  console.warn('[ZeekrDash] 后端不可达，已回落模拟数据', reason || '');
+}
+
+/* 并发保护：启动与 visibilitychange 可能同时触发，避免重复请求与状态抖动 */
+let loading = false;
+
 async function loadAll() {
+  if (loading) return;
+  loading = true;
   state.loading = true;
   render();
-  await Promise.all([loadHealth(), loadStatus(), loadTrips(), loadCharges()]);
-  // 预览/演示模式：服务端未连接，或服务端本身处于 mock 态时，
-  // 统一呈现贴近真车的演示数据；只有服务端切到 live（真实车机）才用真实数据。
-  const isLive = !!(state.health && state.health.mode === 'live');
-  if (!isLive) seedMock();
-  state.loading = false;
-  render();
+
+  try {
+    // ① 地址未配置或指向 localhost：按约定直接展示内置模拟数据，不请求后端
+    if (PREFERS_MOCK) {
+      seedMock();
+      state.mode = 'mock';
+      return;
+    }
+
+    // ② 配置了真实地址：并发请求，全量结果一起等
+    //    以「车辆状态 + 健康检查」是否都拿到作为后端可用的判据，
+    //    任一失败即视为不可达，回落模拟数据
+    const [statusOk, healthOk] = await Promise.all([loadStatus(), loadHealth()]);
+    await Promise.all([loadTrips(), loadCharges()]);
+
+    if (statusOk && healthOk) {
+      state.mode = 'live';
+      fallbackNotified = false;
+    } else {
+      seedMock();
+      state.mode = 'offline';
+      notifyFallback('后端未响应 /api/vehicle/status 或 /api/health');
+    }
+  } finally {
+    syncModeBadge();
+    state.loading = false;
+    loading = false;
+    render();
+  }
 }
 
 /* ═══════════════════════════════════════════════
@@ -1985,14 +2125,14 @@ function syncScrollState() {
 window.addEventListener('scroll', syncScrollState, { passive: true });
 syncScrollState();
 
-// 轮询：仅真实车机（live）模式下刷新，充电中 60 秒，否则 5 分钟
+// 轮询：仅真实数据（live）模式下刷新，充电中 60 秒，否则 5 分钟；
+// 模拟 / 回落状态下没有可刷新的后端，直接跳过
 let pollTimer;
 function schedulePoll() {
   clearTimeout(pollTimer);
   const interval = (state.status && state.status.isCharging) ? 60000 : 300000;
   pollTimer = setTimeout(async () => {
-    const isLive = !!(state.health && state.health.mode === 'live');
-    if (isLive) {
+    if (state.mode === 'live') {
       await loadStatus();
       render();
     }

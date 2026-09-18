@@ -55,6 +55,12 @@ final class TripsViewModel {
         errorMessage = nil
         defer { isLoading = false }
 
+        // 地址未配置 / 指向 localhost：直接使用本地模拟数据，不联网
+        if SettingsStore.shared.prefersMockData {
+            applyMock(days: days)
+            return
+        }
+
         do {
             // 两个请求并发，缩短等待时间
             async let tripsTask: [Trip] = APIClient.shared.get(
@@ -69,10 +75,17 @@ final class TripsViewModel {
             let (loadedTrips, loadedTrend) = try await (tripsTask, trendTask)
             trips = loadedTrips
             trend = loadedTrend
-        } catch let error as ApiError {
-            errorMessage = error.errorDescription
         } catch {
-            errorMessage = error.localizedDescription
+            // 真实地址不可达：回落模拟数据，保证页面不空白；
+            // 用户已由首页的弹框与徽标知晓当前不是真实数据
+            applyMock(days: days)
         }
+    }
+
+    /// 用本地模拟数据填充（按所选区间截取趋势尾部）
+    private func applyMock(days: Int) {
+        trips = MockData.trips
+        trend = Array(MockData.energyTrend.suffix(days))
+        errorMessage = nil
     }
 }

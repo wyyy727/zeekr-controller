@@ -16,9 +16,15 @@ final class SettingsViewModel {
 
     var isChecking = false
     var isReachable = false
-    var isMock = false
     var isLiveConfigured = false
     var missingKeys: [String] = []
+    /// 地址形态（未配置 / 回环 / 真实）
+    var endpointMode: EndpointMode = .unset
+    /// 当前界面实际展示的数据来源
+    var dataMode: DataMode = .mock
+
+    /// 地址未配置或指向 localhost —— 此时走本地模拟数据，不联网
+    var isLocalEndpoint: Bool { endpointMode.preferredSourceIsMock }
 
     // MARK: - 账号
 
@@ -36,19 +42,33 @@ final class SettingsViewModel {
         isChecking = true
         defer { isChecking = false }
 
+        endpointMode = EndpointResolver.resolve(baseURL)
+
+        // 未配置 / localhost：按约定直接使用模拟数据，不做网络探测，
+        // 也就没有「连不连得上」的问题，状态直接按模拟数据呈现。
+        guard !endpointMode.preferredSourceIsMock else {
+            isReachable = false
+            isLiveConfigured = false
+            missingKeys = []
+            dataMode = .mock
+            return
+        }
+
         APIClient.shared.baseURL = baseURL
 
         do {
             let health: HealthInfo = try await APIClient.shared.get(APIRoutes.health)
             isReachable = true
-            isMock = health.mode == "mock"
             isLiveConfigured = health.configured
             missingKeys = health.missingKeys ?? []
+            // 服务端自己也处于 mock 态时，界面拿到的仍是模拟数据
+            dataMode = (health.mode == "mock") ? .offline : .live
         } catch {
             isReachable = false
-            isMock = false
             isLiveConfigured = false
             missingKeys = []
+            // 配置了真实地址却连不上 —— 与首页一致，已回落模拟数据
+            dataMode = .offline
         }
 
         // 顺带刷新登录状态

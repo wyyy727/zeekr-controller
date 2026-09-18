@@ -49,6 +49,12 @@ final class ChargesViewModel {
         errorMessage = nil
         defer { isLoading = false }
 
+        // 地址未配置 / 指向 localhost：直接使用本地模拟数据，不联网
+        if SettingsStore.shared.prefersMockData {
+            applyMock()
+            return
+        }
+
         do {
             // 并发拉取汇总与明细
             async let summaryTask: ChargeSummary = APIClient.shared.get(
@@ -63,11 +69,17 @@ final class ChargesViewModel {
             let (loadedSummary, loadedRecords) = try await (summaryTask, recordsTask)
             summary = loadedSummary
             records = loadedRecords
-        } catch let error as ApiError {
-            errorMessage = error.errorDescription
         } catch {
-            errorMessage = error.localizedDescription
+            // 真实地址不可达：回落模拟数据，保证页面不空白
+            applyMock()
         }
+    }
+
+    /// 用本地模拟数据填充
+    private func applyMock() {
+        records = MockData.chargeRecords
+        summary = MockData.chargeSummary
+        errorMessage = nil
     }
 
     // MARK: - 导入账单

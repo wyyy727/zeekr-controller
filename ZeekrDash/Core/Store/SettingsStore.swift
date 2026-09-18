@@ -29,6 +29,19 @@ final class SettingsStore {
         }
     }
 
+    /// 当前地址的形态：未配置 / 回环地址 / 真实地址
+    ///
+    /// 这是「数据从哪来」的唯一判定入口 —— 地址为空或指向 localhost 时
+    /// 展示本地模拟数据，否则走真实服务端。视图依赖它做响应式重算。
+    var endpointMode: EndpointMode {
+        EndpointResolver.resolve(baseURL)
+    }
+
+    /// 是否应当直接使用本地模拟数据（不需要发起任何网络请求）
+    var prefersMockData: Bool {
+        endpointMode.preferredSourceIsMock
+    }
+
     // MARK: - 轮询间隔（分钟，默认 5；充电中自动缩短为 60 秒）
 
     var pollIntervalMinutes: Double {

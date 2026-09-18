@@ -15,9 +15,10 @@ struct DashboardView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        // 页面标题与底部导航重复，已移除；顶部只保留右上角「模拟数据」玻璃徽标
+        // 页面标题与底部导航重复，已移除；顶部右上角为数据来源徽标
+        // （真实数据时不显示，模拟 / 后端不可达时显示）
         NavigationStack {
-            ScreenContainer(modeText: "模拟数据") {
+            ScreenContainer(modeText: store.modeBadgeText) {
                 if let status = store.vehicleStatus {
                     headerCard(status)
 

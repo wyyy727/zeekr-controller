@@ -45,6 +45,19 @@ struct RootView: View {
             .animation(.easeInOut(duration: 0.22), value: store.toast)
         }
         .tint(Theme.accent(scheme))
+        .alert(
+            "已切换为模拟数据",
+            isPresented: Binding(
+                get: { store.pendingDataSourceNotice != nil },
+                set: { if !$0 { store.pendingDataSourceNotice = nil } }
+            )
+        ) {
+            Button("知道了", role: .cancel) {
+                store.pendingDataSourceNotice = nil
+            }
+        } message: {
+            Text(store.pendingDataSourceNotice ?? "")
+        }
     }
 
     // MARK: - 屏幕容器
@@ -211,8 +224,8 @@ struct ScreenContainer<Content: View, Accessory: View>: View {
 
     @Environment(\.colorScheme) private var scheme
 
-    /// 数据来源徽标文案：模拟数据 / 真实数据
-    var modeText: String = "模拟数据"
+    /// 数据来源徽标文案；传 nil 则不展示徽标（真实数据无需标识）
+    var modeText: String?
     /// 徽标左侧的附加操作（如充电页的账单菜单），默认无
     @ViewBuilder var trailingAccessory: () -> Accessory
     @ViewBuilder let content: () -> Content
@@ -238,21 +251,25 @@ struct ScreenContainer<Content: View, Accessory: View>: View {
 
             trailingAccessory()
 
-            Text(modeText)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(scheme == .dark ? ChineseColor.tianQing : ChineseColor.tianQingDeep)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 5)
-                .glassEffect(.regular, in: .capsule)
+            if let modeText {
+                Text(modeText)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(scheme == .dark ? ChineseColor.tianQing : ChineseColor.tianQingDeep)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .glassEffect(.regular, in: .capsule)
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+            }
         }
         .padding(.horizontal, Metrics.screenPadding)
         .padding(.vertical, 8)
+        .animation(.easeInOut(duration: 0.2), value: modeText)
     }
 }
 
 extension ScreenContainer where Accessory == EmptyView {
     /// 无附加操作的常规页面
-    init(modeText: String = "模拟数据", @ViewBuilder content: @escaping () -> Content) {
+    init(modeText: String?, @ViewBuilder content: @escaping () -> Content) {
         self.init(
             modeText: modeText,
             trailingAccessory: { EmptyView() },

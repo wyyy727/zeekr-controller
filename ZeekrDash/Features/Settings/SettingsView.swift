@@ -16,13 +16,15 @@ struct SettingsView: View {
 
     @State private var model = SettingsViewModel()
     @State private var showCodeSheet = false
+    /// 服务端地址输入框焦点：失焦即提交，避免「改完不按回车」导致不生效
+    @FocusState private var isAddressFocused: Bool
 
     var body: some View {
-        // 页面标题与底部导航重复，已移除；顶部只保留右上角「模拟数据」玻璃徽标
+        // 页面标题与底部导航重复，已移除；顶部右上角为数据来源徽标
         NavigationStack {
-            ScreenContainer(modeText: "模拟数据") {
+            ScreenContainer(modeText: store.modeBadgeText) {
                 connectionSection
-                if model.isMock {
+                if model.isLocalEndpoint {
                     mockNotice
                 } else {
                     accountSection
@@ -42,6 +44,29 @@ struct SettingsView: View {
 
     // MARK: - 服务端连接
 
+    /// 已应用过的地址，用于去重 —— 回车与失焦会各触发一次，避免重复请求
+    @State private var appliedAddress: String?
+
+    /// 地址变更后统一处理：同步客户端、重跑诊断、让首页按新地址重取数据。
+    ///
+    /// 除了 `.onSubmit`（回车），地址框失焦时也会调到这里：用户改完地址
+    /// 往往直接切走而不按回车，只挂 `.onSubmit` 会让新地址停留在
+    /// UserDefaults 里、界面上却还是旧数据。
+    private func applyAddress() async {
+        let current = settings.baseURL
+        guard current != appliedAddress else { return }   // 同一次编辑只跑一次
+        appliedAddress = current
+
+        APIClient.shared.baseURL = current
+        // 换了地址，允许重新提示一次「已切换为模拟数据」
+        store.resetFallbackNotification()
+        await model.checkHealth(baseURL: current)
+        await store.refresh()
+        // 从 localhost 切到真实地址后轮询此前是被跳过的（mock 下不启动），
+        // 这里补一次启动，避免用户一直停在首页时永远不刷新。
+        store.startPolling()
+    }
+
     private var connectionSection: some View {
         SettingsCard(title: "服务端") {
             VStack(spacing: 10) {
@@ -57,11 +82,14 @@ struct SettingsView: View {
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
                         .onSubmit {
-                            Task {
-                                APIClient.shared.baseURL = settings.baseURL
-                                await model.checkHealth(baseURL: settings.baseURL)
-                            }
+                            Task { await applyAddress() }
                         }
+                        // 失焦即提交：覆盖「改完不按回车直接切走」的情况
+                        .onChange(of: isAddressFocused) { _, focused in
+                            guard !focused else { return }
+                            Task { await applyAddress() }
+                        }
+                        .focused($isAddressFocused)
                 }
 
                 Divider().overlay(Theme.separator(scheme))
@@ -74,8 +102,8 @@ struct SettingsView: View {
                     connectionBadge
                 }
 
-                if model.isMock {
-                    Text("当前服务端运行在模拟数据模式，未接入真实车辆")
+                if model.isLocalEndpoint {
+                    Text("地址为空或指向本机，将直接展示内置模拟数据（不联网）")
                         .font(.system(size: 11))
                         .foregroundStyle(ChineseColor.statusWarn)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -102,20 +130,31 @@ struct SettingsView: View {
 
     private var connectionColor: Color {
         if model.isChecking { return Theme.textTertiary(scheme) }
+        // 地址为空 / localhost：按约定走模拟数据，不算失败
+        if model.isLocalEndpoint { return ChineseColor.statusWarn }
         return model.isReachable ? ChineseColor.statusGood : ChineseColor.statusBad
     }
 
     private var connectionText: String {
         if model.isChecking { return "检测中" }
+        if model.isLocalEndpoint { return "模拟数据" }
         return model.isReachable ? "已连接" : "未连接"
     }
 
-    private var mockNotice: some View {
-        HStack(spacing: 8) {
+    /// 诊断区展示的数据来源文案
+    private var diagnosticsSourceText: String {
+        switch store.dataMode {
+        case .mock:    return "本地模拟数据"
+        case .live:    return "真实服务端"
+        case .offline: return "模拟数据（后端不可达）"
+        }
+    }
+
+    private var mockNotice: some View {        HStack(spacing: 8) {
             Image(systemName: "info.circle.fill")
                 .font(.system(size: 13))
                 .foregroundStyle(ChineseColor.statusWarn)
-            Text("演示模式：数据为本地生成，用于预览界面效果")
+            Text("演示模式：地址未配置或指向本机，界面展示的是内置模拟数据")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.textSecondary(scheme))
         }
@@ -265,7 +304,7 @@ struct SettingsView: View {
     private var diagnosticsSection: some View {
         SettingsCard(title: "诊断") {
             VStack(spacing: 0) {
-                diagnosticRow("服务端模式", value: model.isMock ? "模拟数据" : "真实车辆")
+                diagnosticRow("数据来源", value: diagnosticsSourceText)
                 Divider().overlay(Theme.separator(scheme))
                 diagnosticRow("配置完整", value: model.isLiveConfigured ? "是" : "否")
                 Divider().overlay(Theme.separator(scheme))
