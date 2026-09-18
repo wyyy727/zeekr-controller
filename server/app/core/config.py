@@ -7,12 +7,59 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _load_dotenv() -> None:
+    """加载 .env 到 os.environ（已存在的环境变量优先，不覆盖）。
+
+    为什么需要这一步：此前 `.env` 只在 `scripts/server.sh` 里被 `source` 读取，
+    而 `config.py` 自身完全不看 `.env`。于是：
+
+      - 用 `uvicorn app.main:app` 或 IDE 直接启动 → .env 不生效；
+      - 按 README 的 `cd .. && cp .env.example .env` 操作时，.env 落在
+        **仓库根目录**，而 server.sh 找的是 **server/.env** → 同样不生效。
+
+    两者的共同后果是：用户以为在用真实数据，实际静默跑在模拟模式下。
+    这里补上统一加载，并同时查找两个位置，消除路径歧义。
+
+    查找顺序（先命中的先用）：server/.env → 仓库根目录/.env
+    """
+    for candidate in (BASE_DIR / ".env", BASE_DIR.parent / ".env"):
+        if not candidate.is_file():
+            continue
+        text: str | None = None
+        for encoding in ("utf-8", "gbk"):
+            try:
+                text = candidate.read_text(encoding=encoding)
+                break
+            except (OSError, UnicodeDecodeError):
+                continue
+        if text is None:
+            continue
+
+        for raw in text.splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            if not key or key in os.environ:
+                continue
+            # 只把「空白 + #」视为行内注释，避免误伤值里的 #
+            value = re.sub(r"\s+#.*$", "", value).strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            os.environ[key] = value
+
+
+_load_dotenv()
 
 
 def _env(key: str, default: str = "") -> str:
