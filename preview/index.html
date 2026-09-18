@@ -537,6 +537,7 @@ body.is-scrolled .topbar::before {
 
 /* 图标：按压时轻微下沉 + 回弹 */
 .ctrl .ico {
+  position: relative;             /* 供成功态的脉冲圈定位 */
   display: flex; align-items: center; justify-content: center;
   transition: transform .28s cubic-bezier(.34,1.56,.64,1);
 }
@@ -619,24 +620,44 @@ body.is-scrolled .topbar::before {
 .ctrl.busy { pointer-events: none; }
 .ctrl.busy .ctrl-spin { display: flex; }
 
-/* ⑧ 成功反馈：对勾弹出 + 按钮轻弹，1 秒后自动复位 */
-.ctrl-ok {
-  position: absolute; inset: 0;
-  display: none; align-items: center; justify-content: center;
-  background: var(--qing-bi); color: #fff;
-}
-.ctrl-ok svg { width: 24px; height: 24px; }
-.ctrl.done .ctrl-ok { display: flex; animation: ctrlOk .38s cubic-bezier(.34,1.56,.64,1); }
+/* ⑧ 成功反馈：图标弹跳 + 着色 + 外圈脉冲，1 秒后自动复位。
+
+   原先用 .ctrl-ok 整块铺满按钮（青碧底 + 白勾），是满屏大色块，
+   与开启态整块变色是同一个毛病。现改为「图标自己动」：
+   颜色只落在 22px 的图标上，遮罩整块铺色彻底去掉。
+   状态靠颜色 + 形状双重传达，不依赖大面积底色。 */
 .ctrl.done { animation: ctrlBounce .42s cubic-bezier(.34,1.56,.64,1); }
-@keyframes ctrlOk { from { opacity: 0; transform: scale(.7); } to { opacity: 1; transform: scale(1); } }
 @keyframes ctrlBounce {
   0% { transform: scale(.93); }
   55% { transform: scale(1.05); }
   100% { transform: scale(1); }
 }
 
-/* ⑨ 失败反馈：朱砂红抖动 */
-.ctrl.fail .ctrl-ok { background: var(--zhu-sha); }
+/* 成功：图标变青碧 + 弹一下 */
+.ctrl.done .ico {
+  animation: ctrlIcoPop .5s cubic-bezier(.34,1.56,.64,1);
+}
+.ctrl.done:not(.fail) .ico { color: var(--qing-bi); }
+@keyframes ctrlIcoPop {
+  0%   { transform: scale(.72); }
+  55%  { transform: scale(1.16); }
+  100% { transform: scale(1); }
+}
+
+/* 成功后图标外圈扩散一圈青碧脉冲（只用描边，不铺底） */
+.ctrl.done:not(.fail) .ico::after {
+  content: ''; position: absolute;
+  width: 40px; height: 40px; border-radius: 50%;
+  border: 2px solid var(--qing-bi);
+  animation: ctrlPulse .62s cubic-bezier(.22,.61,.36,1) forwards;
+}
+@keyframes ctrlPulse {
+  from { opacity: .7; transform: scale(.55); }
+  to   { opacity: 0;  transform: scale(1.05); }
+}
+
+/* ⑨ 失败反馈：图标变朱砂红 + 左右抖动（按钮整体抖，不改底色） */
+.ctrl.fail .ico { color: var(--zhu-sha); }
 .ctrl.fail { animation: ctrlShake .4s; }
 @keyframes ctrlShake {
   0%,100% { transform: translateX(0); }
@@ -657,7 +678,7 @@ body.is-scrolled .topbar::before {
 
 /* 尊重系统「减弱动态效果」 */
 @media (prefers-reduced-motion: reduce) {
-  .ctrl, .ctrl .ico, .ctrl-ok, .ctrl-ok svg { animation: none !important; transition-duration: .01ms !important; }
+  .ctrl, .ctrl .ico, .ctrl .ico::after { animation: none !important; transition-duration: .01ms !important; }
   .ctrl .ripple { display: none; }
 }
 
@@ -1449,7 +1470,6 @@ function renderDashboard() {
       <span class="ico">${o.icon}</span>
       <span class="ctrl-txt">${o.label}${sub}</span>
       <span class="ctrl-spin" aria-hidden="true"></span>
-      <span class="ctrl-ok" aria-hidden="true">${SVG.check}</span>
     </button>`;
   };
 
