@@ -136,6 +136,14 @@ public struct GridItem: Sendable {
     public static func adaptive(minimum: Double, maximum: Double = .infinity) -> GridItem { GridItem() }
 }
 @MainActor
+public struct Grid<Content: View>: View {
+    public init(alignment: Alignment = .center, horizontalSpacing: Double? = nil, verticalSpacing: Double? = nil, @ViewBuilder content: () -> Content) {}
+}
+@MainActor
+public struct GridRow<Content: View>: View {
+    public init(alignment: VerticalAlignment = .center, @ViewBuilder content: () -> Content) {}
+}
+@MainActor
 public struct PinnedScrollableViews: OptionSet, Sendable {
     public let rawValue: UInt32
     public init(rawValue: UInt32) { self.rawValue = rawValue }
@@ -564,6 +572,7 @@ extension View {
     public func hidden() -> some View { self }
     public func fixedSize() -> some View { self }
     public func fixedSize(horizontal: Bool, vertical: Bool) -> some View { self }
+    public func gridCellUnsizedAxes(_ axes: Axis.Set) -> some View { self }
     public func lineLimit(_ n: Int?) -> some View { self }
     public func minimumScaleFactor(_ f: Double) -> some View { self }
     public func font(_ f: Font?) -> some View { self }

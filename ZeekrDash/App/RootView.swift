@@ -23,6 +23,14 @@ struct RootView: View {
     /// 悬浮胶囊两侧的留白，让 tab bar 从内容上「浮」起来
     private static let tabBarSideInset: CGFloat = 14
 
+    /// Toast 距屏幕底部的间距。
+    ///
+    /// 需紧贴底部导航胶囊上方，而不是让 Toast 落在内容区 ——
+    /// 车控面板是车况页最后一张卡片，若 Toast 浮在屏幕中部偏下的位置，
+    /// 滚到底部时两者会占据同一区域而互相遮挡。
+    /// 数值 = 胶囊高度（约 64pt）+ 底部留白 6pt + 安全区（约 34pt）+ 间隙 8pt。
+    private static let toastBottomInset: CGFloat = 112
+
     var body: some View {
         // 玻璃形状合并为一份采样，避免相邻玻璃之间出现接缝
         GlassEffectContainer(spacing: Metrics.sectionSpacing) {
@@ -33,10 +41,10 @@ struct RootView: View {
 
                 tabBar
 
-                // 全局 Toast（车控指令回执等），浮在胶囊之上
+                // 全局 Toast（车控指令回执等），紧贴底部导航胶囊之上
                 if let toast = store.toast {
                     ToastBubble(text: toast)
-                        .padding(.bottom, 96)
+                        .padding(.bottom, Self.toastBottomInset)
                         .padding(.horizontal, Metrics.screenPadding)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                         .allowsHitTesting(false)

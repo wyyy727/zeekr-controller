@@ -42,11 +42,8 @@ struct ControlsPanel: View {
     /// 成功轻弹的放大倍数
     @State private var bounceScale: CGFloat = 1
 
-    private let columns = [
-        GridItem(.flexible(), spacing: Metrics.sectionSpacing),
-        GridItem(.flexible(), spacing: Metrics.sectionSpacing),
-        GridItem(.flexible(), spacing: Metrics.sectionSpacing),
-    ]
+    /// 每行按钮数（与预览页 `.ctrl-grid` 的 `repeat(3, 1fr)` 一致）
+    private static let columnsPerRow = 3
 
     private var isEnabled: Bool {
         settings.commandsEnabled && !store.isLoading
@@ -260,22 +257,50 @@ struct ControlsPanel: View {
 
     // MARK: - 按钮网格
 
+    /// 固定三列网格（`Grid` + `GridRow`），不用 `LazyVGrid`。
+    ///
+    /// 惰性网格只实体化可见行，滚动时行回收/重建会触发布局重算，
+    /// 表现为按钮随滚动轻微抖动。本面板恒为 15 个按钮且需常驻，
+    /// 惰性布局零收益却牺牲稳定性，故用固定网格。行高/列宽/间距与
+    /// 预览页 `.ctrl-grid` 的 `grid-template-columns: repeat(3, 1fr)` 一致。
     private func grid(_ actions: [ControlAction]) -> some View {
-        LazyVGrid(columns: columns, spacing: Metrics.sectionSpacing) {
-            ForEach(actions) { action in
-                ControlButton(
-                    action: action,
-                    isPending: pending == action,
-                    isSucceeded: succeeded == action,
-                    isFailed: failed == action,
-                    isEnabled: isEnabled && !action.isDisabled,
-                    shakeOffset: failed == action ? shakeOffset : 0,
-                    bounceScale: succeeded == action ? bounceScale : 1,
-                    reduceMotion: reduceMotion
-                ) {
-                    Task { await trigger(action) }
+        let perRow = Self.columnsPerRow
+        let rowCount = (actions.count + perRow - 1) / perRow
+
+        return Grid(
+            horizontalSpacing: Metrics.sectionSpacing,
+            verticalSpacing: Metrics.sectionSpacing
+        ) {
+            ForEach(0..<rowCount, id: \.self) { row in
+                GridRow {
+                    ForEach(0..<perRow, id: \.self) { column in
+                        let index = row * perRow + column
+                        if index < actions.count {
+                            button(for: actions[index])
+                        } else {
+                            // 末行不满时补占位，保证列宽与其余行对齐
+                            Color.clear
+                                .gridCellUnsizedAxes([.horizontal, .vertical])
+                        }
+                    }
                 }
             }
+        }
+    }
+
+    /// 单个车控按钮（动效链路 ①–⑧ 全部由 `ControlButton` 内部承载，此处只接线）
+    private func button(for action: ControlAction) -> some View {
+        ControlButton(
+            action: action,
+            isPending: pending == action,
+            isSucceeded: succeeded == action,
+            isFailed: failed == action,
+            isEnabled: isEnabled && !action.isDisabled,
+            shakeOffset: failed == action ? shakeOffset : 0,
+            bounceScale: succeeded == action ? bounceScale : 1,
+            reduceMotion: reduceMotion
+        ) {
+            Task { await trigger(action) }
         }
     }
 
