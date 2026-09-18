@@ -137,6 +137,15 @@ class AppConfig:
     # 允许下发的车控指令总开关（默认关闭，符合"只读优先"的安全原则）
     allow_commands: bool = field(default_factory=lambda: _env_bool("ALLOW_COMMANDS", False))
 
+    # 可选的 API 令牌。**留空则不启用鉴权**（保持默认行为，方便本地联调）。
+    # 设了值之后，除 /api/health 外的所有 /api/* 都必须带
+    # `Authorization: Bearer <token>`（或 `?token=` 便于浏览器访问 /preview）。
+    #
+    # 为什么需要：服务端监听 0.0.0.0，开启车控后同一局域网内任何人都能
+    # POST /api/vehicle/command 解锁车辆。文档只声明了"仅应在可信局域网内
+    # 运行"，没有任何技术强制手段。
+    api_token: str = field(default_factory=lambda: _env("API_TOKEN"))
+
     # 数据源：auto（配置齐全走真实接口，否则回落 mock）/ mock / live
     data_source: str = field(default_factory=lambda: _env("DATA_SOURCE", "auto"))
 

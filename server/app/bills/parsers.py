@@ -47,18 +47,78 @@ COLUMN_ALIASES: dict[str, list[str]] = {
 }
 
 
-def _decode(raw: bytes) -> str:
-    """自动探测编码并解码。"""
+def _decode(raw: bytes) -> str | None:
+    """自动探测编码并解码；无法可靠解码时返回 None。
+
+    判定分两步，从可靠到宽松：
+
+    1. **严格解码成功**即采纳 —— 这是最可靠的信号（严格模式不会产生替换
+       字符，所以旧实现里"替换字符 < 1%"的判定实际等价于"严格成功"）。
+    2. 全部严格解码都失败时，退一步用 `errors="replace"` 试一遍，取替换
+       字符最少的候选（容忍个别脏字节，但要求脏字符占比 < 1%）。
+    3. 连这一步都过不了就返回 None，由调用方给出明确的"编码无法识别"。
+
+    为什么要去掉原来的 `errors="ignore"` 兜底：静默丢弃无法解码的字节，会把
+    **编码问题伪装成「未找到表头行」** —— 用户看到的是"格式不对"，而真正的
+    原因是文件编码读不了（GBK/UTF-8 混编的账单正是这一类），排障方向被带偏。
+    """
     for encoding in CANDIDATE_ENCODINGS:
         try:
             text = raw.decode(encoding)
-            # 解码后出现大量替换字符说明编码不对
-            if text.count("\ufffd") < len(text) * 0.01:
-                return text
         except (UnicodeDecodeError, LookupError):
             continue
-    # 兜底：忽略错误
-    return raw.decode("utf-8", errors="ignore")
+        return text or None
+
+    candidates: list[tuple[int, str]] = []
+    for encoding in CANDIDATE_ENCODINGS:
+        try:
+            text = raw.decode(encoding, errors="replace")
+        except (UnicodeDecodeError, LookupError):
+            continue
+        if not text:
+            continue
+        bad = text.count("\ufffd")
+        if bad < len(text) * 0.01:
+            candidates.append((bad, text))
+
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: item[0])[1]
+
+
+def _read_xlsx_rows(raw: bytes) -> list[list[str]] | None:
+    """用 openpyxl 读取 xlsx，返回与 `csv.reader` 同构的行列表。
+
+    为什么要支持 xlsx：微信导出的「用于个人对账」账单**常见 Excel 格式**，
+    而 iOS 的文件选择器也允许选 spreadsheet —— 此前服务端只收 csv/txt，
+    客户端能选中却被服务端拒绝，用户会撞上「仅支持 CSV/TXT」的错误。
+    两端对齐后，选 xlsx 也能直接导入。
+
+    依赖缺失或文件损坏时返回 None（由调用方给出可读错误），不抛异常。
+    """
+    try:
+        from openpyxl import load_workbook
+    except ImportError:  # pragma: no cover - 未装 openpyxl 时降级
+        return None
+
+    try:
+        workbook = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+    except Exception:  # noqa: BLE001 - 非 xlsx / 文件损坏 / 版本不支持
+        return None
+
+    try:
+        sheet = workbook.active
+        if sheet is None:
+            return None
+        rows: list[list[str]] = []
+        for row in sheet.iter_rows(values_only=True):
+            # 统一成字符串，复用与 CSV 完全相同的后续解析逻辑。
+            # 日期单元格经 data_only 得到 datetime，str() 形如
+            # "2026-09-01 10:30:00"，正好落在 _parse_datetime 支持的格式里。
+            rows.append(["" if value is None else str(value) for value in row])
+        return rows
+    finally:
+        workbook.close()
 
 
 def _locate_header(rows: list[list[str]]) -> int | None:
@@ -92,14 +152,21 @@ def _map_columns(header: list[str]) -> dict[str, int]:
             if field in mapping:
                 break
 
-        # 精确匹配失败则退化为包含匹配
+        # 精确匹配失败则退化为包含匹配。
+        #
+        # 注意不能"第一个命中就用"：表头若没有精确的「金额」而存在
+        # 「优惠金额」「退款金额」，会把它们当成交易金额。同一别名命中多列时
+        # 选**列名最短**的那个 —— 规范列名通常最短（「金额」<「优惠金额」），
+        # 歧义最小。别名之间仍保持原有的优先级顺序。
         if field not in mapping:
             for alias in aliases:
-                for index, cell in enumerate(cleaned):
-                    if alias in cell and cell:
-                        mapping[field] = index
-                        break
-                if field in mapping:
+                hits = [
+                    index
+                    for index, cell in enumerate(cleaned)
+                    if cell and alias in cell
+                ]
+                if hits:
+                    mapping[field] = min(hits, key=lambda index: len(cleaned[index]))
                     break
 
     return mapping
@@ -170,12 +237,32 @@ def parse_bill(raw: bytes, source: str = "auto") -> dict[str, Any]:
             "total": int,
         }
     """
-    text = _decode(raw)
-    if not text.strip():
-        return {"success": False, "message": "文件内容为空", "records": [], "total": 0}
+    # xlsx 是 zip 容器，魔数为 PK\x03\x04。先按魔数分流，别把二进制当文本
+    # 解码 —— 否则各种编码都会"成功"解出一堆乱码，错误信息完全指错方向。
+    if raw[:4] == b"PK\x03\x04":
+        rows = _read_xlsx_rows(raw)
+        if rows is None:
+            return {
+                "success": False,
+                "message": "无法解析该 Excel 文件，请确认是账单导出文件，"
+                           "或用 Excel 另存为「CSV UTF-8」后重试",
+                "records": [],
+                "total": 0,
+            }
+    else:
+        text = _decode(raw)
+        if text is None:
+            return {
+                "success": False,
+                "message": "无法识别文件编码，请用 Excel 打开后另存为「CSV UTF-8」再导入",
+                "records": [],
+                "total": 0,
+            }
+        if not text.strip():
+            return {"success": False, "message": "文件内容为空", "records": [], "total": 0}
 
-    reader = csv.reader(io.StringIO(text))
-    rows = [row for row in reader]
+        reader = csv.reader(io.StringIO(text))
+        rows = [row for row in reader]
 
     header_index = _locate_header(rows)
     if header_index is None:

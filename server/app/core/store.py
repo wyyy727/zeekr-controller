@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -72,12 +74,30 @@ class Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """借出一个 SQLite 连接，退出时提交/回滚并**显式关闭**。
+
+        为什么不用裸连接：`with sqlite3.connect(...) as conn` 只做事务提交，
+        **不会 close()** —— sqlite3 的上下文管理器管的是事务语义，不是资源
+        生命周期。当前单进程 asyncio 下靠局部变量被 GC 回收勉强能用，但一旦
+        换成多 worker 部署、或连接被缓存复用，文件句柄就会堆积。
+
+        这里显式管理生命周期，同时保留原调用写法不变
+        （`with self._connect() as conn:` 对生成器上下文管理器同样成立）。
+        WAL 模式在建库时已是持久属性，这里保留设置以兼容旧库。
+        """
         conn = sqlite3.connect(self.path, timeout=10)
         conn.row_factory = sqlite3.Row
-        # WAL 模式提升并发读性能
-        conn.execute("PRAGMA journal_mode=WAL")
-        return conn
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            yield conn
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _init_schema(self) -> None:
         with self._connect() as conn:
@@ -107,6 +127,7 @@ class Store:
         ]
 
         with self._connect() as conn:
+            before = conn.total_changes
             conn.executemany(
                 """
                 INSERT OR IGNORE INTO charge_records
@@ -116,7 +137,11 @@ class Store:
                 """,
                 rows,
             )
-        return len(rows)
+            # 用 total_changes 差值，而不是 len(rows)。
+            # len(rows) 是"尝试写入数"—— 被 OR IGNORE 跳过的重复行也被算进去，
+            # 接口语义不准（调用方据此判断"导入了几笔"会偏大）。
+            inserted = conn.total_changes - before
+        return inserted
 
     def list_charges(self, limit: int = 100, months: int | None = None) -> list[dict[str, Any]]:
         """查询充电记录。"""

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
+from datetime import datetime
 from typing import Any
 
 from .parsers import parse_bill
@@ -98,29 +99,57 @@ def extract_charges(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return charges
 
 
+def _filter_by_months(
+    charges: list[dict[str, Any]], months: int
+) -> list[dict[str, Any]]:
+    """截取「最近 N 个月」的记录（含当月，当月算第 1 个月）。"""
+    if months <= 0:
+        return list(charges)
+
+    today = datetime.now()
+    year, month = today.year, today.month - (months - 1)
+    while month <= 0:
+        month += 12
+        year -= 1
+    start = f"{year:04d}-{month:02d}"
+
+    return [c for c in charges if str(c.get("timestamp") or "")[:7] >= start]
+
+
 def build_summary(charges: list[dict[str, Any]], months: int = 6) -> dict[str, Any]:
     """构建充电消费汇总。
 
+    **口径一次说清**：所有统计一律限定在最近 `months` 个月内 —— 总额、笔数、
+    总电量、平均单价、月度列表、服务商分布，全部同一范围。
+
+    此前总额与笔数统计的是**全量历史**，而月度列表被 `[:months]` 截成最近
+    N 个月，两者口径不一致。前端把「累计充电消费」和「近 6 个月月度图」并排
+    展示时，会让人以为两个数字是同一范围。返回值里的 `windowMonths` 供前端
+    明确标注范围。
+
     Args:
-        charges: 充电消费记录
-        months: 按月汇总时保留的月数
+        charges: 充电消费记录（全量，本函数内部按窗口截取）
+        months: 统计窗口的月数
 
     Returns:
         ChargeSummary 契约结构
     """
-    if not charges:
+    window = _filter_by_months(charges, months)
+
+    if not window:
         return {
             "totalAmount": 0.0,
-            "totalEnergyKwh": 0.0,
+            "totalEnergyKwh": None,
             "totalCount": 0,
             "avgUnitPrice": None,
+            "windowMonths": months,
             "monthly": [],
             "byProvider": [],
         }
 
-    total_amount = sum(float(c.get("amount") or 0) for c in charges)
-    # 只有部分记录有电量，按有值部分统计
-    energies = [float(c["energyKwh"]) for c in charges if c.get("energyKwh")]
+    total_amount = sum(float(c.get("amount") or 0) for c in window)
+    # 只有部分记录有电量（账单里通常没有），按有值的部分统计
+    energies = [float(c["energyKwh"]) for c in window if c.get("energyKwh")]
     total_energy = sum(energies) if energies else None
 
     # 按月聚合
@@ -132,7 +161,7 @@ def build_summary(charges: list[dict[str, Any]], months: int = 6) -> dict[str, A
         lambda: {"amount": 0.0, "energyKwh": 0.0, "count": 0, "energyCount": 0}
     )
 
-    for charge in charges:
+    for charge in window:
         amount = float(charge.get("amount") or 0)
         energy = charge.get("energyKwh")
         month = str(charge.get("timestamp") or "")[:7]
@@ -177,8 +206,10 @@ def build_summary(charges: list[dict[str, Any]], months: int = 6) -> dict[str, A
     return {
         "totalAmount": round(total_amount, 2),
         "totalEnergyKwh": round(total_energy, 2) if total_energy else None,
-        "totalCount": len(charges),
+        "totalCount": len(window),
         "avgUnitPrice": round(total_amount / total_energy, 2) if total_energy else None,
+        # 明确告诉前端统计范围，便于把"累计消费"标注成"近 N 个月消费"
+        "windowMonths": months,
         "monthly": monthly,
         "byProvider": by_provider,
     }

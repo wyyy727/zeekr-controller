@@ -22,6 +22,19 @@ from .zeekr_signing import COMMAND_MAP
 
 MOCK_VIN = "L6TDEMOCK00000001"
 
+# 车辆身份三件套。
+#
+# 这三个值必须与 ZeekrDash/Core/Mock/MockData.swift 和 preview/index.html 的
+# MOCK.status **保持一致** —— 否则同一台手机在「地址=localhost（App 内置模拟）」
+# 和「地址=局域网（服务端模拟）」两种情况下会显示成两台不同的车，用户会以为
+# 自己连错了后端。一致性由 tests/test_mock_consistency.py 自动校验。
+#
+# 注意 VIN 故意用明显是假的 L6TDEMOCK... —— 它不会被界面展示，
+# 但把"这是模拟数据"写在值里能避免被误当成真车。
+MOCK_NICKNAME = "焕新 001"
+MOCK_PLATE = "沪A·D8821"
+MOCK_MODEL = "ZEEKR 001"
+
 
 def _seeded_rng(seed_text: str) -> random.Random:
     """基于文本生成确定性随机数发生器。"""
@@ -61,9 +74,9 @@ class MockZeekrClient(ZeekrClient):
         return [
             {
                 "vin": MOCK_VIN,
-                "nickname": "我的极氪 001",
-                "plateNo": "粤A·D88888",
-                "modelName": "极氪 001",
+                "nickname": MOCK_NICKNAME,
+                "plateNo": MOCK_PLATE,
+                "modelName": MOCK_MODEL,
                 "isOwner": False,
             }
         ]
@@ -88,9 +101,9 @@ class MockZeekrClient(ZeekrClient):
 
         return {
             "vin": vin or MOCK_VIN,
-            "nickname": "我的极氪 001",
-            "plateNo": "粤A·D88888",
-            "modelName": "极氪 001",
+            "nickname": MOCK_NICKNAME,
+            "plateNo": MOCK_PLATE,
+            "modelName": MOCK_MODEL,
             "soc": round(soc, 1),
             "rangeKm": range_km,
             "odometerKm": round(odometer, 1),

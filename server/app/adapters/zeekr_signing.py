@@ -382,12 +382,25 @@ def encrypt_vin(vin: str, vin_key: str, vin_iv: str) -> str:
 
     Returns:
         Base64 编码的密文
+
+    前置校验：`AES.new` 在密钥/IV 不足 16 字节时会抛 ValueError，而在 live
+    路径里这个异常会被上层的泛化 `except Exception` 吞掉，排障时几乎看不出
+    根因。这里提前校验并给出明确错误。VIN 也限定 ASCII —— 含非 ASCII 字符
+    时会算出网关无法解密的密文（表现为 `079025 Decrypt X-VIN failed`）。
     """
-    cipher = AES.new(
-        vin_key.encode("utf-8")[:16],
-        AES.MODE_CBC,
-        vin_iv.encode("utf-8")[:16],
-    )
+    key_bytes = vin_key.encode("utf-8")
+    iv_bytes = vin_iv.encode("utf-8")
+
+    if len(key_bytes) < 16:
+        raise ValueError(f"ZEEKR_VIN_KEY 至少需要 16 字节，当前 {len(key_bytes)} 字节")
+    if len(iv_bytes) < 16:
+        raise ValueError(f"ZEEKR_VIN_IV 至少需要 16 字节，当前 {len(iv_bytes)} 字节")
+    if not vin:
+        raise ValueError("VIN 不能为空")
+    if not vin.isascii():
+        raise ValueError("VIN 必须是 ASCII 字符，否则网关无法解密")
+
+    cipher = AES.new(key_bytes[:16], AES.MODE_CBC, iv_bytes[:16])
     ciphertext = cipher.encrypt(pad(vin.encode("utf-8"), AES.block_size))
     return base64.b64encode(ciphertext).decode("ascii")
 

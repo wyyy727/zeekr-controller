@@ -17,8 +17,10 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
+import re
 from datetime import datetime, timedelta
 from hashlib import md5
 from typing import Any
@@ -51,7 +53,43 @@ ERR_UNAUTHORIZED = "079001"
 # 签名校验失败
 ERR_SIGNATURE = "079025"
 
+# 已知的网关业务错误码。
+#
+# 国区网关的**错误信封并不总是带 `success` 字段** —— 常见形态是只有
+# `{"code": "...", "msg": "..."}`。所以不能只靠 `success` 判断成败，
+# 否则这些错误会被当成正常响应、被后续解析当成"数据"，最终表现为
+# 「账号下未找到车辆」这类误导性的结论，而真正的原因（签名算错、
+# 令牌无权）完全看不见。这些码一旦出现，无论有没有 success 都算失败。
+KNOWN_ERROR_CODES = frozenset({ERR_LOGGED_IN_ELSEWHERE, ERR_UNAUTHORIZED, ERR_SIGNATURE})
+
+# GW3 参与签名的 query 值只允许这些字符。
+#
+# httpx 用 `params=` 自行编码，而签名走的是 `_escape_query_value`（它会把
+# `*` 编成 `%2A`、把 `%2F`/`%3F` 解回明文）—— 两者只对「无特殊字符」的值
+# 一致。当前调用只有 latest=false / target=new，故相安无事；但一旦有人
+# 传入含 `*` `/` `?` 空格或非 ASCII 的值，签名串与实际发送字节就会分叉，
+# 网关报 079025 而看不出原因。这里显式拦住，把潜在失效变成即时可见的
+# 错误，而不是静默验签失败。
+_QUERY_SAFE = re.compile(r"^[A-Za-z0-9._~-]*$")
+
 TIMEOUT = httpx.Timeout(20.0, connect=10.0)
+
+
+def _jwt_expires_at(token: str) -> int | None:
+    """从 JWT 中读取 `exp`（只解析，不验签）。
+
+    用于判断本地缓存的令牌是否已经过期。解析失败返回 None —— 即
+    「不知道」，此时既不乐观假设有效、也不武断判死。
+    """
+    try:
+        payload_b64 = token.split(".")[1]
+        payload_b64 += "=" * (-len(payload_b64) % 4)
+        data = json.loads(base64.urlsafe_b64decode(payload_b64))
+        exp = data.get("exp")
+        return int(exp) if exp is not None else None
+    except Exception:  # noqa: BLE001 - 令牌格式不受本服务控制
+        return None
+
 
 
 class ZeekrAuthError(Exception):
@@ -263,6 +301,10 @@ class LiveZeekrClient(ZeekrClient):
         if refresh:
             self._session["gw2_refresh"] = refresh
 
+        # 立即落盘：此前只在 verify_sms_code 末尾存过一次，导致运行期间刷新出来的
+        # 新令牌从不持久化 —— 重启后载入的是磁盘上那份（可能已过期）的旧令牌。
+        self._save_session()
+
     async def _login_gw3(self) -> None:
         """GW3 登录（HMAC-SHA256 签名 + 加密 VIN）。"""
         path = "/ms-user-auth/v1.0/auth/login"
@@ -295,8 +337,26 @@ class LiveZeekrClient(ZeekrClient):
 
         self._session["gw3_token"] = token.replace("Bearer ", "")
 
+        # 同上：GW3 重登（079021 自愈）换出来的新令牌也要落盘，
+        # 否则重启后又回到那份旧令牌。
+        self._save_session()
+
     async def is_authenticated(self) -> bool:
-        return bool(self._session.get("gw1_jwt"))
+        """当前是否持有**可用**的登录态。
+
+        不能只看"令牌存在"。会话是落盘复用的，重启后磁盘上的 gw1_jwt 可能
+        早已过期，此时仍返回 True 会让设置页显示「已登录」而实际点什么都失败。
+        这里读 JWT 的 exp 做判断；读不出来（无 exp 或格式不标准）时按"不知道"
+        处理，沿用旧行为 —— 宁可漏判过期，也不要误判成未登录把用户踢下线。
+        """
+        token = self._session.get("gw1_jwt")
+        if not token:
+            return False
+        exp = _jwt_expires_at(str(token))
+        if exp is None:
+            return True
+        # 留 30 秒余量，避免刚好卡在边界的请求
+        return exp > datetime.now().timestamp() + 30
 
     async def logout(self) -> None:
         self._session = {}
@@ -306,21 +366,61 @@ class LiveZeekrClient(ZeekrClient):
     # MARK: - 请求辅助
 
     @staticmethod
+    def _assert_query_signable(query: dict[str, str] | None) -> None:
+        """拦住会导致「签名串与实际发送字节分叉」的 query 值。
+
+        签名走 `zeekr_signing._escape_query_value`（`*`→`%2A`、撤销 `%2F`/`%3F`
+        的编码），实际发送却交给 httpx 的 `params=` 自行编码。两者只对
+        「无特殊字符」的值一致。当前只有 latest=false / target=new，相安无事；
+        但以后若有人传入含 `*` `/` `?` 空格或非 ASCII 的值，网关会报 079025，
+        而签名串"看起来"是对的 —— 极难定位。
+
+        这里显式拦住，把静默失效变成即时可见的错误。真需要传特殊字符时，
+        应改为自行拼好 query 字符串并让签名与发送复用同一份编码结果。
+        """
+        for key, value in (query or {}).items():
+            if not _QUERY_SAFE.match(str(value)):
+                raise ZeekrAPIError(
+                    "bad_query",
+                    f"query 参数 {key}={value!r} 含特殊字符，签名与实际编码会分叉；"
+                    "请改用自行拼接的原始 query 字符串",
+                )
+
+    @staticmethod
     def _unwrap(payload: Any) -> dict[str, Any]:
         """解包网关响应，识别错误信封。
 
         网关失败时可能返回 `{"code","msg","success"}` 形式的错误信封，
         而非车辆数据 —— 必须识别出来，避免污染解析结果。
+
+        关键点：**错误信封并不总是带 `success` 字段**，更常见的形态是只有
+        `{"code": "079025", "msg": "Signature authentication failed"}`。
+        此前 `success` 缺失时默认按 True 处理，于是一整类错误被当成"数据"、
+        被后续解析消化成「账号下未找到车辆」—— 真正的原因（签名算错、
+        令牌无权）完全看不见，排障方向被彻底带偏。这里对已知业务错误码兜底。
         """
         if not isinstance(payload, dict):
             raise ZeekrAPIError("invalid", "网关返回了非预期格式")
 
         code = str(payload.get("code", "0"))
-        ok = payload.get("success", True)
+        success = payload.get("success")
+
+        if code in KNOWN_ERROR_CODES:
+            # 已知业务错误码：无论有没有 success 都算失败
+            ok = False
+        elif success is None:
+            # 确实没有 success 字段，且不属于已知错误码 —— 交给上层判断
+            ok = True
+        else:
+            ok = bool(success)
 
         # 错误信封：只有 code/msg 而没有业务字段
         if not ok and code not in ("0", "000000"):
-            raise ZeekrAPIError(code, payload.get("msg") or payload.get("message") or "请求失败", payload)
+            raise ZeekrAPIError(
+                code,
+                payload.get("msg") or payload.get("message") or "请求失败",
+                payload,
+            )
 
         return payload
 
@@ -340,6 +440,7 @@ class LiveZeekrClient(ZeekrClient):
         retry_on_session_conflict: bool = True,
     ) -> dict[str, Any]:
         """发起 GW3 请求，自动处理签名与令牌问题。"""
+        self._assert_query_signable(query)
         body_str = compact_json(body) if body is not None else None
 
         headers = build_gw3_headers(
@@ -362,6 +463,16 @@ class LiveZeekrClient(ZeekrClient):
         payload = resp.json()
         code = str(payload.get("code", "0"))
 
+        # 签名失败：常量 ERR_SIGNATURE 此前**定义了却从未被引用**，这条错误会被
+        # _unwrap 静默放过，最终表现为误导性的「未找到车辆」。单独打一条可操作
+        # 的 ERROR —— 079025 几乎总是签名串构造问题，直接指向该查哪里。
+        if code == ERR_SIGNATURE:
+            logger.error(
+                "GW3 签名校验失败（%s）：请核对 GW3_SIGNED_HEADERS 白名单、"
+                "待签名串的换行规则，以及参与签名的 body 是否与实发字节完全一致",
+                ERR_SIGNATURE,
+            )
+
         # 会话被新登录顶替：重登一次再试
         if code == ERR_LOGGED_IN_ELSEWHERE and retry_on_session_conflict:
             logger.info("会话被顶替，尝试重新登录")
@@ -383,8 +494,15 @@ class LiveZeekrClient(ZeekrClient):
         path: str,
         body: dict[str, Any] | None = None,
         query: dict[str, str] | None = None,
+        retry_on_session_conflict: bool = True,
     ) -> dict[str, Any]:
-        """发起 GW2 请求。"""
+        """发起 GW2 请求。
+
+        与 GW3 对齐：会话被新登录顶替（079021）时自动重登并重试一次。
+        此前 GW2 完全没有这条自愈分支 —— 令牌一被顶替就只会失败，
+        用户被迫重新走一遍短信验证。
+        """
+        self._assert_query_signable(query)
         body_str = compact_json(body) if body is not None else None
         headers = sign_gw2(
             self.cfg.hmac_access_key,
@@ -403,7 +521,17 @@ class LiveZeekrClient(ZeekrClient):
             kwargs["params"] = query
 
         resp = await self._http.request(method, f"{GW2_HOST}{path}", **kwargs)
-        return self._unwrap(resp.json())
+        payload = resp.json()
+        code = str(payload.get("code", "0"))
+
+        if code == ERR_LOGGED_IN_ELSEWHERE and retry_on_session_conflict:
+            logger.info("GW2 会话被顶替，尝试重新登录")
+            await self._login_gw2()
+            return await self._request_gw2(
+                method, path, body, query, retry_on_session_conflict=False
+            )
+
+        return self._unwrap(payload)
 
     # MARK: - 车辆数据
 
@@ -548,14 +676,24 @@ class LiveZeekrClient(ZeekrClient):
             _compact(path): value for path, value in leaves.items()
         }
 
-        def pick(*aliases: str) -> Any:
+        # 12V 电瓶电量所在的紧凑路径。动力电池 SOC 的别名匹配**必须排除它** ——
+        # 两者字段名同为 chargeLevel，后缀匹配会静默取错值。
+        lv_battery_charge_level = "mainbatterystatuschargelevel"
+
+        def pick(*aliases: str, exclude: tuple[str, ...] = ()) -> Any:
             """按别名匹配叶子路径。
 
             匹配前把两侧的 `.` 与 `[n]` 下标都剥离，只留字母数字。
             这样别名表用「连续小写字母」书写即可，既简洁又对
             路径分隔方式的变化免疫 —— 无论网关返回的层级怎么嵌套，
             只要字段名序列一致就能命中。
+
+            `exclude` 用于排除掉「语义上绝不该被这个别名命中」的路径。
+            典型场景：动力电池 SOC 与 12V 电瓶电量都以 `chargeLevel` 结尾，
+            后缀匹配会把电瓶的值填进 SOC（实测：报文缺 electricVehicleStatus
+            时 soc 被解析成 88，正好等于 12V 电瓶电量）—— 用户会误以为整车满电。
             """
+            excluded = tuple(_compact(item) for item in exclude)
             for alias in aliases:
                 key = _compact(alias)
                 if not key:
@@ -565,6 +703,8 @@ class LiveZeekrClient(ZeekrClient):
                     return compact_leaves[key]
                 # 退化为后缀匹配（容忍外层多包了一层）
                 for compact_path, value in compact_leaves.items():
+                    if any(compact_path.endswith(item) for item in excluded):
+                        continue
                     if compact_path.endswith(key):
                         return value
             return None
@@ -592,8 +732,16 @@ class LiveZeekrClient(ZeekrClient):
             return None
 
         # 注意：SOC 取 electricVehicleStatus.chargeLevel
-        # mainBatteryStatus.chargeLevel 是 **12V 电瓶**，不是动力电池
-        soc = as_float(pick("electricvehiclestatuschargelevel", "chargelevel"))
+        # mainBatteryStatus.chargeLevel 是 **12V 电瓶**，不是动力电池。
+        # 光靠注释拦不住 —— 两条路径字段名相同，后缀匹配会静默取到电瓶的值，
+        # 所以这里显式把 12V 那条排除掉（实测缺 EV 字段时 soc 会变成 88）。
+        soc = as_float(
+            pick(
+                "electricvehiclestatuschargelevel",
+                "chargelevel",
+                exclude=(lv_battery_charge_level,),
+            )
+        )
         b12_level = as_float(
             pick("maintenancestatusmainbatterystatuschargelevel", "mainbatterystatuschargelevel")
         )
@@ -634,6 +782,15 @@ class LiveZeekrClient(ZeekrClient):
         if charge_current is not None and charge_voltage is not None:
             is_charging = (charge_current * charge_voltage) > 500  # 约 0.5kW 以上视为充电中
 
+        # 充电功率：优先用网关直报的字段（经 _normalize_power 按量级归一到 kW），
+        # 缺失时再由电流 × 电压推算。
+        #
+        # 必须用 `is None` 判断，不能用 `or` —— 网关在未充电时直报 0.0，
+        # 而 0.0 是 falsy，`or` 会把它误当成"缺失"而回退到推算分支（语义错误）。
+        charge_power = _normalize_power(pick("chargepowerkw", "chargepower"))
+        if charge_power is None and charge_current is not None and charge_voltage is not None:
+            charge_power = round(charge_current * charge_voltage / 1000.0, 2)
+
         return {
             "vin": vin,
             "nickname": "",
@@ -646,16 +803,9 @@ class LiveZeekrClient(ZeekrClient):
             "battery12vLevel": b12_level,
             "isCharging": is_charging,
             "isPlugged": as_bool(pick("chargerconnected", "statusofchargerconnection")),
-            # 网关的充电功率量纲在不同车型/固件下不一致（W 或 0.001kW），
-            # 无法凭字段名断定。这里按量级推断：>1000 视为瓦特，否则视为 kW。
-            # 充电功率：优先用网关直报的字段；若没有，则由电流×电压推算。
-            # 网关的量纲在不同车型/固件下不一致，故用 _normalize_power 按量级归一。
-            "chargePowerKw": _normalize_power(pick("chargepowerkw", "chargepower"))
-            or (
-                round(charge_current * charge_voltage / 1000.0, 2)
-                if charge_current is not None and charge_voltage is not None
-                else None
-            ),
+            # 网关的充电功率量纲在不同车型/固件下不一致（W 或 kW），
+            # 已在上方由 _normalize_power 按量级归一到 kW
+            "chargePowerKw": charge_power,
             "chargeVoltage": charge_voltage,
             "chargeCurrent": charge_current,
             "minutesToFull": minutes_to_full,
@@ -667,12 +817,12 @@ class LiveZeekrClient(ZeekrClient):
                 "rearLeft": as_bool(pick("doorstatusrearleft", "rearleftdoorstatus")),
                 "rearRight": as_bool(pick("doorstatusrearright", "rearrightdoorstatus")),
             },
-            "windows": {
-                "frontLeft": None,
-                "frontRight": None,
-                "rearLeft": None,
-                "rearRight": None,
-            },
+            # 车窗状态：网关在国区**没有稳定的车窗字段**（docs/真机验证清单.md
+            # 第三节把「车窗状态」列为待验证）。此前这里返回四个硬编码的 None，
+            # 形态上像"读到了但未知"，实际是拿假数据伪装成有数据 —— 客户端还会
+            # 把它渲染成「已关」。改为整体留空，语义诚实：就是没有这个数据。
+            # 等真机确认字段名后再补解析（届时可参照 doors 的 pick 写法）。
+            "windows": None,
             "trunkOpen": as_bool(pick("trunkstatus", "taildoorstatus")),
             "frunkOpen": as_bool(pick("frunkstatus", "fronttrunkstatus")),
             "tyreFrontLeft": as_float(pick("tyrestatusdriver", "tyrepressurefrontleft")),
