@@ -48,8 +48,14 @@ Thumbs.db
 *.swp
 
 # ─────────── 测试账单样本 ───────────
+# 账单 CSV 一律不入库。例外规则必须写**实际存在的路径**才生效 ——
+# 原先写的是根目录 tests/fixtures/*.csv，而本仓库的测试目录是
+# server/tests/，该规则从未匹配到任何文件（server/tests/fixtures/*.csv
+# 依然会被上面的 *.csv 忽略）。
+# 注：当前测试是在内存里现造 CSV 的，还没有 fixtures 目录；
+# 一旦要加样本文件，放到 server/tests/fixtures/ 即可自动入库。
 *.csv
-!tests/fixtures/*.csv
+!server/tests/fixtures/*.csv
 
 .server.pid
 .server.log
