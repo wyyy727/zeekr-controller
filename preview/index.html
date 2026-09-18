@@ -23,6 +23,12 @@
   --cang-qing:      #2C3E5C;  /* 藏青 */
   --qun-qing:       #4C8DAE;  /* 群青 */
   --zhu-sha:        #E5483B;  /* 朱砂 · 告警（更干净的红） */
+  /* 珊瑚 · 「开启中」状态色（车控按钮）。
+     与朱砂告警红同属红粉系，刻意用明度拉开差距，避免被读成「异常/失败」：
+     浅色模式下加深到 #C9483F（对比度 4.25 才能压住浅玻璃底），
+     深色模式下用本源色 #FA9894（对比度 6.68）。
+     深色模式的值由本文件末尾的 prefers-color-scheme 块覆盖。 */
+  --shan-hu:        #C9483F;
   --yan-zhi:        #C0392B;  /* 胭脂 */
   --teng-huang:     #FFB020;  /* 藤黄 · 强调（明亮琥珀） */
   --xiang-se:       #F4B400;  /* 缃色 */
@@ -59,6 +65,8 @@
     --text-3: #626B76;
     --accent: #4DA3DC;
     --separator: rgba(255, 255, 255, .08);
+    /* 深色模式用珊瑚粉本源色（浅色模式为加深版 #C9483F） */
+    --shan-hu: #FA9894;
   }
 }
 
@@ -557,18 +565,25 @@ body.is-scrolled .topbar::before {
   to { transform: translate(-50%, -50%) scale(1); opacity: 0; }
 }
 
-/* ③ 开关型：开启态用主色玻璃块，保留透光感 */
+/* ③ 开关型：开启态只染图标 + 文字加粗。
+   不再整块铺主色 —— 整块变色在密集网格里过重，且盖掉了玻璃质感。
+   现在按钮底保持与未开启时一致，仅靠「图标着色」传达状态，
+   一眼能扫出哪些是开着的，又不破坏网格的整齐。 */
 .ctrl--toggle.on {
-  background: color-mix(in srgb, var(--accent) 88%, transparent);
-  color: #fff;
-  border-color: color-mix(in srgb, #fff 32%, transparent);
-  box-shadow:
-    inset 0 1px 0 0 rgba(255,255,255,.34),
-    0 4px 16px -6px color-mix(in srgb, var(--accent) 70%, transparent);
+  color: var(--text-1);
+}
+.ctrl--toggle.on .ico {
+  color: var(--shan-hu);
+  /* 轻微辉光：让着色图标从玻璃底上「浮」起来，弥补线条显色面积小 */
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--shan-hu) 45%, transparent));
 }
 .ctrl--toggle.on .ico svg { stroke-width: 2; }
-.ctrl--toggle.on .ctrl-sub { color: rgba(255,255,255,.78); }
-.ctrl--toggle.on:active { background: var(--tian-qing-deep); }
+/* 开启态文字加粗，与图标的重量感对齐 */
+.ctrl--toggle.on .ctrl-txt { font-weight: 600; }
+.ctrl--toggle.on .ctrl-sub { color: var(--text-2); }
+.ctrl--toggle.on:active {
+  background: color-mix(in srgb, var(--shan-hu) 12%, var(--glass-bg));
+}
 
 /* ④ 瞬时动作用菱形角标，和开关型区分开 */
 .ctrl--action::after {
@@ -592,15 +607,12 @@ body.is-scrolled .topbar::before {
   background: color-mix(in srgb, var(--surface-alt) 78%, transparent);
   backdrop-filter: blur(1px);
 }
-.ctrl--toggle.on .ctrl-spin { background: color-mix(in srgb, var(--accent) 78%, transparent); }
+/* 开启态按钮底已是普通玻璃，转圈遮罩无需再为主色块特调 */
 .ctrl-spin::after {
   content: ''; width: 17px; height: 17px; border-radius: 50%;
   border: 2px solid color-mix(in srgb, var(--text-3) 35%, transparent);
   border-top-color: var(--accent);
   animation: ctrlSpin .7s linear infinite;
-}
-.ctrl--toggle.on .ctrl-spin::after {
-  border-color: rgba(255,255,255,.35); border-top-color: #fff;
 }
 @keyframes ctrlSpin { to { transform: rotate(360deg); } }
 
