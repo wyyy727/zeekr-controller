@@ -6,6 +6,8 @@
 //
 //  设计对齐确认版预览页（preview/index.html）：
 //  - 底部导航为「悬浮玻璃胶囊」，两侧留 14pt 间隙，而非通栏
+//  - 胶囊**贴近屏幕底边**（下沿距屏幕底 14pt），因此它会压在系统底部安全区
+//    之上 —— 见 `tabBarBottomGap` 的说明
 //  - 背景有一层氛围光斑（4 组径向渐变）—— 玻璃必须有可折射的内容才看得出效果
 //  - 卡片保持实心（密集文字上盖玻璃是可读性灾难，Apple HIG 明确反对）
 //  - 不使用 .clipped()，它会让玻璃采样不到背景从而静默失效
@@ -23,13 +25,22 @@ struct RootView: View {
     /// 悬浮胶囊两侧的留白，让 tab bar 从内容上「浮」起来
     private static let tabBarSideInset: CGFloat = 14
 
-    /// Toast 距屏幕底部的间距。
+    /// 悬浮胶囊下沿距**屏幕底边**的留白。
+    ///
+    /// 注意基准是屏幕底边，不是安全区上沿 —— `tabBar` 上挂了
+    /// `ignoresSafeArea(.container, edges: .bottom)`，让它越过 34pt 的系统
+    /// 安全区、直接贴住屏幕底部。这样在任何机型上都成立：没有底部安全区的
+    /// 设备（Home 键机型）会退化成普通的 14pt 下边距，不会跑到屏幕外面去。
+    private static let tabBarBottomGap: CGFloat = 14
+
+    /// Toast 距**安全区上沿**的间距（Toast 仍按安全区排版，不走 ignoresSafeArea）。
     ///
     /// 需紧贴底部导航胶囊上方，而不是让 Toast 落在内容区 ——
     /// 车控面板是车况页最后一张卡片，若 Toast 浮在屏幕中部偏下的位置，
     /// 滚到底部时两者会占据同一区域而互相遮挡。
-    /// 数值 = 胶囊高度（约 64pt）+ 底部留白 6pt + 安全区（约 34pt）+ 间隙 8pt。
-    private static let toastBottomInset: CGFloat = 112
+    ///
+    /// 数值 = 胶囊上沿距屏幕底（下留白 14 + 胶囊 64 = 78）+ 间隙 8 − 系统安全区 34 = 52。
+    private static let toastBottomInset: CGFloat = 52
 
     var body: some View {
         // 这里刻意**不使用** `GlassEffectContainer`。
@@ -170,8 +181,10 @@ struct RootView: View {
         .padding(.vertical, 7)
         .glassEffect(.regular, in: .capsule)
         .padding(.horizontal, Self.tabBarSideInset)
-        // 贴在安全区之上，两侧留 14pt，整体悬浮而非通栏
-        .padding(.bottom, 6)
+        // 两侧留 14pt，整体悬浮而非通栏；
+        // 再越过系统安全区，让胶囊真正贴近屏幕底边（详见 tabBarBottomGap）。
+        .padding(.bottom, Self.tabBarBottomGap)
+        .ignoresSafeArea(.container, edges: .bottom)
     }
 
     private func tabItem(_ tab: AppTab) -> some View {

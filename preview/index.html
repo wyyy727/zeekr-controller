@@ -211,7 +211,12 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
   background: var(--bg);
   color: var(--text-1);
-  padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  /* 底部内容预留：内容下边缘锚定在距屏幕底 105px。
+     自屏幕底往上：下留白 14 → 胶囊 59 → 胶囊上沿 73 → 与内容间隙 32 → 105。
+     iOS 侧用同一组数字（胶囊 64pt）：14 + 64 = 78，间隙 27，同样落在 105。
+     即 105 是两端共同的锚点，胶囊高度差 5px 由间隙吸收。
+     105 − 系统安全区 34 = 71。 */
+  padding-bottom: calc(71px + env(safe-area-inset-bottom));
   transition: background .2s;
   position: relative;
   overflow-x: hidden;
@@ -688,8 +693,9 @@ body.is-scrolled .topbar::before {
 .tabbar {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
   display: flex;
-  /* 外层留白，让胶囊浮起来 */
-  padding: 0 14px calc(env(safe-area-inset-bottom) + 10px);
+  /* 外层留白，让胶囊浮起来。下留白 14px 与 iOS 侧 RootView.tabBarBottomGap 一致，
+     胶囊贴住屏幕底边（不再是早先的 10px）。 */
+  padding: 0 14px calc(env(safe-area-inset-bottom) + 14px);
   background: transparent;
   pointer-events: none;                    /* 空白区不挡内容 */
 }
@@ -838,9 +844,11 @@ canvas { display: block; width: 100%; }
    若提示条浮在屏幕中部偏下，滚到底部时会与之重叠而被挡住。 */
 .toast {
   position: fixed; left: 50%;
-  /* tabbar 上沿 = safe-area + padding 10px + 胶囊 59px = safe-area + 69px，
-     此处再留 8px 间隙，与 iOS 侧的 toastBottomInset 语义对齐 */
-  bottom: calc(env(safe-area-inset-bottom) + 77px);
+  /* tabbar 上沿 = safe-area + padding 14px + 胶囊 59px = safe-area + 73px，
+     此处再留 8px 间隙 = safe-area + 81px。
+     取 52 与 iOS 侧的 toastBottomInset 语义对齐 —— iOS 的 52 是相对安全区上沿计的，
+     换算到屏幕底即 52 + 34 = 86 ≈ 81（差额来自两边胶囊高度 64pt / 59px）。 */
+  bottom: calc(env(safe-area-inset-bottom) + 52px);
   transform: translateX(-50%) translateY(12px);
   background: var(--glass-bg);
   /* 与 tabbar / 卡片共用同一档模糊，同屏并置时质感才一致 */
