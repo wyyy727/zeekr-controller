@@ -169,4 +169,11 @@ enum Metrics {
     static let screenPadding: CGFloat = 16
     /// 触控目标最小边长（iOS HIG）
     static let minTouchTarget: CGFloat = 44
+    /// 底部浮动导航胶囊占用的高度（**不含**系统安全区）。
+    ///
+    /// = 胶囊高 64pt（padding 7×2 + item minHeight 50）+ 下留白 6pt。
+    /// 供 `ScreenContainer` 预留底部空间：胶囊是浮在滚动内容之上的，
+    /// 若不预留，最后一张卡片（快捷车控）会永远停在胶囊后面滚不上来。
+    /// 系统安全区由 `safeAreaBar` 自动叠加，无需计入。
+    static let tabBarClearance: CGFloat = 70
 }

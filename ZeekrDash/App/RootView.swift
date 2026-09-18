@@ -32,26 +32,34 @@ struct RootView: View {
     private static let toastBottomInset: CGFloat = 112
 
     var body: some View {
-        // 玻璃形状合并为一份采样，避免相邻玻璃之间出现接缝
-        GlassEffectContainer(spacing: Metrics.sectionSpacing) {
-            ZStack(alignment: .bottom) {
-                backgroundLayer
+        ZStack(alignment: .bottom) {
+            // 玻璃形状合并为一份采样，避免相邻玻璃之间出现接缝。
+            //
+            // 注意 spacing 是**融合阈值**：间距小于它的玻璃形状会被合并成
+            // 同一个形状（iOS 26 起如此，iOS 27 的 Liquid Glass v2 同样如此）。
+            // 因此底部导航胶囊刻意留在容器**之外** —— 车控面板那 15 个玻璃
+            // 按钮会随页面滚动，若与胶囊同处一个容器，经过时会被"吸"进同一个
+            // 形状，表现为按钮游动 / 形变 / 不固定。
+            GlassEffectContainer(spacing: Metrics.sectionSpacing) {
+                ZStack(alignment: .bottom) {
+                    backgroundLayer
 
-                activeScreen
+                    activeScreen
 
-                tabBar
-
-                // 全局 Toast（车控指令回执等），紧贴底部导航胶囊之上
-                if let toast = store.toast {
-                    ToastBubble(text: toast)
-                        .padding(.bottom, Self.toastBottomInset)
-                        .padding(.horizontal, Metrics.screenPadding)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                        .allowsHitTesting(false)
+                    // 全局 Toast（车控指令回执等），紧贴底部导航胶囊之上
+                    if let toast = store.toast {
+                        ToastBubble(text: toast)
+                            .padding(.bottom, Self.toastBottomInset)
+                            .padding(.horizontal, Metrics.screenPadding)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .allowsHitTesting(false)
+                    }
                 }
             }
-            .animation(.easeInOut(duration: 0.22), value: store.toast)
+
+            tabBar
         }
+        .animation(.easeInOut(duration: 0.22), value: store.toast)
         .tint(Theme.accent(scheme))
         .alert(
             "已切换为模拟数据",
@@ -249,6 +257,20 @@ struct ScreenContainer<Content: View, Accessory: View>: View {
         .background(Color.clear)
         .safeAreaInset(edge: .top, spacing: 0) {
             topBar
+        }
+        // 为底部浮动导航胶囊预留空间。
+        //
+        // 为什么用 safeAreaBar（iOS 26+）而不是 safeAreaInset：
+        // 两者都会把滚动内容顶上来，但 safeAreaBar 额外会把**滚动边缘效果**
+        // 延伸到这一侧 —— 内容滚到胶囊附近时是柔和淡出，而不是被硬生生裁在
+        // 胶囊下面。胶囊本身仍是浮在内容之上的（见 RootView.tabBar），内容
+        // 照旧从它底下穿过，视觉规格与 preview/index.html 一致。
+        //
+        // 高度只写胶囊自身占的 70pt；系统安全区由 safeAreaBar 自动叠加，
+        // 不必手算 34pt。此前这里缺了这道预留 —— 胶囊占了 104pt 而内容只留
+        // 24pt，导致「快捷车控」永远滚不到胶囊上方，只能在它后面来回弹。
+        .safeAreaBar(edge: .bottom, spacing: 0) {
+            Color.clear.frame(height: Metrics.tabBarClearance)
         }
         .scrollIndicators(.hidden)
     }
