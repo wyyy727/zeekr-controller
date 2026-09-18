@@ -274,12 +274,16 @@ struct DashboardView: View {
                     // 空调开启是中性状态，不用告警色
                     neutral: true
                 )
+                // 车窗状态在 live 模式下拿不到（网关字段名尚未确认）。
+                // 没有数据时显式显示「未知」并走中性配色，而不是默认成「已关」——
+                // 后者等于把"不知道"说成"没问题"，是把无数据伪装成好消息。
                 StatusChip(
                     title: "车窗",
-                    isGood: !hasOpenWindow(status),
-                    goodText: "已关",
+                    isGood: status.windows == nil || !hasOpenWindow(status),
+                    goodText: status.windows == nil ? "未知" : "已关",
                     badText: "未关",
-                    icon: "car.window.left"
+                    icon: "car.window.left",
+                    neutral: status.windows == nil
                 )
                 StatusChip(
                     title: "后备箱",
@@ -296,7 +300,9 @@ struct DashboardView: View {
     }
 
     private func hasOpenWindow(_ status: VehicleStatus) -> Bool {
-        (status.windows ?? [:]).values.contains(true)
+        // 值本身是 Bool?（服务端可能返回 null 表示"未知"），
+        // 用闭包判断而不是 contains(true)，避免依赖可选值提升。
+        (status.windows ?? [:]).values.contains { $0 == true }
     }
 
     // MARK: - 底部说明

@@ -95,10 +95,20 @@ struct ChargesView: View {
 
     // MARK: - 总额卡片
 
+    /// 统计口径说明。
+    ///
+    /// 服务端保证总额 / 笔数 / 月度 / 服务商分布同属一个统计窗口，
+    /// 这里把窗口长度标出来，避免把「累计」误读成"全历史"
+    /// （月度图只画最近几个月，两者并排容易让人以为同范围）。
+    private var totalScopeCaption: String {
+        guard let months = model.summary?.windowMonths else { return "累计充电消费" }
+        return "累计充电消费 · 近 \(months) 个月"
+    }
+
     private var totalCard: some View {
         VStack(spacing: 14) {
             VStack(spacing: 4) {
-                Text("累计充电消费")
+                Text(totalScopeCaption)
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textTertiary(scheme))
                 HStack(alignment: .firstTextBaseline, spacing: 3) {

@@ -33,12 +33,24 @@ struct TripsView: View {
                     }
                     summaryCard
                     tripList
+
+                    // 有数据、但期间连接失败过：用横幅提示而不是整页错误态
+                    // （与首页 DashboardView 的处理方式保持一致）
+                    if let message = model.errorMessage {
+                        ErrorBanner(message: message, onRetry: { model.errorMessage = nil })
+                    }
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
             .refreshable { await model.load(days: model.selectedDays) }
         }
-        .task { await model.load(days: model.selectedDays) }
+        // 用 .task(id:) 而不是 .task + .onChange：
+        // id 变化时 SwiftUI 会自动取消上一个 task，天然消除了"快速切换区间时
+        // 多个 load 并发、旧响应覆盖新数据"的竞态（原先在 onChange 里裸起
+        // Task，不可取消，也无人回收）。
+        .task(id: model.selectedDays) {
+            await model.load(days: model.selectedDays)
+        }
     }
 
     // MARK: - 时间范围选择
@@ -50,9 +62,6 @@ struct TripsView: View {
             Text("90 天").tag(90)
         }
         .pickerStyle(.segmented)
-        .onChange(of: model.selectedDays) { _, days in
-            Task { await model.load(days: days) }
-        }
     }
 
     // MARK: - 能耗趋势图
@@ -277,7 +286,8 @@ private struct TripRow: View {
                         label("\(String(format: "%.1f", energy)) kWh", icon: "bolt")
                     }
                     if let duration = trip.durationMinutes {
-                        label("\(Int(duration)) 分", icon: "clock")
+                        // 四舍五入，而不是 Int() 的向零截断：1.9 分应显示「2 分」
+                        label("\(Int(duration.rounded())) 分", icon: "clock")
                     }
                 }
             }
@@ -309,18 +319,33 @@ private struct TripRow: View {
         .foregroundStyle(Theme.textTertiary(scheme))
     }
 
-    private var timeText: String {
-        guard let date = trip.startTime else { return "--:--" }
+    /// 复用的日期格式化器。
+    ///
+    /// 这两个属性原先每次访问都 `DateFormatter()` 新建一个 —— 列表滚动时
+    /// 每行每次重绘都要分配两个，是典型的高频创建反模式。提为 static 常量后
+    /// 只创建一次。同时显式固定 en_US_POSIX，避免 locale 影响数字呈现。
+    private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
-        return formatter.string(from: date)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter
+    }()
+
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter
+    }()
+
+    private var timeText: String {
+        guard let date = trip.startTime else { return "--:--" }
+        return Self.timeFormatter.string(from: date)
     }
 
     private var dateText: String {
         guard let date = trip.startTime else { return "--" }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MM-dd"
-        return formatter.string(from: date)
+        return Self.dayFormatter.string(from: date)
     }
 }
 

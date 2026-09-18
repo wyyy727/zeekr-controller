@@ -128,7 +128,10 @@ struct SOCRing: View {
         .onAppear(perform: startAnimations)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            "电量 \(Int(soc)) 百分比\(isCharging ? "，正在充电" : (isLow ? "，电量偏低" : ""))"
+            // 与屏幕上的 `%.0f` 保持一致：都用四舍五入。
+            // 此前读屏用的是 Int(soc)（向零截断），soc=82.6 时屏幕显示 83、
+            // 读屏却念「82」—— 视障用户拿到的是错的数值。
+            "电量 \(Int(soc.rounded())) 百分比\(isCharging ? "，正在充电" : (isLow ? "，电量偏低" : ""))"
         )
     }
 

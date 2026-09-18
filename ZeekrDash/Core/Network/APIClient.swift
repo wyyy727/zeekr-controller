@@ -49,6 +49,12 @@ final class APIClient {
     /// 当前 BaseURL（由 SettingsStore 在启动及修改时同步进来）
     var baseURL: String = defaultBaseURL
 
+    /// 服务端 API 令牌（由 SettingsStore 同步进来）。
+    ///
+    /// 只有服务端设了 `API_TOKEN` 时才需要填；为空则**不发送** Authorization 头，
+    /// 与服务端"未设令牌即不鉴权"的默认行为一一对应。
+    var authToken: String = ""
+
     private let session: URLSession
     private let decoder = JSONDecoder.zeekr
 
@@ -155,7 +161,21 @@ final class APIClient {
         return base
     }
 
+    /// 给请求补上 `Authorization: Bearer <token>`。
+    ///
+    /// 令牌为空时什么都不做 —— 服务端 `API_TOKEN` 未设置时不启用鉴权，
+    /// 多发一个头反而会让不支持的服务端困惑。
+    private func applyAuth(to request: inout URLRequest) {
+        let token = authToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { return }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    }
+
     private func run<T: Codable>(_ request: URLRequest) async throws -> T {
+        // 统一在出口处补鉴权头，四个请求方法（get/post/delete/uploadFile）共用
+        var request = request
+        applyAuth(to: &request)
+
         let data: Data
         let response: URLResponse
         do {

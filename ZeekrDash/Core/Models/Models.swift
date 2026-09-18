@@ -53,10 +53,18 @@ struct VehicleStatus: Codable, Identifiable {
     // MARK: 门锁与车身
     /// 车门是否已锁
     var isLocked: Bool?
-    /// 车门开启状态（按位置）
-    var doors: [String: Bool]?
-    /// 车窗开启状态
-    var windows: [String: Bool]?
+    /// 车门开启状态（按位置）。
+    ///
+    /// **字典的值必须可选**：服务端在拿不到某个车门状态时返回 `null`，
+    /// 而 Swift 的 `Dictionary` 解码用的是 `decode` 而非 `decodeIfPresent`，
+    /// 值类型非可选时遇到 null 会抛 valueNotFound —— 那会让**整个
+    /// VehicleStatus 解码失败**，live 模式彻底不可用（会静默回落模拟数据）。
+    var doors: [String: Bool?]?
+    /// 车窗开启状态（按位置）。值可为 null，语义是"未知"而非"关着"。
+    ///
+    /// 服务端目前恒返回空（网关的车窗字段名尚未确认，见
+    /// docs/真机验证清单.md），首页据此显示「未知」而不是默认成「已关」。
+    var windows: [String: Bool?]?
     /// 后备箱是否开启
     var trunkOpen: Bool?
     /// 前机盖是否开启
@@ -249,6 +257,11 @@ struct ChargeSummary: Codable {
     var totalCount: Int?
     /// 平均单价 元/kWh
     var avgUnitPrice: Double?
+    /// 上述所有统计量共同的统计窗口（月数）。
+    ///
+    /// 服务端保证总额/笔数/月度/服务商分布都在**同一范围内**（最近 N 个月），
+    /// 这个字段让界面能明确标注范围，而不是把"累计"和"近 N 月"混在一起。
+    var windowMonths: Int?
     /// 按月汇总
     var monthly: [ChargeMonthlyStat]?
     /// 按服务商汇总
@@ -256,6 +269,7 @@ struct ChargeSummary: Codable {
 
     enum CodingKeys: String, CodingKey {
         case totalAmount, totalEnergyKwh, totalCount, avgUnitPrice
+        case windowMonths
         case monthly, byProvider
     }
 }

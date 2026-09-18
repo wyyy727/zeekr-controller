@@ -18,6 +18,8 @@ struct SettingsView: View {
     @State private var showCodeSheet = false
     /// 服务端地址输入框焦点：失焦即提交，避免「改完不按回车」导致不生效
     @FocusState private var isAddressFocused: Bool
+    /// API 令牌输入框焦点，同上
+    @FocusState private var isTokenFocused: Bool
 
     var body: some View {
         // 页面标题与底部导航重复，已移除；顶部右上角为数据来源徽标
@@ -44,21 +46,24 @@ struct SettingsView: View {
 
     // MARK: - 服务端连接
 
-    /// 已应用过的地址，用于去重 —— 回车与失焦会各触发一次，避免重复请求
-    @State private var appliedAddress: String?
+    /// 已应用过的「地址 + 令牌」组合，用于去重 —— 回车与失焦会各触发一次，
+    /// 避免重复请求。把令牌也纳入 key，这样只改令牌也能触发重新连接。
+    @State private var appliedConnection: String?
 
-    /// 地址变更后统一处理：同步客户端、重跑诊断、让首页按新地址重取数据。
+    /// 地址或令牌变更后统一处理：同步客户端、重跑诊断、让首页按新配置重取数据。
     ///
-    /// 除了 `.onSubmit`（回车），地址框失焦时也会调到这里：用户改完地址
-    /// 往往直接切走而不按回车，只挂 `.onSubmit` 会让新地址停留在
-    /// UserDefaults 里、界面上却还是旧数据。
+    /// 除了 `.onSubmit`（回车），失焦时也会调到这里：用户改完往往直接切走
+    /// 而不按回车，只挂 `.onSubmit` 会让新值停留在 UserDefaults 里、
+    /// 界面上却还是旧数据。
     private func applyAddress() async {
         let current = settings.baseURL
-        guard current != appliedAddress else { return }   // 同一次编辑只跑一次
-        appliedAddress = current
+        let key = current + "\u{1}" + settings.apiToken
+        guard key != appliedConnection else { return }   // 同一次编辑只跑一次
+        appliedConnection = key
 
         APIClient.shared.baseURL = current
-        // 换了地址，允许重新提示一次「已切换为模拟数据」
+        APIClient.shared.authToken = settings.apiToken
+        // 换了地址/令牌，允许重新提示一次「已切换为模拟数据」
         store.resetFallbackNotification()
         await model.checkHealth(baseURL: current)
         await store.refresh()
@@ -91,6 +96,33 @@ struct SettingsView: View {
                         }
                         .focused($isAddressFocused)
                 }
+
+                Divider().overlay(Theme.separator(scheme))
+
+                HStack {
+                    Text("API 令牌")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.textSecondary(scheme))
+                    Spacer()
+                    SecureField("未启用可留空", text: Bindable(settings).apiToken)
+                        .font(.system(size: 13))
+                        .multilineTextAlignment(.trailing)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onSubmit {
+                            Task { await applyAddress() }
+                        }
+                        .onChange(of: isTokenFocused) { _, focused in
+                            guard !focused else { return }
+                            Task { await applyAddress() }
+                        }
+                        .focused($isTokenFocused)
+                }
+
+                Text("服务端设了 API_TOKEN 后必填，否则所有接口会返回 401；留空表示未启用鉴权")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textTertiary(scheme))
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 Divider().overlay(Theme.separator(scheme))
 

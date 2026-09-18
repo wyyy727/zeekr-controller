@@ -50,10 +50,23 @@ final class TripsViewModel {
 
     // MARK: - 加载
 
+    /// 当前加载代次。每次 `load` 自增，用于丢弃"过时请求"的结果。
+    ///
+    /// 为什么需要：分段控件切得快时会同时有多个 load 在飞。先前那个如果后返回，
+    /// 就会用**旧区间**的数据覆盖新区间（图表显示的日期范围与选中项不符），
+    /// 而且它的 `defer` 会把 `isLoading` 提前置回 false、加载态提前消失。
+    private var loadGeneration = 0
+
     func load(days: Int) async {
+        loadGeneration += 1
+        let generation = loadGeneration
+
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
+        defer {
+            // 只有"最后一次"加载才有资格关掉加载态
+            if generation == loadGeneration { isLoading = false }
+        }
 
         // 地址未配置 / 指向 localhost：直接使用本地模拟数据，不联网
         if SettingsStore.shared.prefersMockData {
@@ -73,12 +86,23 @@ final class TripsViewModel {
             )
 
             let (loadedTrips, loadedTrend) = try await (tripsTask, trendTask)
+
+            // 已被更新的请求取代（或任务被取消）：丢弃本次结果，不要写回
+            guard generation == loadGeneration, !Task.isCancelled else { return }
+
             trips = loadedTrips
             trend = loadedTrend
         } catch {
-            // 真实地址不可达：回落模拟数据，保证页面不空白；
-            // 用户已由首页的弹框与徽标知晓当前不是真实数据
+            // 期间已经有更新的加载在跑，别用旧请求的失败去覆盖它的状态
+            guard generation == loadGeneration else { return }
+
+            // 真实地址不可达：回落模拟数据，保证页面不空白
             applyMock(days: days)
+            // 同时把错误留下来供界面提示。
+            // 此前这里连 errorMessage 也被 applyMock 置成 nil，导致
+            // TripsView 的错误态 UI 永远走不到（是段死代码），用户也就
+            // 完全不知道「当前看到的其实是模拟数据」。
+            errorMessage = "连接服务端失败，当前展示的是模拟数据"
         }
     }
 

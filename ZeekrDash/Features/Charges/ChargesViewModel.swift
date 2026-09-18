@@ -125,11 +125,19 @@ final class ChargesViewModel {
 
     // MARK: - 提示
 
+    /// 当前 toast 的自动清除任务。连续提示时先取消上一个 ——
+    /// 否则先前那个 Task 到点会把**后一条**仍在展示的 toast 提前清掉
+    /// （表现为第二条只闪了不到 2.4 秒就消失）。
+    private var toastTask: Task<Void, Never>?
+
     func showToast(_ message: String) {
         toast = message
-        Task {
+        toastTask?.cancel()
+        toastTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 2_400_000_000)
-            toast = nil
+            guard !Task.isCancelled else { return }
+            // 只有"仍然是这条消息"时才清除，避免误清掉更新后的那条
+            if self?.toast == message { self?.toast = nil }
         }
     }
 }

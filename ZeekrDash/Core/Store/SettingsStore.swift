@@ -18,6 +18,7 @@ final class SettingsStore {
         static let baseURL        = "settings.baseURL"
         static let pollMinutes    = "settings.pollMinutes"
         static let commandsEnabled = "settings.commandsEnabled"
+        static let apiToken       = "settings.apiToken"
     }
 
     // MARK: - 服务端地址
@@ -58,6 +59,20 @@ final class SettingsStore {
         }
     }
 
+    // MARK: - 服务端 API 令牌
+
+    /// 服务端启用 `API_TOKEN` 鉴权时填这里。
+    ///
+    /// 留空（默认）表示服务端未启用鉴权 —— 此时 App 不发送 Authorization 头。
+    /// 服务端监听 0.0.0.0，开启车控后没有令牌等于局域网内谁都能解锁车辆，
+    /// 所以两边的这个开关是一对。
+    var apiToken: String {
+        didSet {
+            UserDefaults.standard.set(apiToken, forKey: Key.apiToken)
+            APIClient.shared.authToken = apiToken
+        }
+    }
+
     // MARK: - 极氪账号（预留，仅本地记录手机号）
 
     var zeekrPhone: String {
@@ -71,7 +86,10 @@ final class SettingsStore {
         let storedMinutes = d.double(forKey: Key.pollMinutes)
         pollIntervalMinutes = storedMinutes > 0 ? storedMinutes : 5
         commandsEnabled = d.bool(forKey: Key.commandsEnabled)
+        apiToken = d.string(forKey: Key.apiToken) ?? ""
 
         APIClient.shared.baseURL = baseURL
+        // didSet 在 init 期间不会触发，这里显式同步一次
+        APIClient.shared.authToken = apiToken
     }
 }
