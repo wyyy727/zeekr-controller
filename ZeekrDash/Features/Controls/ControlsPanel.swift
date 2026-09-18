@@ -55,8 +55,17 @@ struct ControlsPanel: View {
     /// 每行按钮数（与预览页 `.ctrl-grid` 的 `repeat(3, 1fr)` 一致）
     private static let columnsPerRow = 3
 
+    /// 按钮是否可用 —— **只看总开关，不看 `store.isLoading`**。
+    ///
+    /// `isLoading` 在每次轮询（默认 5 分钟一次、充电中 60 秒一次）与每次下拉
+    /// 刷新时都会置位。而它同时决定 `usesGlass`，所以一旦接进来，整个面板的
+    /// 15 个按钮会在每次后台取数时**集体从玻璃态切成平面态、图标一起变灰**，
+    /// 取完再切回来 —— 屏幕上一大片按钮同时闪动，看着就像按钮自己在来回动。
+    ///
+    /// 后台取数是只读操作，没有任何理由改动按钮外观；重复下发的防护由
+    /// `trigger` 里的 `pending` / `succeeded` 完成，与加载态无关。
     private var isEnabled: Bool {
-        settings.commandsEnabled && !store.isLoading
+        settings.commandsEnabled
     }
 
     private var status: VehicleStatus? { store.vehicleStatus }

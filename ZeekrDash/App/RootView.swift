@@ -32,34 +32,41 @@ struct RootView: View {
     private static let toastBottomInset: CGFloat = 112
 
     var body: some View {
+        // 这里刻意**不使用** `GlassEffectContainer`。
+        //
+        // 该容器会按「两个玻璃形状的距离小于 spacing」把它们合并成同一个形状。
+        // 而本视图树里同时存在两类玻璃：
+        //   · 跟着页面滚动的 —— 车控面板那 15 个按钮、卡片上的徽标；
+        //   · 钉在屏幕上的   —— 顶部数据来源徽标、Toast、底部导航胶囊。
+        // 容器对两者一视同仁地做距离判定，于是滚动过程中「滚动玻璃」与
+        // 「固定玻璃」的相对距离一直在变，合并关系被反复建立又拆散 ——
+        // 表现就是按钮的玻璃轮廓跟着滚动游动、形变，永远停不到一个固定位置。
+        //
+        // 预览页 preview/index.html 里每块玻璃都是各自独立的 `backdrop-filter`，
+        // 本来就不存在「相邻玻璃合并」这回事，去掉容器反而更贴近设计稿。
         ZStack(alignment: .bottom) {
-            // 玻璃形状合并为一份采样，避免相邻玻璃之间出现接缝。
+            backgroundLayer
+
+            activeScreen
+
+            // 全局 Toast（车控指令回执等），紧贴底部导航胶囊之上。
             //
-            // 注意 spacing 是**融合阈值**：间距小于它的玻璃形状会被合并成
-            // 同一个形状（iOS 26 起如此，iOS 27 的 Liquid Glass v2 同样如此）。
-            // 因此底部导航胶囊刻意留在容器**之外** —— 车控面板那 15 个玻璃
-            // 按钮会随页面滚动，若与胶囊同处一个容器，经过时会被"吸"进同一个
-            // 形状，表现为按钮游动 / 形变 / 不固定。
-            GlassEffectContainer(spacing: Metrics.sectionSpacing) {
-                ZStack(alignment: .bottom) {
-                    backgroundLayer
-
-                    activeScreen
-
-                    // 全局 Toast（车控指令回执等），紧贴底部导航胶囊之上
-                    if let toast = store.toast {
-                        ToastBubble(text: toast)
-                            .padding(.bottom, Self.toastBottomInset)
-                            .padding(.horizontal, Metrics.screenPadding)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                            .allowsHitTesting(false)
-                    }
+            // 动画只挂在这一层，不挂在包含 ScrollView 的父层：把
+            // `.animation(_:value:)` 套在滚动容器外面时，toast 一变，
+            // 整棵子树（含滚动内容）都会一起进入动画，车控按钮会跟着晃。
+            ZStack(alignment: .bottom) {
+                if let toast = store.toast {
+                    ToastBubble(text: toast)
+                        .padding(.bottom, Self.toastBottomInset)
+                        .padding(.horizontal, Metrics.screenPadding)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .allowsHitTesting(false)
                 }
             }
+            .animation(.easeInOut(duration: 0.22), value: store.toast)
 
             tabBar
         }
-        .animation(.easeInOut(duration: 0.22), value: store.toast)
         .tint(Theme.accent(scheme))
         .alert(
             "已切换为模拟数据",
