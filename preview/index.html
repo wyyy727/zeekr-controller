@@ -914,6 +914,9 @@ canvas { display: block; width: 100%; }
    ② 页面由自有服务端托管（非 5500 预览端口）时用同源地址
    ③ 其余情况（本地 5500 预览、file:// 打开）回退到 localhost —— 即模拟数据 */
 const QUERY_API = new URLSearchParams(location.search).get('api');
+/* 服务端设了 API_TOKEN 时，用 ?token=xxx 打开本页即可免改代码带令牌。
+   服务端同时接受 Authorization 头与 ?token= 查询参数（见 main.py 中间件）。 */
+const QUERY_TOKEN = new URLSearchParams(location.search).get('token') || '';
 const API_SOURCE = QUERY_API
   ? QUERY_API.trim()
   : ((location.origin.startsWith('http') && location.port !== '5500')
@@ -1148,6 +1151,17 @@ const CTRL_LABELS = {
   tripPlan: '出行规划已下发', carFinder: '车辆位置已推送', refresh: '车况已刷新',
 };
 
+/* 给请求补上 API 令牌。服务端没设 API_TOKEN 时 QUERY_TOKEN 为空，
+   行为与以前完全一致（不额外加头）。 */
+function withAuth(opts) {
+  if (!QUERY_TOKEN) return opts;
+  const merged = Object.assign({}, opts || {});
+  merged.headers = Object.assign({}, (opts && opts.headers) || {}, {
+    Authorization: 'Bearer ' + QUERY_TOKEN,
+  });
+  return merged;
+}
+
 async function api(path, opts) {
   // 模拟数据模式：不发起任何网络请求，交由调用方直接使用内置数据
   if (PREFERS_MOCK) throw new Error('mock 模式：不访问网络');
@@ -1158,7 +1172,10 @@ async function api(path, opts) {
     applyDemoCommand(cmd);
     return { success: true, message: CTRL_LABELS[cmd] || '指令已下发' };
   }
-  const res = await fetch(API_SOURCE + path, opts);
+  const res = await fetch(API_SOURCE + path, withAuth(opts));
+  if (res.status === 401) {
+    throw new Error('服务端要求 API 令牌：请改用 /preview?token=xxx 打开本页');
+  }
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const json = await res.json();
   if (!json.success) throw new Error(json.error || '服务端返回失败');
@@ -1587,7 +1604,7 @@ function renderDashboard() {
         ${ctrlBtn({
           cmd: charging ? 'chargeStop' : 'chargeStart',
           label: charging ? '结束充电' : '开始充电',
-          icon: SVG.plug, kind: 'action', disabled: !charging && !s.chargeGunConnected,
+          icon: SVG.plug, kind: 'action', disabled: !charging && !s.isPlugged,
         })}
         ${ctrlBtn({ cmd: 'sentinel', label: '哨兵模式', icon: SVG.shield, kind: 'toggle' })}
       </div>
