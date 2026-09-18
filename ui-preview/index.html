@@ -1,0 +1,1646 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#F3F5F7">
+<title>ZeekrDash 极氪看板 · 界面对照</title>
+<style>
+/* ═══════════════════════════════════════════════════════════
+   ZeekrDash 界面还原
+   ───────────────────────────────────────────────────────────
+   本文件严格依据 ZeekrDash 的 SwiftUI 源码还原，色值/结构/文案
+   全部取自源码，非设计稿臆造。对照关系：
+
+     Theme.swift          →  :root 色变量
+     RootView.swift       →  .phone / .aura / .tabbar
+     DashboardView.swift  →  #page-dash
+     TripsView.swift      →  #page-trips
+     ChargesView.swift    →  #page-charges
+     SettingsView.swift   →  #page-settings
+     ControlsPanel.swift  →  .ctrl-grid（15 按钮）
+     SOCRing.swift        →  .soc-ring
+     StatCard / StatusChip / SoonBadge / ToastBubble / ErrorBanner
+                          →  同名 class
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Theme.swift · ChineseColor ───────────────────────────── */
+:root {
+  /* 青色系（主色） */
+  --tian-qing:      #2E8BC0;
+  --tian-qing-deep: #1C6FA8;
+  --zhu-qing:       #16B89A;
+  --qing-bi:        #16B89A;
+  --piao-se:        #E8F2FA;
+  /* 蓝色系 */
+  --dian-lan:  #3A6EA5;
+  --dian-qing: #1E7FC2;
+  --cang-qing: #2C3E5C;
+  --qun-qing:  #4C8DAE;
+  /* 红色系 */
+  --zhu-sha: #E5483B;
+  --yan-zhi: #C0392B;
+  --fei-se:  #F6B8B0;
+  /* 黄色系 */
+  --teng-huang: #FFB020;
+  --xiang-se:   #F4B400;
+  --ti-se:      #F2994A;
+  /* 中性色 */
+  --yue-bai:      #F3F5F7;
+  --xiang-ya-bai: #FFFFFF;
+  --gao-se:       #EDF1F4;
+  --mo-se:        #1B1F24;
+  --xuan-qing:    #4A4E57;
+  --dai-se:       #5B6472;
+
+  /* 语义色 */
+  --status-good:     var(--qing-bi);
+  --status-warn:     var(--teng-huang);
+  --status-bad:      var(--zhu-sha);
+  --status-charging: var(--dian-qing);
+
+  /* Theme · 明色模式 */
+  --bg:          var(--yue-bai);
+  --surface:     var(--xiang-ya-bai);
+  --surface-alt: var(--gao-se);
+  --text-1:      var(--mo-se);
+  --text-2:      rgba(74, 78, 87, .62);
+  --text-3:      rgba(91, 100, 114, .42);
+  --accent:      var(--tian-qing-deep);
+  --accent-2:    var(--dian-lan);
+  --separator:   rgba(27, 31, 36, .08);
+
+  /* Metrics */
+  --card-radius: 16px;
+  --card-padding: 16px;
+  --gap: 12px;
+  --screen-padding: 16px;
+}
+
+/* Theme · 暗色模式（Theme.background/surface/... 的 dark 分支） */
+body.dark {
+  --bg:          #14171C;
+  --surface:     #1E2228;
+  --surface-alt: #272C33;
+  --text-1:      #ECEFF3;
+  --text-2:      #9AA3AE;
+  --text-3:      #626B76;
+  --accent:      #4DA3DC;
+  --accent-2:    var(--qun-qing);
+  --separator:   rgba(255, 255, 255, .08);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+               "Helvetica Neue", "Microsoft YaHei", sans-serif;
+  background: #20242B;
+  color: var(--text-1);
+  display: flex;
+  justify-content: center;
+  padding: 28px 16px 56px;
+  min-height: 100vh;
+}
+
+/* ── 页面外围：说明栏 ─────────────────────────────────────── */
+.stage { display: flex; flex-direction: column; align-items: center; gap: 18px; width: 100%; }
+
+.doc-head { text-align: center; color: #E6E9EE; max-width: 480px; }
+.doc-head h1 { font-size: 19px; font-weight: 600; margin: 0 0 6px; letter-spacing: .3px; }
+.doc-head p { font-size: 12.5px; line-height: 1.65; margin: 0; color: #98A1AE; }
+.doc-head code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11.5px; background: rgba(255,255,255,.09);
+  padding: 1.5px 5px; border-radius: 4px; color: #B8C2CF;
+}
+
+.toolbar { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.toolbar button {
+  font: inherit; font-size: 12px; padding: 7px 15px; border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.07);
+  color: #D6DCE4; cursor: pointer; transition: .16s;
+}
+.toolbar button:hover { background: rgba(255,255,255,.14); }
+.toolbar button.on { background: var(--tian-qing); border-color: var(--tian-qing); color: #fff; }
+
+/* ═══════════════════════════════════════════════════════════
+   iPhone 机身
+   ═══════════════════════════════════════════════════════════ */
+.phone {
+  position: relative;
+  width: 393px;              /* iPhone 15/16 逻辑宽度 */
+  height: 852px;
+  border-radius: 54px;
+  background: var(--bg);
+  overflow: hidden;
+  box-shadow:
+    0 0 0 11px #0B0D10,
+    0 0 0 13px #2A2F38,
+    0 32px 70px rgba(0,0,0,.55);
+  display: flex; flex-direction: column;
+  transition: background .25s;
+}
+
+/* Dynamic Island */
+.island {
+  position: absolute; top: 11px; left: 50%; transform: translateX(-50%);
+  width: 124px; height: 35px; background: #05070A; border-radius: 20px; z-index: 60;
+}
+
+/* RootView.backgroundLayer —— 4 组氛围光斑，blur 6pt */
+.aura { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+.aura i {
+  position: absolute; border-radius: 50%; filter: blur(6px);
+  transition: opacity .25s;
+}
+/* ① 天青 (0.18, 0.12) r=0.26 */
+.aura i:nth-child(1) {
+  width: 260px; height: 260px; left: -18px; top: 22px;
+  background: radial-gradient(circle, rgba(46,139,192,.16) 0%, rgba(46,139,192,0) 70%);
+}
+/* ② 青碧 (0.84, 0.22) r=0.24 */
+.aura i:nth-child(2) {
+  width: 240px; height: 240px; right: -46px; top: 108px;
+  background: radial-gradient(circle, rgba(22,184,154,.13) 0%, rgba(22,184,154,0) 70%);
+}
+/* ③ 靛蓝 (0.62, 0.88) r=0.30 */
+.aura i:nth-child(3) {
+  width: 300px; height: 300px; right: 22px; bottom: -78px;
+  background: radial-gradient(circle, rgba(58,110,165,.14) 0%, rgba(58,110,165,0) 70%);
+}
+/* ④ 缇色 (0.08, 0.76) r=0.22 */
+.aura i:nth-child(4) {
+  width: 220px; height: 220px; left: -74px; bottom: 118px;
+  background: radial-gradient(circle, rgba(242,153,74,.10) 0%, rgba(242,153,74,0) 70%);
+}
+body.dark .aura i:nth-child(1) { background: radial-gradient(circle, rgba(46,139,192,.22) 0%, rgba(46,139,192,0) 70%); }
+body.dark .aura i:nth-child(2) { background: radial-gradient(circle, rgba(22,184,154,.16) 0%, rgba(22,184,154,0) 70%); }
+body.dark .aura i:nth-child(3) { background: radial-gradient(circle, rgba(58,110,165,.20) 0%, rgba(58,110,165,0) 70%); }
+body.dark .aura i:nth-child(4) { background: radial-gradient(circle, rgba(242,153,74,.12) 0%, rgba(242,153,74,0) 70%); }
+
+/* ── ScreenContainer · 顶部玻璃徽标 ───────────────────────── */
+.topbar {
+  position: relative; z-index: 20;
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  padding: 6px var(--screen-padding) 8px;
+  padding-top: max(6px, env(safe-area-inset-top));
+  margin-top: 44px;          /* 让开 Dynamic Island */
+  flex-shrink: 0;
+}
+.badge-glass {
+  font-size: 11px; font-weight: 600; color: var(--tian-qing-deep);
+  padding: 5px 12px; border-radius: 999px;
+  background: rgba(255,255,255,.55);
+  backdrop-filter: blur(14px) saturate(1.7);
+  -webkit-backdrop-filter: blur(14px) saturate(1.7);
+  border: 1px solid rgba(255,255,255,.7);
+  box-shadow: 0 1px 3px rgba(27,31,36,.07), inset 0 1px 0 rgba(255,255,255,.85);
+}
+body.dark .badge-glass { color: var(--tian-qing); background: rgba(255,255,255,.10); border-color: rgba(255,255,255,.14); }
+.badge-icon {
+  width: 32px; height: 32px; border-radius: 999px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-2); cursor: pointer;
+  background: rgba(255,255,255,.5);
+  backdrop-filter: blur(14px) saturate(1.7);
+  -webkit-backdrop-filter: blur(14px) saturate(1.7);
+  border: 1px solid rgba(255,255,255,.6);
+}
+body.dark .badge-icon { background: rgba(255,255,255,.09); border-color: rgba(255,255,255,.13); }
+
+/* ── 滚动区 ──────────────────────────────────────────────── */
+.scroll {
+  position: relative; z-index: 10;
+  flex: 1; overflow-y: auto; overflow-x: hidden;
+  /* 底部预留：悬浮 TabBar 高约 64px + 两侧 6px + 呼吸间距。
+     不足会让最后一张卡片被胶囊压住。 */
+  padding: 0 var(--screen-padding) calc(112px + env(safe-area-inset-bottom));
+  scrollbar-width: none;
+  /* 滚动到底部时内容不会突然被裁，留出自然收尾 */
+  scroll-padding-bottom: 24px;
+}
+.scroll::-webkit-scrollbar { display: none; }
+.page { display: none; flex-direction: column; gap: var(--gap); }
+.page.on { display: flex; }
+
+/* ═══════════════════════════════════════════════════════════
+   通用卡片 · Theme.surface + radius 16
+   ═══════════════════════════════════════════════════════════ */
+.card {
+  background: var(--surface);
+  border-radius: var(--card-radius);
+  padding: var(--card-padding);
+  transition: background .25s;
+}
+.card-title { font-size: 15px; font-weight: 600; color: var(--text-1); }
+.card-sub { font-size: 11px; color: var(--text-3); }
+.divider { height: 1px; background: var(--separator); }
+.row-between { display: flex; align-items: center; justify-content: space-between; }
+
+/* ── StatCard.swift ──────────────────────────────────────── */
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
+.stat-card {
+  background: var(--surface); border-radius: var(--card-radius);
+  padding: var(--card-padding); display: flex; flex-direction: column; gap: 8px;
+}
+.stat-head { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text-2); }
+.stat-head svg { width: 12px; height: 12px; color: var(--text-3); flex-shrink: 0; }
+.stat-value { display: flex; align-items: baseline; gap: 4px; }
+.stat-value b {
+  font-size: 22px; font-weight: 700; color: var(--text-1);
+  font-variant-numeric: tabular-nums; letter-spacing: -.4px;
+}
+.stat-value span { font-size: 13px; color: var(--text-2); }
+
+/* ── StatusChip.swift ────────────────────────────────────── */
+.chip-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
+.status-chip {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; min-height: 48px;
+  background: var(--surface-alt); border-radius: 10px;
+}
+.status-chip svg { width: 15px; height: 15px; flex-shrink: 0; }
+.status-chip .t { font-size: 11px; color: var(--text-3); line-height: 1.3; }
+.status-chip .v { font-size: 13px; font-weight: 500; color: var(--text-1); line-height: 1.35; }
+.c-good { color: var(--status-good); }
+.c-warn { color: var(--status-warn); }
+.c-bad  { color: var(--status-bad); }
+.c-neutral { color: var(--accent-2); }
+
+/* ── SoonBadge.swift ─────────────────────────────────────── */
+.soon-badge {
+  font-size: 10px; color: var(--text-3); padding: 3px 8px;
+  background: var(--surface-alt); border-radius: 999px; white-space: nowrap;
+}
+
+/* ── ToastBubble.swift ───────────────────────────────────── */
+.toast {
+  position: absolute; left: 50%; transform: translateX(-50%) translateY(12px);
+  bottom: 106px; z-index: 80;
+  font-size: 12.5px; font-weight: 500; color: var(--xiang-ya-bai);
+  background: rgba(27,31,36,.95); padding: 10px 18px; border-radius: 999px;
+  box-shadow: 0 3px 8px rgba(27,31,36,.22);
+  opacity: 0; pointer-events: none; transition: .22s; max-width: 78%; text-align: center;
+}
+.toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ═══════════════════════════════════════════════════════════
+   DashboardView · 电量头卡 + SOCRing.swift
+   ═══════════════════════════════════════════════════════════ */
+.dash-head { display: flex; align-items: center; gap: 20px; }
+.soc-ring { position: relative; width: 132px; height: 132px; flex-shrink: 0; }
+.soc-ring svg { transform: rotate(-90deg); display: block; }
+.soc-ring .track { stroke: var(--separator); }
+.soc-ring .prog { stroke-linecap: round; transition: stroke-dashoffset .6s ease-out, stroke .3s; }
+.soc-ring .mid {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 2px;
+}
+.soc-ring .num {
+  font-size: 37px; font-weight: 500; color: var(--text-1);
+  font-variant-numeric: tabular-nums; line-height: 1;
+}
+.soc-ring .num span { font-size: 14.5px; font-weight: 400; color: var(--text-2); }
+.soc-ring .charging {
+  display: flex; align-items: center; gap: 3px;
+  font-size: 11px; font-weight: 500; color: var(--status-charging);
+}
+/* 低电量呼吸脉冲（SOCRing.swift 的 lowPulse） */
+@keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .55; transform: scale(1.035); } }
+.soc-ring.low .prog, .soc-ring.low .num { animation: pulse 1.6s ease-in-out infinite; }
+@keyframes breathe { 0%,100% { opacity: 1; } 50% { opacity: .72; } }
+.soc-ring.charging .prog { animation: breathe 1.4s ease-in-out infinite; }
+/* 「电量偏低」胶囊 */
+.soc-ring .low-tag {
+  position: absolute; left: 50%; bottom: 0; transform: translateX(-50%) translateY(7px);
+  font-size: 10px; font-weight: 600; color: #fff; white-space: nowrap;
+  padding: 2px 9px; border-radius: 10px; background: var(--zhu-sha);
+  box-shadow: 0 2px 4px rgba(229,72,59,.6);
+}
+
+.dash-head-right { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.car-name { font-size: 15px; font-weight: 600; color: var(--text-1); }
+.car-plate { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+.mini-stat { display: flex; align-items: center; justify-content: space-between; }
+.mini-stat .k { font-size: 12px; color: var(--text-3); }
+.mini-stat .v {
+  font-size: 14px; font-weight: 500; color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 充电卡 */
+.charge-card { background: rgba(232,242,250,.55); }
+body.dark .charge-card { background: rgba(232,242,250,.10); }
+.charge-title { display: flex; align-items: center; gap: 5px; font-size: 14px; font-weight: 600; color: var(--status-charging); }
+.charge-row { display: flex; margin-top: 12px; }
+.charge-item { flex: 1; text-align: center; display: flex; flex-direction: column; gap: 4px; }
+.charge-item .v {
+  font-size: 18px; font-weight: 500; color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.charge-item .k { font-size: 11px; color: var(--text-3); }
+.charge-eta {
+  display: flex; align-items: center; gap: 6px; margin-top: 12px;
+  font-size: 12px; color: var(--text-2);
+}
+
+/* 胎压 */
+.tyre-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
+.tyre-item {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 9px 0; background: rgba(237,241,244,.55); border-radius: 10px;
+}
+body.dark .tyre-item { background: rgba(39,44,51,.55); }
+.tyre-item .k { font-size: 10px; color: var(--text-3); }
+.tyre-item .v {
+  font-size: 16px; font-weight: 600; color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.tyre-item .v.bad { color: var(--status-bad); }
+.tyre-warn { display: flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 500; color: var(--status-bad); }
+
+/* 底部说明 */
+.footnote { text-align: center; padding-top: 4px; }
+.footnote div { font-size: 11px; color: var(--text-3); }
+.footnote div:last-child { font-size: 10px; opacity: .8; margin-top: 4px; }
+
+/* ═══════════════════════════════════════════════════════════
+   ControlsPanel.swift · 15 个车控按钮
+   ═══════════════════════════════════════════════════════════ */
+.ctrl-sep { display: flex; align-items: center; gap: 9px; padding: 16px 0 10px; }
+.ctrl-sep span { font-size: 11px; font-weight: 500; color: var(--text-3); white-space: nowrap; }
+.ctrl-sep i { flex: 1; height: 1px; background: var(--separator); }
+.ctrl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap); }
+.ctrl-btn {
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 7px; min-height: 82px; padding: 12px 6px;
+  background: var(--surface-alt); border-radius: 13px;
+  border: 1px solid transparent;
+  cursor: pointer; user-select: none;
+  transition: transform .3s cubic-bezier(.34,1.56,.64,1), background .2s;
+}
+.ctrl-btn.scene { min-height: 74px; }
+.ctrl-btn svg { width: 22px; height: 22px; color: var(--text-1); transition: transform .28s cubic-bezier(.34,1.56,.64,1); }
+.ctrl-btn.scene svg { width: 20px; height: 20px; }
+.ctrl-btn .lbl { font-size: 12px; color: var(--text-1); line-height: 1.2; }
+.ctrl-btn .sub { font-size: 9.5px; color: var(--text-3); line-height: 1.2; }
+/* 开关型·开启态（Theme.accent 88%） */
+.ctrl-btn.on { background: rgba(28,111,168,.88); border-color: rgba(255,255,255,.32); }
+.ctrl-btn.on svg { color: var(--xiang-ya-bai); }
+.ctrl-btn.on .lbl { color: var(--xiang-ya-bai); }
+.ctrl-btn.on .sub { color: rgba(255,255,255,.78); }
+body.dark .ctrl-btn.on { background: rgba(77,163,220,.88); }
+/* 禁用态 */
+.ctrl-btn.dis { background: rgba(237,241,244,.5); cursor: not-allowed; }
+body.dark .ctrl-btn.dis { background: rgba(39,44,51,.5); }
+.ctrl-btn.dis svg, .ctrl-btn.dis .lbl { color: var(--text-3); }
+/* ① 按压下沉 scale(.93) */
+.ctrl-btn:active:not(.dis) { transform: scale(.93); }
+.ctrl-btn:active:not(.dis) svg { transform: scale(.86) translateY(1px); }
+/* ⑤ 成功轻弹 */
+@keyframes bounce { 0% { transform: scale(.93); } 45% { transform: scale(1.05); } 100% { transform: scale(1); } }
+.ctrl-btn.bounce { animation: bounce .3s cubic-bezier(.34,1.56,.64,1); }
+/* ⑥ 失败抖动 0→-5→+5→-3→+3→0 */
+@keyframes shake {
+  0%,100% { transform: translateX(0); }
+  15% { transform: translateX(-5px); } 35% { transform: translateX(5px); }
+  55% { transform: translateX(-3px); } 75% { transform: translateX(3px); }
+}
+.ctrl-btn.shake { animation: shake .4s ease-in-out; }
+/* ④ 成功对勾遮罩：青碧铺满，对勾 0.7 弹出 */
+.ctrl-overlay {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  border-radius: 13px; opacity: 0; pointer-events: none;
+}
+.ctrl-overlay.ok { background: var(--qing-bi); }
+.ctrl-overlay.ok svg { width: 24px; height: 24px; color: var(--xiang-ya-bai); stroke-width: 3.2; }
+@keyframes pop { from { transform: scale(.7); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.ctrl-overlay.show { opacity: 1; }
+.ctrl-overlay.show svg { animation: pop .38s cubic-bezier(.34,1.56,.64,1); }
+.ctrl-overlay.fail { background: rgba(229,72,59,.16); }
+/* ③ 下发转圈 */
+.ctrl-overlay.load {
+  background: rgba(237,241,244,.78);
+  opacity: 1;
+}
+.ctrl-btn.on .ctrl-overlay.load { background: rgba(28,111,168,.78); }
+body.dark .ctrl-overlay.load { background: rgba(39,44,51,.78); }
+.spinner {
+  width: 17px; height: 17px; border-radius: 50%;
+  border: 2px solid rgba(28,111,168,.25); border-top-color: var(--accent);
+  animation: spin .7s linear infinite;
+}
+.ctrl-btn.on .spinner { border-color: rgba(255,255,255,.34); border-top-color: #fff; }
+.ctrl-btn.on .ctrl-overlay.load { background: rgba(28,111,168,.78); }
+@keyframes spin { to { transform: rotate(360deg); } }
+.ctrl-disabled-note { font-size: 11px; color: var(--text-3); padding-top: 12px; }
+
+/* ═══════════════════════════════════════════════════════════
+   TripsView.swift
+   ═══════════════════════════════════════════════════════════ */
+.seg {
+  display: flex; background: var(--surface-alt); border-radius: 9px; padding: 2px;
+}
+.seg button {
+  flex: 1; font: inherit; font-size: 13px; padding: 6px 0; border: 0;
+  background: transparent; color: var(--text-2); border-radius: 7px; cursor: pointer;
+  transition: .16s;
+}
+.seg button.on { background: var(--surface); color: var(--text-1); font-weight: 600; box-shadow: 0 1px 3px rgba(27,31,36,.12); }
+.chart-card { display: flex; flex-direction: column; gap: 10px; }
+.chart-head { display: flex; align-items: center; gap: 6px; }
+.chart-body { height: 150px; position: relative; }
+.chart-body canvas { width: 100%; height: 100%; display: block; }
+
+.summary { display: flex; align-items: center; padding: 14px 0; }
+.summary-item { flex: 1; text-align: center; }
+.summary-item .v { font-size: 17px; font-weight: 500; color: var(--text-1); font-variant-numeric: tabular-nums; }
+.summary-item .u { font-size: 10px; color: var(--text-3); margin-left: 2px; }
+.summary-item .k { font-size: 11px; color: var(--text-3); margin-top: 3px; }
+.summary .divider { width: 1px; height: 28px; flex: 0 0 1px; }
+
+.trip-row { display: flex; align-items: flex-start; gap: 12px; padding: 9px 0; }
+.trip-time { width: 52px; flex-shrink: 0; }
+.trip-time .h { font-size: 13px; font-weight: 500; color: var(--text-1); font-variant-numeric: tabular-nums; }
+.trip-time .d { font-size: 10px; color: var(--text-3); }
+.trip-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.trip-route { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-2); }
+.trip-route svg { width: 9px; height: 9px; color: var(--text-3); flex-shrink: 0; }
+.trip-route span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trip-meta { display: flex; align-items: center; gap: 8px; }
+.trip-meta i { display: flex; align-items: center; gap: 3px; font-style: normal; font-size: 11px; color: var(--text-3); }
+.trip-meta svg { width: 9px; height: 9px; }
+.trip-cons { text-align: right; flex-shrink: 0; }
+.trip-cons .v { font-size: 14px; font-weight: 500; color: var(--accent); font-variant-numeric: tabular-nums; }
+.trip-cons .k { font-size: 8px; color: var(--text-3); }
+
+/* ═══════════════════════════════════════════════════════════
+   ChargesView.swift
+   ═══════════════════════════════════════════════════════════ */
+.total-center { text-align: center; display: flex; flex-direction: column; gap: 4px; }
+.total-center .k { font-size: 12px; color: var(--text-3); }
+.total-center .v {
+  display: flex; align-items: baseline; justify-content: center; gap: 3px;
+}
+.total-center .v em { font-style: normal; font-size: 16px; color: var(--text-2); }
+.total-center .v b {
+  font-size: 36px; font-weight: 500; color: var(--text-1);
+  font-variant-numeric: tabular-nums; letter-spacing: -.8px;
+}
+.total-row { display: flex; padding-top: 14px; }
+.total-item { flex: 1; text-align: center; }
+.total-item .v { font-size: 17px; font-weight: 500; color: var(--text-1); font-variant-numeric: tabular-nums; }
+.total-item .k { font-size: 11px; color: var(--text-3); margin-top: 3px; }
+
+.hbar-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+.hbar-name { width: 62px; flex-shrink: 0; font-size: 10px; color: var(--text-2); text-align: right; }
+.hbar-track { flex: 1; height: 15px; }
+.hbar-track i { display: block; height: 100%; border-radius: 3px; }
+.hbar-val { width: 34px; flex-shrink: 0; font-size: 9px; color: var(--text-3); }
+
+.charge-rec { display: flex; align-items: flex-start; gap: 12px; padding: 9px 0; }
+.rec-mark { width: 3px; height: 32px; border-radius: 2px; flex-shrink: 0; margin-top: 2px; }
+.rec-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.rec-provider { font-size: 13px; font-weight: 500; color: var(--text-1); }
+.rec-sub { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--text-3); }
+.rec-merchant { font-size: 10px; color: var(--text-3); opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rec-amt { text-align: right; flex-shrink: 0; }
+.rec-amt .v { font-size: 15px; font-weight: 500; color: var(--text-1); font-variant-numeric: tabular-nums; }
+.rec-amt .k { font-size: 10px; color: var(--text-3); }
+
+.soon-card { background: rgba(255,255,255,.6); }
+body.dark .soon-card { background: rgba(30,34,40,.6); }
+.soon-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.soon-row > svg { width: 15px; height: 15px; color: var(--text-3); flex-shrink: 0; }
+.soon-row .txt { flex: 1; min-width: 0; }
+.soon-row .txt .t { font-size: 13px; color: var(--text-2); }
+.soon-row .txt .d { font-size: 11px; color: var(--text-3); }
+
+/* ═══════════════════════════════════════════════════════════
+   SettingsView.swift
+   ═══════════════════════════════════════════════════════════ */
+.set-card { display: flex; flex-direction: column; gap: 10px; }
+.set-label { font-size: 13px; font-weight: 600; color: var(--text-3); padding-left: 4px; }
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.set-row .k { font-size: 13px; color: var(--text-2); }
+.set-row .v { font-size: 13px; color: var(--text-1); font-variant-numeric: tabular-nums; }
+.set-row input[type="text"] {
+  font: inherit; font-size: 12.5px; text-align: right; border: 0; outline: 0;
+  background: transparent; color: var(--text-1); flex: 1; min-width: 0;
+}
+.set-row input::placeholder { color: var(--text-3); }
+.conn-badge { display: flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 500; }
+.dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.mock-notice {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px; border-radius: var(--card-radius);
+  background: rgba(255,176,32,.14); font-size: 12px; color: var(--text-2);
+}
+.mock-notice svg { width: 14px; height: 14px; color: var(--status-warn); flex-shrink: 0; }
+.hint { font-size: 11px; color: var(--text-3); line-height: 1.5; }
+.warn-line { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--status-warn); }
+.warn-line svg { width: 12px; height: 12px; flex-shrink: 0; }
+
+.slider-wrap { padding: 2px 0; }
+input[type="range"] {
+  -webkit-appearance: none; width: 100%; height: 4px; border-radius: 2px;
+  background: var(--surface-alt); outline: 0; margin: 0;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 4px rgba(27,31,36,.28); cursor: pointer;
+}
+
+/* iOS 风格 Toggle */
+.toggle-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.toggle-txt .t { font-size: 14px; color: var(--text-1); }
+.toggle-txt .d { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+.switch {
+  width: 51px; height: 31px; border-radius: 999px; background: var(--surface-alt);
+  position: relative; cursor: pointer; flex-shrink: 0; transition: background .2s;
+}
+.switch i {
+  position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%;
+  background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,.2); transition: transform .2s;
+}
+.switch.on { background: var(--accent); }
+.switch.on i { transform: translateX(20px); }
+
+.diag-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; }
+.diag-row .k { font-size: 13px; color: var(--text-2); }
+.diag-row .v { font-size: 13px; color: var(--text-1); }
+.miss-keys { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; }
+.miss-keys .t { font-size: 12px; color: var(--status-warn); }
+.miss-keys .l { font-size: 10px; font-family: ui-monospace, Menlo, monospace; color: var(--text-3); line-height: 1.6; }
+
+/* ═══════════════════════════════════════════════════════════
+   RootView.swift · 悬浮玻璃 TabBar
+   ═══════════════════════════════════════════════════════════ */
+.tabbar {
+  position: absolute; left: 14px; right: 14px; bottom: 6px; z-index: 70;
+  display: flex; padding: 7px 4px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.72);
+  backdrop-filter: blur(30px) saturate(2.1);
+  -webkit-backdrop-filter: blur(30px) saturate(2.1);
+  border: 1px solid rgba(255,255,255,.78);
+  box-shadow: 0 6px 22px rgba(27,31,36,.13), inset 0 1px 0 rgba(255,255,255,.9);
+  padding-bottom: calc(7px + env(safe-area-inset-bottom));
+}
+body.dark .tabbar {
+  background: rgba(32,37,45,.80); border-color: rgba(255,255,255,.10);
+  box-shadow: 0 6px 22px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.09);
+}
+.tab {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; min-height: 50px; border: 0; background: transparent; cursor: pointer;
+  color: var(--text-3); position: relative; font: inherit;
+}
+.tab svg { width: 22px; height: 22px; transition: transform .24s cubic-bezier(.34,1.56,.64,1); }
+.tab .t { font-size: 10px; }
+.tab.on { color: var(--accent); }
+.tab.on svg { transform: scale(1.06); }
+.tab.on .t { font-weight: 600; }
+/* 选中态高光药丸 */
+.tab.on::before {
+  content: ''; position: absolute; inset: 2px 6px; border-radius: 999px;
+  background: rgba(255,255,255,.70); z-index: -1;
+}
+body.dark .tab.on::before { background: rgba(255,255,255,.12); }
+
+/* 底部 Home Indicator */
+.home-bar {
+  position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+  width: 140px; height: 5px; border-radius: 3px; background: rgba(27,31,36,.28); z-index: 75;
+}
+body.dark .home-bar { background: rgba(255,255,255,.28); }
+
+@media (max-width: 460px) {
+  body { padding: 12px 6px 32px; }
+  .phone { width: 100%; max-width: 393px; height: 800px; border-radius: 44px; box-shadow: 0 0 0 8px #0B0D10, 0 0 0 10px #2A2F38, 0 24px 50px rgba(0,0,0,.5); }
+}
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <div class="doc-head">
+    <h1>ZeekrDash 极氪看板 · 界面对照</h1>
+    <p>本页依据 <code>ZeekrDash/</code> 下的 SwiftUI 源码还原：配色取自 <code>Theme.swift</code>，
+      结构对应 <code>RootView</code> / <code>DashboardView</code> / <code>TripsView</code> /
+      <code>ChargesView</code> / <code>SettingsView</code> / <code>ControlsPanel</code>。
+      数据为示意值，用于直观呈现真实 App 的视觉效果。</p>
+  </div>
+
+  <div class="toolbar">
+    <button data-jump="dash" class="on">车况</button>
+    <button data-jump="trips">行程</button>
+    <button data-jump="charges">充电</button>
+    <button data-jump="settings">设置</button>
+    <button id="themeBtn">切换暗色</button>
+  </div>
+
+  <div class="phone">
+    <div class="island"></div>
+
+    <!-- RootView.backgroundLayer -->
+    <div class="aura"><i></i><i></i><i></i><i></i></div>
+
+    <!-- ScreenContainer.topBar -->
+    <div class="topbar">
+      <div class="badge-icon" id="moreBtn" style="display:none" title="账单操作">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9">
+          <circle cx="12" cy="12" r="9"/><circle cx="8.5" cy="12" r=".6" fill="currentColor" stroke="none"/>
+          <circle cx="12" cy="12" r=".6" fill="currentColor" stroke="none"/><circle cx="15.5" cy="12" r=".6" fill="currentColor" stroke="none"/>
+        </svg>
+      </div>
+      <div class="badge-glass">模拟数据</div>
+    </div>
+
+    <div class="scroll" id="scroll">
+
+      <!-- ══════════ DashboardView ══════════ -->
+      <div class="page on" id="page-dash">
+
+        <!-- headerCard -->
+        <div class="card dash-head">
+          <div class="soc-ring" id="socRing">
+            <svg width="132" height="132" viewBox="0 0 132 132">
+              <circle class="track" cx="66" cy="66" r="60.5" fill="none" stroke-width="11"/>
+              <circle class="prog" id="socProg" cx="66" cy="66" r="60.5" fill="none" stroke-width="11"
+                      stroke-dasharray="380.1" stroke-dashoffset="380.1"/>
+            </svg>
+            <div class="mid">
+              <div class="num" id="socNum">—<span>%</span></div>
+            </div>
+          </div>
+          <div class="dash-head-right">
+            <div>
+              <div class="car-name" id="carName">我的爱车</div>
+              <div class="car-plate" id="carPlate">浙A·D12345</div>
+            </div>
+            <div class="divider"></div>
+            <div class="mini-stat"><span class="k">续航</span><span class="v" id="rangeVal">—</span></div>
+            <div class="mini-stat"><span class="k">总里程</span><span class="v" id="odoVal">—</span></div>
+          </div>
+        </div>
+
+        <!-- chargingCard（仅充电中显示） -->
+        <div class="card charge-card" id="chargeCard" style="display:none">
+          <div class="charge-title">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
+            充电中
+          </div>
+          <div class="charge-row">
+            <div class="charge-item"><div class="v" id="cPower">—</div><div class="k">功率 kW</div></div>
+            <div class="charge-item"><div class="v" id="cVolt">—</div><div class="k">电压 V</div></div>
+            <div class="charge-item"><div class="v" id="cCurr">—</div><div class="k">电流 A</div></div>
+          </div>
+          <div class="charge-eta">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.9">
+              <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/>
+            </svg>
+            预计 <span id="etaVal">—</span> 充满
+          </div>
+        </div>
+
+        <!-- metricsGrid · 4 个 StatCard -->
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-head">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0Z"/></svg>
+              车内温度
+            </div>
+            <div class="stat-value"><b id="inTemp">—</b><span>°C</span></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-head">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg>
+              车外温度
+            </div>
+            <div class="stat-value"><b id="exTemp">—</b><span>°C</span></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-head">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7l6 6 4-4 8 8"/><path d="M21 17v-4h-4"/></svg>
+              平均能耗
+            </div>
+            <div class="stat-value"><b id="avgCons">—</b><span>kWh/100km</span></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-head">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="17" height="10" rx="2.5"/><path d="M22 10.5v3"/><rect x="4.6" y="9.6" width="11.8" height="4.8" rx="1.4" fill="currentColor" stroke="none"/></svg>
+              12V 电瓶
+            </div>
+            <div class="stat-value"><b id="batt12v">—</b><span>V</span></div>
+          </div>
+        </div>
+
+        <!-- tyreCard -->
+        <div class="card">
+          <div class="row-between" style="align-items:baseline;gap:5px">
+            <div style="display:flex;align-items:baseline;gap:5px">
+              <span class="card-title">胎压</span>
+              <span class="card-sub">kPa</span>
+            </div>
+            <div class="tyre-warn" id="tyreWarn" style="display:none">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M12 2 1 21h22L12 2zm1 14h-2v2h2v-2zm0-7h-2v5h2V9z"/></svg>
+              异常
+            </div>
+          </div>
+          <div class="tyre-grid">
+            <div class="tyre-item"><span class="k">左前</span><span class="v" id="tFL">—</span></div>
+            <div class="tyre-item"><span class="k">右前</span><span class="v" id="tFR">—</span></div>
+            <div class="tyre-item"><span class="k">左后</span><span class="v" id="tRL">—</span></div>
+            <div class="tyre-item"><span class="k">右后</span><span class="v" id="tRR">—</span></div>
+          </div>
+        </div>
+
+        <!-- statusCard · 车身状态 2×2 -->
+        <div class="card">
+          <div class="card-title" style="margin-bottom:12px">车身状态</div>
+          <div class="chip-grid">
+            <div class="status-chip">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10.5" width="16" height="10" rx="2.4"/><path d="M8 10.5V7.4a4 4 0 0 1 8 0v3.1"/></svg>
+              <div><div class="t">车门</div><div class="v" id="chipDoor">—</div></div>
+            </div>
+            <div class="status-chip">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M4.9 5.9l14.2 12.2M19.1 5.9 4.9 18.1M2 12h20"/></svg>
+              <div><div class="t">空调</div><div class="v" id="chipAc">—</div></div>
+            </div>
+            <div class="status-chip">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="2.4"/><path d="M12 6v12"/></svg>
+              <div><div class="t">车窗</div><div class="v" id="chipWin">—</div></div>
+            </div>
+            <div class="status-chip">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 16V8.5c0-.8.7-1.5 1.5-1.5H14l3.5 3.5H19a2 2 0 0 1 2 2V16"/><path d="M3 16h18"/><circle cx="7" cy="17.6" r="1.7"/><circle cx="17" cy="17.6" r="1.7"/></svg>
+              <div><div class="t">后备箱</div><div class="v" id="chipTrunk">—</div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ControlsPanel -->
+        <div class="card" id="ctrlCard">
+          <div class="row-between" style="margin-bottom:12px">
+            <span class="card-title">快捷车控</span>
+            <span class="card-sub" id="ctrlStatus">车辆已上锁</span>
+          </div>
+
+          <div class="ctrl-grid" id="grid-vehicle"></div>
+
+          <div class="ctrl-sep"><span>远程操作</span><i></i></div>
+          <div class="ctrl-grid" id="grid-remote"></div>
+
+          <div class="ctrl-sep"><span>场景</span><i></i></div>
+          <div class="ctrl-grid" id="grid-scene"></div>
+
+          <div class="ctrl-disabled-note" id="ctrlNote" style="display:none">
+            在「设置」中开启控制指令开关后可用
+          </div>
+        </div>
+
+        <div class="footnote">
+          <div>更新于 <span id="updTime">—</span></div>
+          <div>数据来自非官方接口，仅供参考</div>
+        </div>
+      </div>
+
+      <!-- ══════════ TripsView ══════════ -->
+      <div class="page" id="page-trips">
+        <div class="seg" id="rangeSeg">
+          <button class="on" data-days="7">7 天</button>
+          <button data-days="30">30 天</button>
+          <button data-days="90">90 天</button>
+        </div>
+
+        <div class="card chart-card">
+          <div class="chart-head">
+            <span class="card-title">百公里能耗</span>
+            <span class="card-sub">· kWh/100km</span>
+          </div>
+          <div class="chart-body"><canvas id="chartCons"></canvas></div>
+        </div>
+
+        <div class="card chart-card">
+          <div class="chart-head">
+            <span class="card-title">每日里程</span>
+            <span class="card-sub">· km</span>
+          </div>
+          <div class="chart-body"><canvas id="chartDist"></canvas></div>
+        </div>
+
+        <div class="card">
+          <div class="summary">
+            <div class="summary-item"><div><span class="v" id="sumDist">—</span><span class="u">km</span></div><div class="k">总里程</div></div>
+            <div class="divider"></div>
+            <div class="summary-item"><div><span class="v" id="sumEnergy">—</span><span class="u">kWh</span></div><div class="k">总能耗</div></div>
+            <div class="divider"></div>
+            <div class="summary-item"><div><span class="v" id="sumAvg">—</span><span class="u">kWh/100km</span></div><div class="k">平均能耗</div></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="row-between" style="margin-bottom:10px">
+            <span class="card-title">行程记录</span>
+            <span class="card-sub" id="tripCount">— 条</span>
+          </div>
+          <div id="tripList"></div>
+        </div>
+      </div>
+
+      <!-- ══════════ ChargesView ══════════ -->
+      <div class="page" id="page-charges">
+        <div class="card">
+          <div class="total-center">
+            <div class="k">累计充电消费</div>
+            <div class="v"><em>¥</em><b id="totalAmt">—</b></div>
+          </div>
+          <div class="divider" style="margin-top:14px"></div>
+          <div class="total-row">
+            <div class="total-item"><div class="v" id="totalCount">—</div><div class="k">笔数</div></div>
+            <div class="total-item"><div class="v" id="totalProv">—</div><div class="k">覆盖服务商</div></div>
+            <div class="total-item"><div class="v" id="totalPrice">—</div><div class="k">平均单价</div></div>
+          </div>
+        </div>
+
+        <div class="card chart-card">
+          <div class="chart-head"><span class="card-title">服务商分布</span><span class="card-sub">· 元</span></div>
+          <div id="providerBars"></div>
+        </div>
+
+        <div class="card chart-card">
+          <div class="chart-head"><span class="card-title">月度消费</span><span class="card-sub">· 元</span></div>
+          <div class="chart-body"><canvas id="chartMonth"></canvas></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title" style="margin-bottom:10px">消费明细</div>
+          <div id="recList"></div>
+        </div>
+
+        <div class="card soon-card">
+          <div class="card-title" style="margin-bottom:10px">即将上线</div>
+          <div class="soon-row">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 12h4l2.5-6 4 12L16 12h5"/></svg>
+            <div class="txt"><div class="t">充电量统计</div><div class="d">接入服务商订单后可统计 kWh 与单价</div></div>
+            <div class="soon-badge">即将上线</div>
+          </div>
+          <div class="soon-row">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5h3.8a1.8 1.8 0 0 1 0 3.6H9.5h4a1.8 1.8 0 0 1 0 3.6H9.5"/></svg>
+            <div class="txt"><div class="t">动态电价</div><div class="d">按峰谷时段与场站计算实际电费</div></div>
+            <div class="soon-badge">即将上线</div>
+          </div>
+          <div class="soon-row">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3 4v4h4"/><path d="M12 8v4.3l3 1.8"/></svg>
+            <div class="txt"><div class="t">智能充电</div><div class="d">在最低电价时段自动充电</div></div>
+            <div class="soon-badge">即将上线</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════ SettingsView ══════════ -->
+      <div class="page" id="page-settings">
+        <div>
+          <div class="set-label">服务端</div>
+          <div class="card set-card">
+            <div class="set-row">
+              <span class="k">地址</span>
+              <input type="text" id="baseUrl" value="http://192.168.1.10:8765" spellcheck="false">
+            </div>
+            <div class="divider"></div>
+            <div class="set-row">
+              <span class="k">状态</span>
+              <span class="conn-badge"><i class="dot" style="background:var(--status-good)"></i><span style="color:var(--status-good)">已连接</span></span>
+            </div>
+            <div class="hint" style="color:var(--status-warn)">当前服务端运行在模拟数据模式，未接入真实车辆</div>
+          </div>
+        </div>
+
+        <div class="mock-notice">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+          演示模式：数据为本地生成，用于预览界面效果
+        </div>
+
+        <div>
+          <div class="set-label">数据刷新</div>
+          <div class="card set-card">
+            <div class="set-row">
+              <span class="k">轮询间隔</span>
+              <span class="v" id="pollVal">5 分钟</span>
+            </div>
+            <div class="slider-wrap"><input type="range" id="pollRange" min="1" max="30" step="1" value="5"></div>
+            <div class="hint">充电中会自动缩短到 60 秒，及时反映充电进度</div>
+          </div>
+        </div>
+
+        <div>
+          <div class="set-label">车辆控制</div>
+          <div class="card set-card">
+            <div class="toggle-row">
+              <div class="toggle-txt">
+                <div class="t">允许下发控制指令</div>
+                <div class="d">关闭时 App 仅可查看，不能操作车辆</div>
+              </div>
+              <div class="switch on" id="cmdSwitch"><i></i></div>
+            </div>
+            <div class="warn-line" id="cmdWarn">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 1 21h22L12 2zm1 14h-2v2h2v-2zm0-7h-2v5h2V9z"/></svg>
+              远程控制存在风险，请确认车辆处于安全场景
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="set-label">诊断</div>
+          <div class="card">
+            <div class="diag-row"><span class="k">服务端模式</span><span class="v">模拟数据</span></div>
+            <div class="divider"></div>
+            <div class="diag-row"><span class="k">配置完整</span><span class="v">否</span></div>
+            <div class="divider"></div>
+            <div class="diag-row"><span class="k">上次刷新</span><span class="v" id="diagUpd">—</span></div>
+            <div class="divider"></div>
+            <div class="miss-keys">
+              <div class="t">缺少的服务端配置</div>
+              <div class="l">ZEEKR_HMAC_ACCESS_KEY<br>ZEEKR_HMAC_SECRET_KEY<br>ZEEKR_PASSWORD_PUBLIC_KEY<br>ZEEKR_PROD_SECRET<br>ZEEKR_VIN_KEY<br>ZEEKR_VIN_IV</div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="set-label">关于</div>
+          <div class="card set-card">
+            <div style="font-size:14px;font-weight:500;color:var(--text-1)">ZeekrDash</div>
+            <div class="hint">非官方工具，基于社区逆向研究成果实现。与极氪、吉利无任何关联，仅供个人自用。</div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /scroll -->
+
+    <!-- ToastBubble -->
+    <div class="toast" id="toast"></div>
+
+    <!-- RootView.tabBar -->
+    <div class="tabbar" id="tabbar">
+      <button class="tab on" data-tab="dash">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 14.5V12c0-.6.2-1.2.7-1.6l1.8-1.6 1.6-2.4A2.5 2.5 0 0 1 9.1 5.3h5.8a2.5 2.5 0 0 1 2 1.1l1.6 2.4 1.8 1.6c.5.4.7 1 .7 1.6v2.5"/><path d="M3 14.5h18v3.2a1.3 1.3 0 0 1-1.3 1.3H4.3A1.3 1.3 0 0 1 3 17.7v-3.2Z"/><circle cx="7.2" cy="16.6" r="1.1" fill="currentColor" stroke="none"/><circle cx="16.8" cy="16.6" r="1.1" fill="currentColor" stroke="none"/></svg>
+        <span class="t">车况</span>
+      </button>
+      <button class="tab" data-tab="trips">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 20V4"/><path d="M3 20h18"/><path d="M6.5 16 10 11l3.2 3L20 6.5"/></svg>
+        <span class="t">行程</span>
+      </button>
+      <button class="tab" data-tab="charges">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13 2 4.5 13.5h6L9.5 22 18 10.5h-6L13 2Z"/></svg>
+        <span class="t">充电</span>
+      </button>
+      <button class="tab" data-tab="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.9 2.9l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.9-2.9l.1-.1a1.7 1.7 0 0 0-1.2-2.9H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 8.8a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.9-2.9l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.9 2.9l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+        <span class="t">设置</span>
+      </button>
+    </div>
+
+    <div class="home-bar"></div>
+  </div><!-- /phone -->
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════
+   数据：示意值。字段名与 Models.swift 的 VehicleStatus / Trip /
+   ChargeRecord 保持一致，便于对照。
+   ═══════════════════════════════════════════════════════════ */
+const STATE = {
+  status: {
+    nickname: '我的爱车', plateNo: '浙A·D12345',
+    soc: 68, rangeKm: 412, odometerKm: 18642,
+    battery12vVoltage: 12.4,
+    interiorTemp: 24.5, exteriorTemp: 18.2, avgConsumption: 15.8,
+    isCharging: false, isPlugged: true,
+    chargePowerKw: 62.4, chargeVoltage: 402, chargeCurrent: 155, minutesToFull: 34,
+    isLocked: true, climateOn: false, trunkOpen: false,
+    windows: { fl: false, fr: false, rl: false, rr: false },
+    tyreFrontLeft: 245, tyreFrontRight: 243, tyreRearLeft: 248, tyreRearRight: 246,
+    tyreWarning: false
+  },
+  ctrl: { commandsEnabled: true },
+  pending: null, succeeded: null, failed: null
+};
+
+/* ControlProvider 显示名（Models.swift） */
+const PROVIDERS = {
+  zeekr:      { name: '极氪极充', color: 'var(--tian-qing)' },
+  starCharge: { name: '星星充电', color: 'var(--dian-lan)'  },
+  teld:       { name: '特来电',   color: 'var(--zhu-qing)'  },
+  stateGrid:  { name: '国家电网', color: 'var(--qun-qing)'  },
+  eCharging:  { name: 'e充电',    color: 'var(--qing-bi)'   },
+  other:      { name: '其他',     color: 'var(--dai-se)'    }
+};
+
+const TREND = [
+  { date: '09-12', consumption: 15.2, distanceKm: 48, energyKwh: 7.3 },
+  { date: '09-13', consumption: 16.8, distanceKm: 62, energyKwh: 10.4 },
+  { date: '09-14', consumption: 14.1, distanceKm: 35, energyKwh: 4.9 },
+  { date: '09-15', consumption: 17.9, distanceKm: 88, energyKwh: 15.8 },
+  { date: '09-16', consumption: 15.4, distanceKm: 54, energyKwh: 8.3 },
+  { date: '09-17', consumption: 13.6, distanceKm: 29, energyKwh: 3.9 },
+  { date: '09-18', consumption: 16.1, distanceKm: 41, energyKwh: 6.6 }
+];
+
+const TRIPS = [
+  { startTime: '08:24', date: '09-18', from: '滨江·江南大道', to: '西湖区文三路', distanceKm: 18.4, energyKwh: 2.9, durationMinutes: 41, consumption: 15.8 },
+  { startTime: '18:02', date: '09-17', from: '文三路数字大厦', to: '滨江·星光大道', distanceKm: 21.6, energyKwh: 3.6, durationMinutes: 52, consumption: 16.7 },
+  { startTime: '09:11', date: '09-17', from: '滨江·江南大道', to: '萧山机场',   distanceKm: 32.1, energyKwh: 4.8, durationMinutes: 38, consumption: 15.0 },
+  { startTime: '14:35', date: '09-16', from: '城西银泰',     to: '良渚文化村',   distanceKm: 24.8, energyKwh: 4.1, durationMinutes: 46, consumption: 16.5 },
+  { startTime: '07:48', date: '09-15', from: '滨江·江南大道', to: '未来科技城',   distanceKm: 28.3, energyKwh: 5.2, durationMinutes: 55, consumption: 18.4 }
+];
+
+const RECORDS = [
+  { timestamp: '2026-09-17 21:14', amount: 86.40, energyKwh: 52.3, provider: 'zeekr',     channel: '极氪',   merchant: '极氪极充·滨江星光大道站' },
+  { timestamp: '2026-09-15 19:32', amount: 62.80, energyKwh: 38.6, provider: 'teld',      channel: '微信',   merchant: '特来电·文三路充电站' },
+  { timestamp: '2026-09-12 08:05', amount: 41.20, energyKwh: 25.1, provider: 'starCharge',channel: '支付宝', merchant: '星星充电·城西银泰店' },
+  { timestamp: '2026-09-09 22:48', amount: 78.60, energyKwh: 47.9, provider: 'stateGrid', channel: '支付宝', merchant: '国家电网·萧山服务区' },
+  { timestamp: '2026-09-05 16:20', amount: 33.50, energyKwh: 20.4, provider: 'eCharging', channel: '微信',   merchant: 'e充电·良渚文化村站' }
+];
+
+const MONTHLY = [
+  { month: '4 月', amount: 186 }, { month: '5 月', amount: 224 },
+  { month: '6 月', amount: 198 }, { month: '7 月', amount: 268 },
+  { month: '8 月', amount: 302 }, { month: '9 月', amount: 244 }
+];
+
+const CHARGING = { enabled: true };
+
+/* ═══════════════════════════════════════════════════════════
+   ControlsPanel.swift · 三组按钮定义（与源码逐项对应）
+   ═══════════════════════════════════════════════════════════ */
+const ICON = {
+  lock:    '<path d="M6 10.5h12a1.5 1.5 0 0 1 1.5 1.5v7.5A1.5 1.5 0 0 1 18 21H6a1.5 1.5 0 0 1-1.5-1.5V12A1.5 1.5 0 0 1 6 10.5Z"/><path d="M8.2 10.5V7.4a3.8 3.8 0 0 1 7.6 0v3.1"/>',
+  unlock:  '<path d="M6 10.5h12a1.5 1.5 0 0 1 1.5 1.5v7.5A1.5 1.5 0 0 1 18 21H6a1.5 1.5 0 0 1-1.5-1.5V12A1.5 1.5 0 0 1 6 10.5Z"/><path d="M8.2 10.5V7.4a3.8 3.8 0 0 1 6.6-2.5"/>',
+  snow:    '<path d="M12 2v20M4.9 5.9l14.2 12.2M19.1 5.9 4.9 18.1M2 12h20"/>',
+  defrost: '<circle cx="12" cy="12" r="9"/><path d="M12 6v12M6.8 8.6l10.4 6.8M17.2 8.6 6.8 15.4"/>',
+  wheel:   '<circle cx="12" cy="12" r="8.4"/><circle cx="12" cy="12" r="2.6"/><path d="M12 3.6v5.8M5 16.5l5-2.9M19 16.5l-5-2.9"/>',
+  seatheat:'<path d="M7 4.5v8.2a3 3 0 0 0 1.1 2.3l3.4 2.6"/> <path d="M4.5 17.5h9"/><path d="M16.5 6.5c1.4 1.6 1.4 3.4 0 5M19.5 4.5c2.4 2.8 2.4 6.2 0 9"/>',
+  wind:    '<path d="M3 8h11a3 3 0 1 0-3-3"/><path d="M3 12h15a3 3 0 1 1-3 3"/><path d="M3 16h8"/>',
+  flash:   '<path d="M4 14.5h4l1.2 5.5L16 9.5h-4L13 3 4 14.5Z"/>',
+  honk:    '<path d="M11 5 6.5 9H3v6h3.5L11 19V5Z"/><path d="M15.2 8.6a4.8 4.8 0 0 1 0 6.8M18 6a8.5 8.5 0 0 1 0 12"/>',
+  window:  '<rect x="3" y="6" width="18" height="12" rx="2.4"/><path d="M12 6v12"/>',
+  sunshade:'<circle cx="12" cy="12" r="4.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>',
+  boltclk: '<path d="M13 2 4.5 13.5h6L9.5 22 18 10.5h-6L13 2Z"/>',
+  sentinel:'<path d="M12 2.5 4.5 6v6c0 5 3.2 8.3 7.5 9.5 4.3-1.2 7.5-4.5 7.5-9.5V6L12 2.5Z"/><path d="M12 8v5" stroke-width="2.2"/>',
+  route:   '<circle cx="6" cy="6" r="2.4"/><circle cx="18" cy="18" r="2.4"/><path d="M6 8.4v6a3.6 3.6 0 0 0 3.6 3.6h5.9"/>',
+  locate:  '<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8.4"/><path d="M12 1.5v3.6M12 18.9v3.6M1.5 12h3.6M18.9 12h3.6"/>',
+  refresh: '<path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M21 4v5h-5"/>'
+};
+
+function svg(paths) {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + paths + '</svg>';
+}
+
+/* 三组按钮 —— 与 ControlsPanel.swift 的 vehicleControls / remoteActions / sceneActions 逐项对应 */
+function groups() {
+  const s = STATE.status, locked = s.isLocked === true, ac = s.climateOn === true, chg = s.isCharging === true;
+  return {
+    vehicle: [
+      { cmd: locked ? 'unlock' : 'lock', label: locked ? '解锁' : '锁车', sub: locked ? '当前已锁' : '当前未锁', icon: locked ? ICON.unlock : ICON.lock, toggle: true, on: locked },
+      { cmd: ac ? 'climateOff' : 'climateOn', label: ac ? '关空调' : '开空调', sub: ac ? '运行中' : '已关闭', icon: ICON.snow, toggle: true, on: ac },
+      { cmd: 'defrost',  label: '前除霜',  sub: '风挡除雾',  icon: ICON.defrost,  toggle: true, on: false },
+      { cmd: 'wheelHeat',label: '方向盘',  sub: '加热',      icon: ICON.wheel,    toggle: true, on: false },
+      { cmd: 'seatHeat', label: '座椅加热',sub: '主 / 副驾', icon: ICON.seatheat, toggle: true, on: false },
+      { cmd: 'ventSeat', label: '座椅通风',sub: '主 / 副驾', icon: ICON.wind,     toggle: true, on: false }
+    ],
+    remote: [
+      { cmd: 'flash',        label: '闪灯',    icon: ICON.flash },
+      { cmd: 'honk',         label: '鸣笛',    icon: ICON.honk },
+      { cmd: 'closeWindows', label: '关车窗',  icon: ICON.window },
+      { cmd: 'sunshade',     label: '遮阳帘',  icon: ICON.sunshade },
+      { cmd: chg ? 'chargeStop' : 'chargeStart', label: chg ? '结束充电' : '开始充电', icon: ICON.boltclk,
+        dis: !chg && s.isPlugged !== true },
+      { cmd: 'sentinel',     label: '哨兵模式', icon: ICON.sentinel, toggle: true, on: false }
+    ],
+    scene: [
+      { cmd: 'tripPlan', label: '出行规划', sub: '预设出发时间', icon: ICON.route,   cls: 'scene' },
+      { cmd: 'carFinder',label: '寻车',     sub: '定位车辆',     icon: ICON.locate,  cls: 'scene' },
+      { cmd: 'refresh',  label: '立即刷新', sub: '同步车况',     icon: ICON.refresh, cls: 'scene' }
+    ]
+  };
+}
+
+const CMD_LABELS = {
+  lock: '锁车', unlock: '解锁', climateOn: '开空调', climateOff: '关空调',
+  defrost: '前除霜', wheelHeat: '方向盘加热', seatHeat: '座椅加热', ventSeat: '座椅通风',
+  flash: '闪灯', honk: '鸣笛', closeWindows: '关车窗', sunshade: '遮阳帘',
+  chargeStart: '开始充电', chargeStop: '结束充电', sentinel: '哨兵模式',
+  tripPlan: '出行规划', carFinder: '寻车', refresh: '立即刷新'
+};
+
+/* ═══════════════════════════════════════════════════════════
+   渲染 · DashboardView
+   ═══════════════════════════════════════════════════════════ */
+function fmtDist(km) {
+  return km >= 10000 ? (km / 10000).toFixed(1) + ' 万 km' : Math.round(km) + ' km';
+}
+function fmtDuration(min) {
+  const t = Math.round(min);
+  if (t < 60) return t + ' 分钟';
+  const h = Math.floor(t / 60), m = t % 60;
+  return m === 0 ? h + ' 小时' : h + ' 小时 ' + m + ' 分';
+}
+function socColor(soc) {
+  if (soc < 30) return 'var(--zhu-sha)';
+  if (soc < 50) return 'var(--teng-huang)';
+  return 'var(--qing-bi)';
+}
+
+function renderDash() {
+  const s = STATE.status;
+  const soc = s.soc ?? 0;
+  const charging = s.isCharging === true;
+
+  /* SOCRing：主色充电中固定靛青，否则按三档 */
+  const ring = document.getElementById('socRing');
+  const prog = document.getElementById('socProg');
+  const C = 2 * Math.PI * 60.5;
+  prog.style.strokeDasharray = C;
+  prog.style.strokeDashoffset = C * (1 - Math.max(0, Math.min(1, soc / 100)));
+  const ringColor = charging ? 'var(--dian-qing)' : socColor(soc);
+  prog.style.stroke = ringColor;
+  ring.classList.toggle('charging', charging);
+  ring.classList.toggle('low', !charging && soc < 30);
+
+  document.getElementById('socNum').innerHTML = Math.round(soc) + '<span>%</span>';
+  const mid = ring.querySelector('.mid');
+  let badge = mid.querySelector('.charging');
+  if (charging && !badge) {
+    badge = document.createElement('div');
+    badge.className = 'charging';
+    badge.innerHTML = '<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>充电中';
+    mid.appendChild(badge);
+  } else if (!charging && badge) badge.remove();
+
+  let tag = ring.querySelector('.low-tag');
+  if (!charging && soc < 30 && !tag) {
+    tag = document.createElement('div');
+    tag.className = 'low-tag';
+    tag.textContent = '电量偏低';
+    ring.appendChild(tag);
+  } else if ((charging || soc >= 30) && tag) tag.remove();
+
+  ring.style.filter = charging ? 'none'
+    : soc < 30 ? 'drop-shadow(0 0 7px rgba(229,72,59,.55))'
+    : soc < 50 ? 'drop-shadow(0 0 5px rgba(255,176,32,.42))' : 'none';
+
+  document.getElementById('carName').textContent = s.nickname || '我的爱车';
+  document.getElementById('carPlate').textContent = s.plateNo || '';
+  document.getElementById('rangeVal').textContent = s.rangeKm != null ? Math.round(s.rangeKm) + ' km' : '--';
+  document.getElementById('odoVal').textContent = s.odometerKm != null ? fmtDist(s.odometerKm) : '--';
+
+  /* chargingCard */
+  const cc = document.getElementById('chargeCard');
+  cc.style.display = charging ? '' : 'none';
+  if (charging) {
+    document.getElementById('cPower').textContent = s.chargePowerKw?.toFixed(1) ?? '--';
+    document.getElementById('cVolt').textContent = s.chargeVoltage?.toFixed(0) ?? '--';
+    document.getElementById('cCurr').textContent = s.chargeCurrent?.toFixed(0) ?? '--';
+    document.getElementById('etaVal').textContent =
+      s.minutesToFull > 0 ? fmtDuration(s.minutesToFull) : '--';
+  }
+
+  document.getElementById('inTemp').textContent = s.interiorTemp?.toFixed(1) ?? '--';
+  document.getElementById('exTemp').textContent = s.exteriorTemp?.toFixed(1) ?? '--';
+  document.getElementById('avgCons').textContent = s.avgConsumption?.toFixed(1) ?? '--';
+  document.getElementById('batt12v').textContent = s.battery12vVoltage?.toFixed(1) ?? '--';
+
+  /* 胎压：<220 或 >280 视为异常 */
+  const tyres = [['tFL', s.tyreFrontLeft], ['tFR', s.tyreFrontRight], ['tRL', s.tyreRearLeft], ['tRR', s.tyreRearRight]];
+  let anyAbnormal = false;
+  tyres.forEach(([id, v]) => {
+    const el = document.getElementById(id);
+    const bad = v != null && (v < 220 || v > 280);
+    if (bad) anyAbnormal = true;
+    el.textContent = v != null ? v.toFixed(0) : '--';
+    el.classList.toggle('bad', bad);
+  });
+  document.getElementById('tyreWarn').style.display = (s.tyreWarning === true || anyAbnormal) ? '' : 'none';
+
+  /* 车身状态 */
+  const setChip = (id, good, goodText, badText, neutral) => {
+    const el = document.getElementById(id);
+    el.textContent = good ? goodText : badText;
+    el.className = 'v ' + (neutral ? 'c-neutral' : (good ? 'c-good' : 'c-warn'));
+  };
+  setChip('chipDoor', s.isLocked === true, '已锁', '未锁');
+  setChip('chipAc', s.climateOn === true, '开启', '关闭', true);
+  setChip('chipWin', !Object.values(s.windows || {}).includes(true), '已关', '未关');
+  setChip('chipTrunk', s.trunkOpen !== true, '已关', '开启');
+
+  document.getElementById('ctrlStatus').textContent =
+    !STATE.ctrl.commandsEnabled ? '已禁用' : (s.isLocked ? '车辆已上锁' : '车辆未上锁');
+  document.getElementById('ctrlNote').style.display = STATE.ctrl.commandsEnabled ? 'none' : '';
+
+  const d = new Date();
+  const now = [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2, '0')).join(':');
+  document.getElementById('updTime').textContent = now;
+  document.getElementById('diagUpd').textContent = now;
+
+  renderControls();
+}
+
+/* ── ControlsPanel 渲染 ───────────────────────────────────── */
+function renderControls() {
+  const g = groups();
+  const on = STATE.ctrl.commandsEnabled;
+  const build = (list, targetId) => {
+    const box = document.getElementById(targetId);
+    box.innerHTML = list.map((a, i) => {
+      const dis = !on || a.dis;
+      const cls = ['ctrl-btn', a.cls || '', a.toggle && a.on ? 'on' : '', dis ? 'dis' : ''].filter(Boolean).join(' ');
+      return `<div class="${cls}" data-g="${targetId}" data-i="${i}" title="${CMD_LABELS[a.cmd] || a.label}">
+        <div class="ctrl-overlay"></div>
+        ${svg(a.icon)}
+        <div class="lbl">${a.label}</div>
+        ${a.sub ? `<div class="sub">${a.sub}</div>` : ''}
+      </div>`;
+    }).join('');
+  };
+  build(g.vehicle, 'grid-vehicle');
+  build(g.remote, 'grid-remote');
+  build(g.scene, 'grid-scene');
+}
+
+/* 点击下发（模拟 ControlsPanel.trigger 的 8 段动效链路） */
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.ctrl-btn');
+  if (!btn || btn.classList.contains('dis') || STATE.pending || STATE.succeeded) return;
+  const gi = btn.dataset.g, i = +btn.dataset.i;
+  const key = gi === 'grid-vehicle' ? 'vehicle' : gi === 'grid-remote' ? 'remote' : 'scene';
+  const action = groups()[key][i];
+  if (!action) return;
+
+  STATE.pending = action;
+  const ov = btn.querySelector('.ctrl-overlay');
+  ov.className = 'ctrl-overlay load show';
+  ov.innerHTML = '<div class="spinner"></div>';
+
+  setTimeout(() => {
+    STATE.pending = null;
+    const ok = Math.random() > 0.12;          // 大部分成功，偶发失败以呈现失败态
+
+    if (ok) {
+      ov.className = 'ctrl-overlay ok show';
+      ov.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4.5 4.5L19 7.5"/></svg>';
+      btn.classList.add('bounce');
+      applyLocal(action);
+      showToast(CMD_LABELS[action.cmd] + '已下发');
+      setTimeout(() => { ov.className = 'ctrl-overlay'; ov.innerHTML = ''; btn.classList.remove('bounce'); }, 950);
+    } else {
+      ov.className = 'ctrl-overlay fail show';
+      btn.classList.add('shake');
+      showToast(CMD_LABELS[action.cmd] + '失败，请重试');
+      setTimeout(() => { ov.className = 'ctrl-overlay'; btn.classList.remove('shake'); }, 900);
+    }
+  }, 620);
+});
+
+/* 本地联动，让开关态有真实感 */
+function applyLocal(a) {
+  const s = STATE.status;
+  switch (a.cmd) {
+    case 'lock': s.isLocked = true; break;
+    case 'unlock': s.isLocked = false; break;
+    case 'climateOn': s.climateOn = true; break;
+    case 'climateOff': s.climateOn = false; break;
+    case 'chargeStart': s.isCharging = true; s.soc = Math.min(100, s.soc + 3); break;
+    case 'chargeStop': s.isCharging = false; break;
+    case 'refresh': break;
+    default: break;
+  }
+  renderDash();
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('on');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('on'), 2100);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   TripsView
+   ═══════════════════════════════════════════════════════════ */
+function renderTrips() {
+  const totalDist = TREND.reduce((a, p) => a + (p.distanceKm || 0), 0);
+  const totalEnergy = TREND.reduce((a, p) => a + (p.energyKwh || 0), 0);
+  document.getElementById('sumDist').textContent = totalDist.toFixed(0);
+  document.getElementById('sumEnergy').textContent = totalEnergy.toFixed(1);
+  document.getElementById('sumAvg').textContent = totalDist > 0 ? (totalEnergy / totalDist * 100).toFixed(1) : '--';
+  document.getElementById('tripCount').textContent = TRIPS.length + ' 条';
+
+  document.getElementById('tripList').innerHTML = TRIPS.map((t, i) => `
+    <div class="trip-row">
+      <div class="trip-time"><div class="h">${t.startTime}</div><div class="d">${t.date}</div></div>
+      <div class="trip-mid">
+        <div class="trip-route">
+          <span>${t.from}</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M4 12h15M13 6l6 6-6 6"/></svg>
+          <span>${t.to}</span>
+        </div>
+        <div class="trip-meta">
+          <i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20 8 4h8l4 16"/><path d="M6.4 13h11.2"/></svg>${t.distanceKm.toFixed(1)} km</i>
+          <i><svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4.5 13.5h6L9.5 22 18 10.5h-6L13 2Z"/></svg>${t.energyKwh.toFixed(1)} kWh</i>
+          <i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/></svg>${Math.round(t.durationMinutes)} 分</i>
+        </div>
+      </div>
+      <div class="trip-cons"><div class="v">${t.consumption.toFixed(1)}</div><div class="k">kWh/100</div></div>
+    </div>
+    ${i < TRIPS.length - 1 ? '<div class="divider"></div>' : ''}
+  `).join('');
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ChargesView
+   ═══════════════════════════════════════════════════════════ */
+function renderCharges() {
+  const total = RECORDS.reduce((a, r) => a + r.amount, 0);
+  const energy = RECORDS.reduce((a, r) => a + r.energyKwh, 0);
+  const provs = new Set(RECORDS.map(r => r.provider));
+  document.getElementById('totalAmt').textContent = total.toFixed(2);
+  document.getElementById('totalCount').textContent = RECORDS.length;
+  document.getElementById('totalProv').textContent = provs.size;
+  document.getElementById('totalPrice').textContent = energy > 0 ? (total / energy).toFixed(2) : '--';
+
+  /* 服务商分布横向条形（对应 BarMark y=服务商 x=金额） */
+  const byProv = {};
+  RECORDS.forEach(r => { byProv[r.provider] = (byProv[r.provider] || 0) + r.amount; });
+  const max = Math.max(...Object.values(byProv));
+  document.getElementById('providerBars').innerHTML = Object.entries(byProv)
+    .sort((a, b) => b[1] - a[1])
+    .map(([p, amt]) => {
+      const info = PROVIDERS[p] || PROVIDERS.other;
+      return `<div class="hbar-row">
+        <div class="hbar-name">${info.name}</div>
+        <div class="hbar-track"><i style="width:${(amt / max * 100).toFixed(1)}%;background:${info.color}"></i></div>
+        <div class="hbar-val">${amt.toFixed(0)}</div>
+      </div>`;
+    }).join('');
+
+  document.getElementById('recList').innerHTML = RECORDS.map((r, i) => {
+    const info = PROVIDERS[r.provider] || PROVIDERS.other;
+    return `<div class="charge-rec">
+      <div class="rec-mark" style="background:${info.color}"></div>
+      <div class="rec-mid">
+        <div class="rec-provider">${info.name}</div>
+        <div class="rec-sub"><span>${r.timestamp.slice(0, 16)}</span><span>·</span><span>${r.channel}</span></div>
+        <div class="rec-merchant">${r.merchant}</div>
+      </div>
+      <div class="rec-amt">
+        <div class="v">¥${r.amount.toFixed(2)}</div>
+        <div class="k">${r.energyKwh.toFixed(1)} kWh</div>
+      </div>
+    </div>${i < RECORDS.length - 1 ? '<div class="divider"></div>' : ''}`;
+  }).join('');
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Canvas 图表（对应 Swift Charts 的 LineMark/AreaMark 与 BarMark）
+   ═══════════════════════════════════════════════════════════ */
+function setupCanvas(cv) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return null;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  return { ctx, w, h };
+}
+function cssVar(n) {
+  return getComputedStyle(document.body).getPropertyValue(n).trim();
+}
+
+/* LineMark + AreaMark · 百公里能耗 */
+function drawConsumption() {
+  const cv = document.getElementById('chartCons');
+  const c = setupCanvas(cv); if (!c) return;
+  const { ctx, w, h } = c;
+  /* 右侧留 18px：末位日期标签（如 09-18）居中绘制，不留白会被裁掉 */
+  const padL = 30, padR = 18, padT = 8, padB = 20;
+  const cw = w - padL - padR, ch = h - padT - padB;
+
+  const vals = TREND.map(p => p.consumption);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const pad = (hi - lo) * 0.35 || 1;
+  lo -= pad; hi += pad;
+
+  const X = i => padL + (i / (TREND.length - 1)) * cw;
+  const Y = v => padT + ch - ((v - lo) / (hi - lo)) * ch;
+
+  /* 网格 + Y 轴标签 */
+  ctx.strokeStyle = cssVar('--separator') || 'rgba(0,0,0,.08)';
+  ctx.fillStyle = cssVar('--text-3');
+  ctx.font = '9px -apple-system, sans-serif';
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (let i = 0; i <= 3; i++) {
+    const v = lo + (hi - lo) * (i / 3);
+    const y = Y(v);
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillText(v.toFixed(0), padL - 6, y);
+  }
+
+  /* AreaMark 渐变填充 */
+  const accent = cssVar('--accent') || '#1C6FA8';
+  const grad = ctx.createLinearGradient(0, padT, 0, padT + ch);
+  grad.addColorStop(0, hexA(accent, .22));
+  grad.addColorStop(1, hexA(accent, .02));
+  ctx.beginPath();
+  ctx.moveTo(X(0), Y(vals[0]));
+  for (let i = 1; i < vals.length; i++) ctx.lineTo(X(i), Y(vals[i]));
+  ctx.lineTo(X(vals.length - 1), padT + ch);
+  ctx.lineTo(X(0), padT + ch);
+  ctx.closePath();
+  ctx.fillStyle = grad; ctx.fill();
+
+  /* LineMark · catmullRom 平滑 */
+  ctx.beginPath();
+  ctx.strokeStyle = accent; ctx.lineWidth = 2;
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  const pts = vals.map((v, i) => [X(i), Y(v)]);
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i], p1 = pts[i + 1];
+    const cx = (p0[0] + p1[0]) / 2;
+    ctx.bezierCurveTo(cx, p0[1], cx, p1[1], p1[0], p1[1]);
+  }
+  ctx.stroke();
+
+  /* X 轴标签 */
+  ctx.fillStyle = cssVar('--text-3');
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  TREND.forEach((p, i) => {
+    if (i % 2 === 0 || i === TREND.length - 1) ctx.fillText(p.date, X(i), padT + ch + 5);
+  });
+}
+
+/* BarMark · 每日里程 / 月度消费 */
+function drawBars(id, data, labelKey, valueKey, colorVar, labelStep) {
+  const cv = document.getElementById(id);
+  const c = setupCanvas(cv); if (!c) return;
+  const { ctx, w, h } = c;
+  /* 右侧留 16px 容纳末位 X 轴标签 */
+  const padL = 30, padR = 16, padT = 8, padB = 20;
+  const cw = w - padL - padR, ch = h - padT - padB;
+
+  const vals = data.map(d => d[valueKey]);
+  const hi = Math.max(...vals) * 1.15 || 1;
+
+  ctx.strokeStyle = cssVar('--separator') || 'rgba(0,0,0,.08)';
+  ctx.fillStyle = cssVar('--text-3');
+  ctx.font = '9px -apple-system, sans-serif';
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (let i = 0; i <= 3; i++) {
+    const v = hi * (i / 3), y = padT + ch - (v / hi) * ch;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillText(v.toFixed(0), padL - 6, y);
+  }
+
+  const n = data.length;
+  const slot = cw / n, bw = Math.max(4, Math.min(22, slot * 0.55));
+  const color = cssVar(colorVar) || '#3A6EA5';
+  data.forEach((d, i) => {
+    const v = d[valueKey];
+    const bh = (v / hi) * ch;
+    const x = padL + slot * i + (slot - bw) / 2;
+    const y = padT + ch - bh;
+    ctx.fillStyle = colorVar === '--accent-2' ? hexA(color, .72) : hexA(color, .82);
+    roundRect(ctx, x, y, bw, bh, 2); ctx.fill();
+  });
+
+  ctx.fillStyle = cssVar('--text-3');
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  data.forEach((d, i) => {
+    if (i % (labelStep || 1) === 0) ctx.fillText(d[labelKey], padL + slot * i + slot / 2, padT + ch + 5);
+  });
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+/* #RRGGBB + alpha → rgba() */
+function hexA(hex, a) {
+  hex = (hex || '#000000').trim();
+  if (hex.startsWith('rgb')) return hex;
+  const m = hex.replace('#', '');
+  const full = m.length === 3 ? m.split('').map(c => c + c).join('') : m;
+  const n = parseInt(full, 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+function drawAllCharts() {
+  drawConsumption();
+  drawBars('chartDist', TREND, 'date', 'distanceKm', '--accent-2', 2);
+  drawBars('chartMonth', MONTHLY, 'month', 'amount', '--accent', 1);
+}
+
+/**
+ * 只重绘「当前可见页面」的图表。
+ *
+ * 隐藏页（display:none）的 canvas 其 clientWidth/Height 为 0，
+ * 此时设置宽高会得到 0×0 画布 → 图表永远是空白。
+ * 所以必须等页面可见后再画。
+ */
+function drawVisibleCharts() {
+  const active = document.querySelector('.page.on');
+  if (!active) return;
+  if (active.id === 'page-trips') {
+    drawConsumption();
+    drawBars('chartDist', TREND, 'date', 'distanceKm', '--accent-2', 2);
+  } else if (active.id === 'page-charges') {
+    drawBars('chartMonth', MONTHLY, 'month', 'amount', '--accent', 1);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   交互
+   ═══════════════════════════════════════════════════════════ */
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.tab === name));
+  document.querySelectorAll('.page').forEach(p => p.classList.toggle('on', p.id === 'page-' + name));
+  document.querySelectorAll('.toolbar button[data-jump]').forEach(b => b.classList.toggle('on', b.dataset.jump === name));
+  document.getElementById('scroll').scrollTop = 0;
+
+  /* 账单菜单图标只在充电页出现（对应 ChargesView 的 trailingAccessory） */
+  document.getElementById('moreBtn').style.display = name === 'charges' ? 'flex' : 'none';
+
+  /* 等页面真正可见、布局完成后再画图，否则 canvas 尺寸为 0 */
+  requestAnimationFrame(() => requestAnimationFrame(drawVisibleCharts));
+}
+document.getElementById('tabbar').addEventListener('click', e => {
+  const b = e.target.closest('.tab'); if (b) switchTab(b.dataset.tab);
+});
+document.querySelectorAll('.toolbar button[data-jump]').forEach(b =>
+  b.addEventListener('click', () => switchTab(b.dataset.jump)));
+
+/* 图标按钮仅作示意（真实 App 里是账单导入菜单） */
+document.getElementById('moreBtn').addEventListener('click', () =>
+  showToast('账单导入菜单（示意）'));
+
+/* 暗色切换 */
+document.getElementById('themeBtn').addEventListener('click', e => {
+  document.body.classList.toggle('dark');
+  const dark = document.body.classList.contains('dark');
+  e.target.textContent = dark ? '切换亮色' : '切换暗色';
+  document.querySelector('meta[name="theme-color"]').setAttribute('content', dark ? '#14171C' : '#F3F5F7');
+  requestAnimationFrame(() => requestAnimationFrame(drawVisibleCharts));
+});
+
+/* 行程范围切换 */
+document.getElementById('rangeSeg').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  [...e.currentTarget.children].forEach(x => x.classList.toggle('on', x === b));
+  requestAnimationFrame(drawVisibleCharts);
+});
+
+/* 轮询滑块 */
+const poll = document.getElementById('pollRange');
+poll.addEventListener('input', () => {
+  document.getElementById('pollVal').textContent = poll.value + ' 分钟';
+});
+
+/* 车控总开关 */
+document.getElementById('cmdSwitch').addEventListener('click', function () {
+  this.classList.toggle('on');
+  STATE.ctrl.commandsEnabled = this.classList.contains('on');
+  document.getElementById('cmdWarn').style.display = STATE.ctrl.commandsEnabled ? '' : 'none';
+  renderDash();
+});
+
+/* 初始化 */
+renderDash();
+renderTrips();
+renderCharges();
+switchTab('dash');
+
+window.addEventListener('resize', () => requestAnimationFrame(drawVisibleCharts));
+window.addEventListener('load', () => requestAnimationFrame(drawVisibleCharts));
+/* 字体/布局异步就绪后补画一次，避免首帧尺寸偏差 */
+setTimeout(drawVisibleCharts, 120);
+setTimeout(drawVisibleCharts, 400);
+/* 暗色模式下图表要重绘 */
+new MutationObserver(() => requestAnimationFrame(drawAllCharts))
+  .observe(document.body, { attributes: true, attributeFilter: ['class'] });
+</script>
+</body>
+</html>
