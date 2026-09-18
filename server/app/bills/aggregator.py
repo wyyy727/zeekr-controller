@@ -5,15 +5,28 @@
 2. **跨平台去重**（同一笔消费可能同时出现在支付宝和微信）
 3. 按服务商 / 月份维度**聚合统计**
 
-去重策略：以「时间（分钟级）+ 金额」作为指纹。
-同一笔充电不太可能在同一分钟、同一金额发生两次。
+去重策略（订单号优先，无订单号时退化为时间指纹）：
+
+- **有订单号** → 指纹为 `no:<交易单号>`。同平台重复导入被精确识别，
+  且不会误伤「同分钟同额的两笔真实消费」。
+- **无订单号** → 指纹为 `ts:<分钟>|<金额>`。此时无更强依据，只能按
+  「同分钟同额即同一笔」处理，以保住跨平台去重能力。
+
+两种指纹**互斥使用**而非叠加：时间指纹是弱证据，若与订单号并存会让
+「同分钟同额的两笔不同订单」被时间指纹抢先判重 —— 这正是要修的 bug。
+
+已知权衡：同一笔消费在支付宝与微信**各带一个不同的交易单号**时，
+会被记为两笔（重复）。这是有意为之 —— 多记一笔在对账时能被发现，
+少记一笔（静默吞掉）用户永远察觉不到。安全侧偏向「宁可重复」。
+
+历史缺陷：早期实现只有「分钟 + 金额」且完全忽略 `orderNo`，导致同一
+分钟内在不同充电站的两笔同额消费被静默丢弃。
 """
 
 from __future__ import annotations
 
 import uuid
 from collections import defaultdict
-from datetime import datetime
 from typing import Any
 
 from .parsers import parse_bill
@@ -21,16 +34,24 @@ from .providers import detect_provider, provider_display_name
 
 
 def _dedup_key(record: dict[str, Any]) -> str:
-    """生成去重指纹。
+    """生成去重指纹（订单号优先，无订单号时退化为时间指纹）。
 
-    时间精确到分钟 —— 容忍不同平台记录的秒级差异，
-    同时保证同一笔消费的指纹一致。
+    返回形如：
+      `no:<订单号>`        —— 订单号指纹
+      `ts:<分钟>|<金额>`    —— 时间指纹（无订单号时的兜底）
+
+    时间指纹**不含渠道**：跨平台去重的核心场景是同一笔消费在支付宝和
+    微信各出现一次（渠道不同），带渠道会让它去重失败。
     """
+    order_no = str(record.get("orderNo") or "").strip()
+    if order_no:
+        return f"no:{order_no.upper()}"
+
     timestamp = str(record.get("timestamp") or "")
-    # 截断到分钟
+    # 截断到分钟 —— 容忍不同平台记录的秒级差异
     minute = timestamp[:16] if len(timestamp) >= 16 else timestamp
     amount = record.get("amount")
-    return f"{minute}|{round(float(amount or 0), 2)}"
+    return f"ts:{minute}|{round(float(amount or 0), 2)}"
 
 
 def extract_charges(records: list[dict[str, Any]]) -> list[dict[str, Any]]:

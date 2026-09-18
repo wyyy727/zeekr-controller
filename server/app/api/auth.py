@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from ..adapters import get_client, is_mock
 from ..core.config import config
+from . import fail
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,8 @@ async def send_code(payload: SendCodeRequest) -> dict:
     try:
         result = await client.send_sms_code(phone)
     except Exception as exc:  # noqa: BLE001
-        logger.error("发送验证码失败：%s", exc)
-        raise HTTPException(status_code=500, detail=f"发送验证码失败：{exc}") from exc
+        # 不回显原始异常：网关报文可能含令牌片段
+        fail("发送验证码失败，请检查服务端日志", exc)
 
     return {
         "success": result.get("success", False),
@@ -70,8 +71,8 @@ async def verify_code(payload: VerifyCodeRequest) -> dict:
     try:
         result = await client.verify_sms_code(phone, code)
     except Exception as exc:  # noqa: BLE001
-        logger.error("验证码校验失败：%s", exc)
-        raise HTTPException(status_code=500, detail=f"验证码校验失败：{exc}") from exc
+        # 不回显原始异常：登录链路报文更敏感
+        fail("验证码校验失败，请检查服务端日志", exc)
 
     return {
         "success": result.get("success", False),

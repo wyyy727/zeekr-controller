@@ -5,11 +5,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from ..adapters import get_client, is_mock
+from ..adapters import get_client
 from ..core.config import config
+from . import fail
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +25,6 @@ class CommandRequest(BaseModel):
     vin: str | None = Field(default=None, description="目标车辆 VIN")
 
 
-def _error(message: str, code: int = 500) -> HTTPException:
-    return HTTPException(status_code=code, detail=message)
-
-
 @router.get("/status")
 async def get_status(vin: str | None = None) -> dict:
     """获取车辆实时状态。"""
@@ -35,9 +32,8 @@ async def get_status(vin: str | None = None) -> dict:
     try:
         status = await client.get_vehicle_status(vin=vin)
     except Exception as exc:  # noqa: BLE001 - 统一转为 HTTP 错误
-        # 不回显原始异常文本 —— 网关报文可能含令牌片段，细节只写日志
-        logger.error("获取车辆状态失败：%s", exc, exc_info=True)
-        raise _error("获取车辆状态失败，请检查服务端日志与登录状态") from exc
+        # 不回显原始异常：网关报文可能含令牌片段
+        fail("获取车辆状态失败，请检查服务端日志与登录状态", exc)
 
     # 补齐车辆信息（状态接口在某些网关下不返回昵称/车牌）
     try:
@@ -67,8 +63,8 @@ async def list_vehicles() -> dict:
     try:
         vehicles = await client.list_vehicles()
     except Exception as exc:  # noqa: BLE001
-        logger.error("获取车辆列表失败：%s", exc, exc_info=True)
-        raise _error("获取车辆列表失败，请检查服务端日志") from exc
+        # 不回显原始异常：网关报文可能含令牌片段
+        fail("获取车辆列表失败，请检查服务端日志", exc)
 
     return {"success": True, "data": vehicles}
 
@@ -95,8 +91,8 @@ async def send_command(payload: CommandRequest) -> dict:
             vin=payload.vin,
         )
     except Exception as exc:  # noqa: BLE001
-        logger.error("下发指令失败：%s", exc, exc_info=True)
-        raise _error("下发指令失败，请检查服务端日志") from exc
+        # 不回显原始异常：网关报文可能含令牌片段
+        fail("下发指令失败，请检查服务端日志", exc)
 
     success = bool(result.get("success"))
     return {

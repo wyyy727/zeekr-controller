@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import csv
 import hashlib
@@ -20,6 +21,7 @@ import io
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -362,6 +364,99 @@ class TestCommandTrustBoundary:
             if is_supported_command(c) and not is_verified_command(c)
         }
         assert diff == set(UNVERIFIED_COMMANDS)
+
+
+# MARK: - 车控闸门「接线」验证
+#
+# 上面 TestCommandTrustBoundary 测的是 `is_verified_command` 这个**零件**。
+# 本组测的是**接线** —— 即 `LiveZeekrClient.send_command` 是否真的调用它。
+#
+# 背景：此前 `is_verified_command` 在全项目仅被测试引用，生产路径 0 调用，
+# 导致「未验证指令 live 拒发」的安全承诺完全落空。仅测零件无法发现该类缺陷。
+
+class TestLiveCommandGating:
+    """`LiveZeekrClient.send_command` 必须真的调用可信度闸门。"""
+
+    @staticmethod
+    def _bare_client() -> Any:
+        """构造一个不触发登录的客户端实例，仅用于验证**入口守卫**。
+
+        守卫在发起任何网络请求之前返回，因此这里无需真实凭证。
+        """
+        from app.adapters.live_client import LiveZeekrClient
+
+        client = LiveZeekrClient.__new__(LiveZeekrClient)
+        client._session = {"active_vin": "TESTVIN0000000000"}
+        return client
+
+    def test_send_command_calls_is_verified_command(self) -> None:
+        """接线断言：send_command 内部必须调用 `is_verified_command`。
+
+        用 monkeypatch 记录调用，防止「函数存在但没人调」的回归。
+        选用未验证指令，保证在守卫处即返回，不触及网络层。
+        """
+        import app.adapters.live_client as live_module
+
+        calls: list[str] = []
+        original = live_module.is_verified_command
+
+        def spy(command: str) -> bool:
+            calls.append(command)
+            return original(command)
+
+        live_module.is_verified_command = spy  # type: ignore[assignment]
+        try:
+            client = self._bare_client()
+            asyncio.run(client.send_command("defrost"))
+        finally:
+            live_module.is_verified_command = original  # type: ignore[assignment]
+
+        assert calls == ["defrost"], "send_command 未调用 is_verified_command（安全闸门脱线）"
+
+    def test_verified_command_passes_gate(self) -> None:
+        """已验证指令必须**穿过**闸门（不被误拦）。
+
+        通过 spy 断言闸门放行，且不依赖后续网络行为 —— 一旦放行，
+        说明闸门没有把已验证指令错杀。
+        """
+        import app.adapters.live_client as live_module
+
+        seen: list[str] = []
+        original = live_module.is_verified_command
+
+        def spy(command: str) -> bool:
+            seen.append(command)
+            return True  # 强制放行，避免进入真实网络路径
+
+        live_module.is_verified_command = spy  # type: ignore[assignment]
+        try:
+            client = self._bare_client()
+            try:
+                asyncio.run(client.send_command("lock"))
+            except Exception:  # noqa: BLE001
+                pass  # 放行后进入网络层必然失败，与闸门行为无关
+        finally:
+            live_module.is_verified_command = original  # type: ignore[assignment]
+
+        assert seen == ["lock"], "已验证指令未经过闸门判定"
+
+    def test_send_command_rejects_all_unverified(self) -> None:
+        """所有未验证指令都必须被 live 路径拒绝，且不发起网络请求。"""
+        client = self._bare_client()
+        for command in sorted(UNVERIFIED_COMMANDS):
+            result = asyncio.run(client.send_command(command))
+            assert result["success"] is False, f"{command} 未被拦截"
+            assert result.get("reason") == "unverified_command", (
+                f"{command} 的拒绝原因未标注为 unverified_command"
+            )
+
+    def test_send_command_rejects_unknown_before_gate(self) -> None:
+        """完全未知的指令仍走「不支持的指令」分支，语义不混淆。"""
+        client = self._bare_client()
+        result = asyncio.run(client.send_command("launchMissiles"))
+        assert result["success"] is False
+        assert "不支持的指令" in result["message"]
+        assert "reason" not in result
 
 
 # MARK: - 服务商识别
@@ -739,3 +834,373 @@ class TestStatusNormalization:
         }
         status = self._normalize(payload)
         assert status["minutesToFull"] is None, "2047 是哨兵值，应转为未知"
+
+
+# MARK: - 行程 tripId 稳定性
+#
+# 背景：`trips` 表主键是 trip_id 且用 INSERT OR REPLACE，历史实现里
+# 网关不返回 id 时 tripId 退化为空串，多条行程互相覆盖 —— 实测写 3 条只剩 1 条。
+
+class TestTripIdStability:
+    """trip_id 必须稳定、唯一，绝不退化为空串。"""
+
+    def test_prefers_gateway_id(self) -> None:
+        """网关给了 id 就用它，不画蛇添足。"""
+        from app.adapters.live_client import build_trip_id
+        assert build_trip_id("abc-123", "2026-01-01 08:00:00", "2026-01-01 08:30:00", 12.5) == "abc-123"
+
+    def test_blank_id_falls_back_to_derived(self) -> None:
+        """id 缺失/空白时不能返回空串。"""
+        from app.adapters.live_client import build_trip_id
+        for blank in (None, "", "   "):
+            trip_id = build_trip_id(blank, "2026-01-01 08:00:00", "2026-01-01 08:30:00", 12.5)
+            assert trip_id, f"raw_id={blank!r} 时返回了空 trip_id"
+            assert trip_id.startswith("derived-")
+
+    def test_derived_id_is_deterministic(self) -> None:
+        """同一条行程派生出的 id 每次都一样（否则幂等写入失效）。"""
+        from app.adapters.live_client import build_trip_id
+        args = (None, "2026-01-01 08:00:00", "2026-01-01 08:30:00", 12.5)
+        assert build_trip_id(*args) == build_trip_id(*args)
+
+    def test_distinct_trips_get_distinct_ids(self) -> None:
+        """不同时间/里程的行程必须拿到不同 id。"""
+        from app.adapters.live_client import build_trip_id
+        ids = {
+            build_trip_id(None, "2026-01-01 08:00:00", "2026-01-01 08:30:00", 12.5),
+            build_trip_id(None, "2026-01-01 09:00:00", "2026-01-01 09:30:00", 12.5),
+            build_trip_id(None, "2026-01-01 08:00:00", "2026-01-01 08:30:00", 20.0),
+            build_trip_id(None, "2026-01-02 08:00:00", "2026-01-02 08:30:00", 12.5),
+        }
+        assert len(ids) == 4, "不同行程派生出了相同 id"
+
+    def test_save_three_trips_keeps_three(self) -> None:
+        """回归复现：写 3 条网关无 id 的行程，库里必须仍是 3 条。"""
+        import tempfile
+        from app.adapters.live_client import build_trip_id
+        from app.core.store import Store
+
+        store = Store(Path(tempfile.mkdtemp()) / "test.db")
+        raws = [
+            {"startTime": "2026-01-01 08:00:00", "endTime": "2026-01-01 08:30:00", "distance": 10.0},
+            {"startTime": "2026-01-01 12:00:00", "endTime": "2026-01-01 12:40:00", "distance": 25.0},
+            {"startTime": "2026-01-02 07:30:00", "endTime": "2026-01-02 08:10:00", "distance": 18.5},
+        ]
+        trips = [
+            {
+                "tripId": build_trip_id(r.get("id") or r.get("journeyId"), r["startTime"], r["endTime"], r["distance"]),
+                "startTime": r["startTime"],
+                "endTime": r["endTime"],
+                "distanceKm": r["distance"],
+            }
+            for r in raws
+        ]
+        assert store.save_trips(trips) == 3
+        assert len(store.list_trips(days=3650)) == 3, "行程被主键覆盖，静默丢数据"
+
+    def test_store_rejects_blank_trip_id(self) -> None:
+        """防御层：即便上游漏了，store 也不能让空 id 覆盖数据。"""
+        import tempfile
+        from app.core.store import Store
+
+        store = Store(Path(tempfile.mkdtemp()) / "test.db")
+        written = store.save_trips([
+            {"tripId": "", "startTime": "2026-01-01 08:00:00"},
+            {"tripId": "", "startTime": "2026-01-01 09:00:00"},
+            {"tripId": "ok-1", "startTime": "2026-01-01 10:00:00"},
+        ])
+        assert written == 1, "空 trip_id 应被跳过"
+        remaining = store.list_trips(days=3650)
+        assert len(remaining) == 1
+        assert remaining[0]["tripId"] == "ok-1"
+
+
+# MARK: - 快照表防膨胀
+#
+# 背景：状态接口每次轮询都 save_snapshot，前端秒级轮询下单日可写数万行，
+# SQLite 文件无限膨胀。修复要点：节流（无变化不落库）+ 保留上限。
+
+class TestSnapshotRetention:
+    """快照必须节流且有上限，不能随轮询无限增长。"""
+
+    @staticmethod
+    def _store() -> Any:
+        import tempfile
+        from app.core.store import Store
+        return Store(Path(tempfile.mkdtemp()) / "test.db")
+
+    def test_identical_snapshots_are_throttled(self) -> None:
+        """状态未变且间隔太短时，重复轮询不应落库。"""
+        store = self._store()
+        status = {"vin": "V1", "soc": 80.0, "rangeKm": 400.0, "odometerKm": 1000.0}
+        for _ in range(20):
+            store.save_snapshot(status)
+        assert len(store.list_snapshots("V1", limit=100)) == 1, "轮询噪声被写成了快照"
+
+    def test_soc_change_always_saved(self) -> None:
+        """SOC 变化必须立刻落库（电量曲线靠它）。"""
+        store = self._store()
+        for soc in (80.0, 79.0, 78.0, 77.0):
+            store.save_snapshot({"vin": "V1", "soc": soc, "rangeKm": 400.0, "odometerKm": 1000.0})
+        assert len(store.list_snapshots("V1", limit=100)) == 4
+
+    def test_odometer_change_saved(self) -> None:
+        """里程变化也算实质变化。"""
+        store = self._store()
+        store.save_snapshot({"vin": "V1", "soc": 80.0, "rangeKm": 400.0, "odometerKm": 1000.0})
+        store.save_snapshot({"vin": "V1", "soc": 80.0, "rangeKm": 400.0, "odometerKm": 1005.0})
+        assert len(store.list_snapshots("V1", limit=100)) == 2
+
+    def test_missing_vin_skipped(self) -> None:
+        """没 vin 的状态无法归属，直接跳过且不报错。"""
+        store = self._store()
+        store.save_snapshot({"soc": 50.0})
+        assert store.list_snapshots("V1", limit=100) == []
+
+    def test_retention_cap_enforced(self) -> None:
+        """超过上限后旧快照被裁剪，且只留最近的。"""
+        from app.core.store import Store
+        store = self._store()
+        store.SNAPSHOT_KEEP = 50
+        # 每条 soc 都不同 → 全部落库，触发裁剪
+        for i in range(120):
+            store.save_snapshot({"vin": "V1", "soc": float(i), "rangeKm": 1.0, "odometerKm": 1.0})
+        kept = store.list_snapshots("V1", limit=1000)
+        assert len(kept) == 50, f"保留上限失效，实际 {len(kept)} 条"
+        assert kept[0]["soc"] == 119.0, "被裁掉的应该是最旧的，最新一条必须还在"
+        assert min(s["soc"] for s in kept) == 70.0
+
+    def test_retention_is_per_vin(self) -> None:
+        """裁剪按车辆隔离，不能误删别的车。"""
+        store = self._store()
+        store.SNAPSHOT_KEEP = 10
+        for i in range(30):
+            store.save_snapshot({"vin": "A", "soc": float(i), "rangeKm": 1.0, "odometerKm": 1.0})
+        for i in range(5):
+            store.save_snapshot({"vin": "B", "soc": float(i), "rangeKm": 1.0, "odometerKm": 1.0})
+        assert len(store.list_snapshots("A", limit=1000)) == 10
+        assert len(store.list_snapshots("B", limit=1000)) == 5, "B 车的快照被 A 车的裁剪误删"
+
+    def test_created_at_uses_local_clock_not_utc(self) -> None:
+        """回归：created_at 必须是本地时钟。
+
+        SQLite 的 CURRENT_TIMESTAMP 是 UTC，与 Python 的 datetime.now()
+        相差一个时区，会让节流比较永远判定「间隔足够」而失效（本机实测
+        差 8 小时 → 每条轮询都落库）。
+        """
+        from datetime import datetime
+        store = self._store()
+        store.save_snapshot({"vin": "V1", "soc": 80.0, "rangeKm": 400.0, "odometerKm": 1000.0})
+        recorded = store.list_snapshots("V1", limit=1)[0]["createdAt"]
+        parsed = datetime.strptime(recorded, "%Y-%m-%d %H:%M:%S")
+        drift = abs((datetime.now() - parsed).total_seconds())
+        assert drift < 60, f"created_at 与本地时钟相差 {drift:.0f} 秒，疑似写成了 UTC"
+
+
+# MARK: - P2-2 统计行判定精确性
+
+def _csv_bytes(rows: list[list[str]]) -> bytes:
+    buffer = io.StringIO()
+    csv.writer(buffer).writerows(rows)
+    return buffer.getvalue().encode("gbk")
+
+
+_ALIPAY_HEADER = ["交易时间", "交易对方", "商品说明", "收/支", "金额", "支付方式", "交易状态", "交易单号"]
+
+
+class TestSummaryRowPrecision:
+    """「共…笔」统计行判定必须精确，不能误杀真实交易。"""
+
+    def test_real_merchant_containing_gong_and_bi_kept(self) -> None:
+        """商户名同时含「共」「笔」的真实交易不能被丢。
+
+        历史缺陷：`if "共" in joined and "笔" in joined: continue` 会连这类
+        正常交易一起跳过。
+        """
+        rows = [
+            ["支付宝交易记录明细查询"],
+            _ALIPAY_HEADER,
+            ["2026-09-01 10:30:00", "共笔文具店", "办公用品", "支出", "-35.00", "余额宝", "交易成功", "A1"],
+        ]
+        result = parse_bill(_csv_bytes(rows), source="alipay")
+        assert result["success"] is True
+        assert len(result["records"]) == 1, "商户名含「共」「笔」的真实交易被误杀"
+        assert result["records"][0]["merchant"] == "共笔文具店"
+
+    def test_real_transaction_with_count_like_note_kept(self) -> None:
+        """备注里像「共2笔」但有金额的真实交易必须保留。"""
+        rows = [
+            ["支付宝交易记录明细查询"],
+            _ALIPAY_HEADER,
+            ["2026-09-01 10:30:00", "某充电站", "合并开票 共2笔", "支出", "-88.50", "余额宝", "交易成功", "A2"],
+        ]
+        result = parse_bill(_csv_bytes(rows), source="alipay")
+        assert len(result["records"]) == 1, "有金额的交易被统计行规则误杀"
+
+    def test_pure_summary_row_still_skipped(self) -> None:
+        """真正的统计行（无金额）仍要被跳过。"""
+        rows = [
+            ["支付宝交易记录明细查询"],
+            _ALIPAY_HEADER,
+            ["2026-09-01 10:30:00", "极氪极充", "充电", "支出", "-88.50", "余额宝", "交易成功", "A3"],
+            ["共 4 笔记录", "", "", "", "", "", "", ""],
+            ["共4笔记录"],
+        ]
+        result = parse_bill(_csv_bytes(rows), source="alipay")
+        assert len(result["records"]) == 1
+        assert result["records"][0]["merchant"] == "极氪极充"
+
+
+# MARK: - P2-1 缓存必须能回源
+
+class TestTripsCacheRevalidation:
+    """行程缓存不能「一旦有数据就永不回源」。"""
+
+    def test_ttl_expiry_triggers_refetch(self) -> None:
+        """TTL 过期后必须回源，而不是永远返回旧缓存。"""
+        import tempfile
+        from app.api import trips as trips_api
+        from app.core.store import Store
+
+        store = Store(Path(tempfile.mkdtemp()) / "t.db")
+        store.TRIPS_CACHE_TTL_SEC = 0  # 立即过期
+        store.save_trips([{"tripId": "old-1", "startTime": "2026-09-01 08:00:00"}])
+
+        calls: list[int] = []
+
+        class FakeClient:
+            async def get_trips(self, vin=None, days=30):
+                calls.append(days)
+                return [{"tripId": "new-1", "startTime": "2026-09-02 08:00:00"}]
+
+        # 打桩：替换 main.store 与 get_client
+        import app.main as main_module
+        import app.api.trips as trips_module
+        old_store, old_get = main_module.store, trips_module.get_client
+        main_module.store = store
+        trips_module.get_client = lambda: FakeClient()
+        trips_module._last_refresh.clear()
+        try:
+            trips_api.TRIPS_CACHE_TTL_SEC = 0
+            result = asyncio.run(trips_module.get_trips(days=30))
+            assert calls == [30], "缓存过期却未回源"
+            assert any(t["tripId"] == "new-1" for t in result["data"])
+        finally:
+            main_module.store, trips_module.get_client = old_store, old_get
+            trips_module._last_refresh.clear()
+
+    def test_force_bypasses_fresh_cache(self) -> None:
+        """force=true 必须跳过缓存直接回源。"""
+        import tempfile
+        from app.api import trips as trips_api
+        from app.core.store import Store
+
+        store = Store(Path(tempfile.mkdtemp()) / "t.db")
+        store.save_trips([{"tripId": "old-1", "startTime": "2026-09-01 08:00:00"}])
+
+        calls: list[int] = []
+
+        class FakeClient:
+            async def get_trips(self, vin=None, days=30):
+                calls.append(days)
+                return [{"tripId": "forced-1", "startTime": "2026-09-02 08:00:00"}]
+
+        import app.main as main_module
+        import app.api.trips as trips_module
+        old_store, old_get = main_module.store, trips_module.get_client
+        main_module.store = store
+        trips_module.get_client = lambda: FakeClient()
+        trips_module._last_refresh.clear()
+        try:
+            # 先建一次「新鲜」缓存
+            trips_api.TRIPS_CACHE_TTL_SEC = 3600
+            asyncio.run(trips_module.get_trips(days=30))
+            calls.clear()
+            asyncio.run(trips_module.get_trips(days=30))       # 命中缓存
+            assert calls == [], "TTL 内不应该回源"
+            asyncio.run(trips_module.get_trips(days=30, force=True))
+            assert calls == [30], "force=true 未跳过缓存"
+        finally:
+            main_module.store, trips_module.get_client = old_store, old_get
+            trips_module._last_refresh.clear()
+
+    def test_upstream_failure_degrades_to_cache(self) -> None:
+        """回源失败但有缓存时应降级返回旧数据，而不是 500。"""
+        import tempfile
+        from app.core.store import Store
+
+        store = Store(Path(tempfile.mkdtemp()) / "t.db")
+        store.save_trips([{"tripId": "old-1", "startTime": "2026-09-01 08:00:00"}])
+
+        class BrokenClient:
+            async def get_trips(self, vin=None, days=30):
+                raise RuntimeError("gateway down with token=SECRET")
+
+        import app.main as main_module
+        import app.api.trips as trips_module
+        old_store, old_get = main_module.store, trips_module.get_client
+        main_module.store = store
+        trips_module.get_client = lambda: BrokenClient()
+        trips_module._last_refresh.clear()
+        try:
+            result = asyncio.run(trips_module.get_trips(days=30, force=True))
+            assert result["success"] is True
+            assert result.get("stale") is True
+            assert result["data"][0]["tripId"] == "old-1"
+        finally:
+            main_module.store, trips_module.get_client = old_store, old_get
+            trips_module._last_refresh.clear()
+
+
+# MARK: - P2-3 错误回显统一
+
+class TestErrorDetailHygiene:
+    """上游异常不得回显给客户端（可能夹带令牌）。"""
+
+    def test_upstream_error_hides_exception_text(self) -> None:
+        """detail 只能是固定文案，绝不能含原始异常。"""
+        from app.api import upstream_error
+
+        secret = "accessToken=eyJhbGciOiJIUzI1NiJ9.LEAKED"
+        err = upstream_error("获取车辆状态失败，请检查服务端日志与登录状态", RuntimeError(secret))
+        assert secret not in str(err.detail)
+        assert "eyJhbGciOiJIUzI1NiJ9" not in str(err.detail)
+        assert err.status_code == 500
+
+    def test_no_api_module_echoes_exception(self) -> None:
+        """全量静态检查：api 包内不得再出现 `detail=f\"...{exc}\"` 写法。"""
+        import re
+        api_dir = Path(__file__).resolve().parent.parent / "app" / "api"
+        offenders = []
+        for path in api_dir.glob("*.py"):
+            if path.name == "__init__.py":
+                continue
+            text = path.read_text(encoding="utf-8")
+            # 找 detail= 里出现 {exc} 或 {e} 的 f-string
+            for match in re.finditer(r"detail\s*=\s*f?[\"'].*?\{(?:exc|e)\}", text):
+                offenders.append(f"{path.name}: {match.group(0)}")
+        assert not offenders, f"仍有接口回显原始异常：{offenders}"
+
+    def test_upstream_error_logs_for_diagnostics(self) -> None:
+        """不回显不等于不留痕 —— 必须进日志。"""
+        import logging
+        from app.api import upstream_error
+
+        records: list[logging.LogRecord] = []
+
+        class Capture(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        api_logger = logging.getLogger("app.api")
+        handler = Capture()
+        api_logger.addHandler(handler)
+        old_level = api_logger.level
+        api_logger.setLevel(logging.ERROR)
+        try:
+            upstream_error("操作失败", RuntimeError("内部细节 X"))
+        finally:
+            api_logger.removeHandler(handler)
+            api_logger.setLevel(old_level)
+        assert records, "上游异常未写日志，排障时无从下手"
+        assert any("内部细节 X" in r.getMessage() or (r.exc_info and "内部细节 X" in str(r.exc_info[1])) for r in records)

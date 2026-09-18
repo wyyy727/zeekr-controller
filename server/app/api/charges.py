@@ -8,6 +8,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from ..bills.aggregator import build_summary, import_bill
 from ..bills.providers import provider_display_name
+from . import fail
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +78,8 @@ async def import_charges(
     try:
         result = import_bill(raw, source=source, store=store)
     except Exception as exc:  # noqa: BLE001
-        logger.exception("账单导入失败")
-        raise HTTPException(status_code=500, detail=f"账单导入失败：{exc}") from exc
+        # 不回显原始异常：解析链路可能带出文件内容片段
+        fail("账单导入失败，请检查文件格式与服务端日志", exc)
 
     return {
         "success": result["success"],

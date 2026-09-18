@@ -27,6 +27,13 @@ from typing import Any
 # 候选编码，按尝试顺序
 CANDIDATE_ENCODINGS = ("utf-8-sig", "utf-8", "gbk", "gb18030", "utf-16")
 
+# 表尾统计行的判定：如「共 123 笔记录」「共12笔」。
+#
+# 必须锚定「共」+ 数字 + 「笔」，且整行不含其他有意义的交易字段。
+# 历史缺陷：只判断「共」与「笔」是否同时出现，会把商户名/备注里恰好
+# 含这两个字的**真实交易**一并丢掉（如「共笔文具」「共2笔运费」）。
+SUMMARY_ROW_PATTERN = re.compile(r"共\s*\d+\s*笔")
+
 # 列名别名表：统一字段 → 可能的原始列名
 COLUMN_ALIASES: dict[str, list[str]] = {
     "timestamp": ["交易时间", "交易创建时间", "支付时间", "时间", "交易日期"],
@@ -206,13 +213,17 @@ def parse_bill(raw: bytes, source: str = "auto") -> dict[str, Any]:
         if not row or not any(cell.strip() for cell in row):
             continue
 
-        # 跳过表尾的统计行（如「共 123 笔记录」）
-        joined = " ".join(row)
-        if "共" in joined and "笔" in joined:
-            continue
-
         timestamp = _parse_datetime(cell(row, "timestamp"))
         amount = _parse_amount(cell(row, "amount"))
+
+        # 跳过表尾统计行（如「共 123 笔记录」）。
+        #
+        # 用「共 + 数字 + 笔」精确匹配，而非只看到「共」「笔」就丢 —— 后者
+        # 会误杀商户名/备注里带这两个字的**真实交易**。再加一道保险：真实
+        # 交易必有可解析的金额，统计行没有；两者同时满足才判为统计行。
+        if SUMMARY_ROW_PATTERN.search(" ".join(row)) and amount is None:
+            continue
+
         if timestamp is None or amount is None:
             continue
 

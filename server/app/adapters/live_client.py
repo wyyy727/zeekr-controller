@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta
-from pathlib import Path
+from hashlib import md5
 from typing import Any
 
 import httpx
@@ -37,6 +37,7 @@ from .zeekr_signing import (
     build_login_device_id,
     compact_json,
     encrypt_vin,
+    is_verified_command,
     sign_gw1,
     sign_gw2,
 )
@@ -95,6 +96,35 @@ def _normalize_power(raw: Any) -> float | None:
         return 0.0
     # 大于 1000 按瓦特处理，否则视为已是 kW
     return round(value / 1000.0, 2) if value > 1000 else round(value, 2)
+
+
+def build_trip_id(
+    raw_id: Any,
+    start_time: Any,
+    end_time: Any,
+    distance: Any,
+) -> str:
+    """为一条行程生成**稳定且不碰撞**的 trip_id。
+
+    修复背景：此前退化为 `str(raw.get("id") or raw.get("journeyId") or "")`，
+    网关未返回 id 时得空串。而 `trips` 表以 `trip_id TEXT PRIMARY KEY` +
+    `INSERT OR REPLACE` 写入，多条空串行程会互相覆盖 —— 实测写入 3 条，
+    库里只剩 1 条（静默丢失，且丢失的恰好是后面覆盖前面的）。
+
+    无 id 时改用业务字段派生指纹：起止时间 + 里程。同一辆车在同一秒、
+    同一里程跑出两条行程的概率可忽略，而网关的行程记录天然按时间区分，
+    因此该指纹足以稳定标识一条行程。
+
+    > 有 id 时仍以 id 为准（网关给的标识优先），仅在缺失时兜底。
+    """
+    given = "" if raw_id is None else str(raw_id).strip()
+    if given:
+        return given
+
+    fingerprint = "|".join(
+        str(part if part is not None else "") for part in (start_time, end_time, distance)
+    )
+    return f"derived-{md5(fingerprint.encode('utf-8')).hexdigest()[:16]}"
 
 
 class LiveZeekrClient(ZeekrClient):
@@ -701,11 +731,14 @@ class LiveZeekrClient(ZeekrClient):
 
         trips: list[dict[str, Any]] = []
         for raw in items:
+            start_time = raw.get("startTime")
+            end_time = raw.get("endTime")
+            distance = raw.get("distance")
             trips.append({
-                "tripId": str(raw.get("id") or raw.get("journeyId") or ""),
-                "startTime": raw.get("startTime"),
-                "endTime": raw.get("endTime"),
-                "distanceKm": raw.get("distance"),
+                "tripId": build_trip_id(raw.get("id") or raw.get("journeyId"), start_time, end_time, distance),
+                "startTime": start_time,
+                "endTime": end_time,
+                "distanceKm": distance,
                 "energyKwh": raw.get("energy") or raw.get("consumeEnergy"),
                 "avgSpeedKmh": raw.get("avgSpeed"),
                 "maxSpeedKmh": raw.get("maxSpeed"),
@@ -762,6 +795,20 @@ class LiveZeekrClient(ZeekrClient):
         """下发车控指令。"""
         if command not in COMMAND_MAP:
             return {"success": False, "message": f"不支持的指令：{command}", "command": command}
+
+        # 可信度闸门：serviceId 基于猜测的指令一律拒绝。
+        #
+        # 这些指令的 serviceId 是按拼音首字母拼的（如 ZDF/ZWH），未经真车
+        # 验证。放行后果不对称：指令静默无效时用户以为「锁了车其实没锁」，
+        # 本身即安全问题；更坏的情况是触发未知车端动作。
+        # 详见 `zeekr_signing.py` 顶部「车控指令可信度分级」。
+        if not is_verified_command(command):
+            return {
+                "success": False,
+                "message": f"指令 {command} 未经真车验证，live 模式拒绝下发",
+                "command": command,
+                "reason": "unverified_command",
+            }
 
         target_vin = vin or self._session.get("active_vin") or ""
         if not target_vin:
