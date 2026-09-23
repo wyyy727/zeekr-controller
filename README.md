@@ -2,7 +2,11 @@
 
 > 极氪 001 车主自建车控看板 —— 补齐官方 App 缺失的**能耗统计**与**行程历史**，并把分散在各充电服务商的消费记录汇总起来。
 
-**目标车型**：2026 款焕新极氪 001　**目标平台**：iOS 17+
+**目标车型**：2026 款焕新极氪 001　**目标平台**：**iOS 26.0+**（见 `project.yml` 的 `deploymentTarget`）
+
+> ⚠️ 部署目标写的是 **iOS 26.0**，不是 README 早期版本写的 iOS 17+。
+> 界面依赖 iOS 26 原生 Liquid Glass API（`.glassEffect` / `.safeAreaBar`），
+> 旧版本 SDK 编不过 —— 这也是构建必须用 `macos-26` + Xcode 26 的原因。
 
 ---
 
@@ -86,9 +90,40 @@ cd .. && cp .env.example .env
 ./scripts/server.sh start
 ```
 
-访问 <http://localhost:8765/docs> 可以看到接口文档。
+`scripts/server.sh` 支持 `start` / `stop` / `restart` / `status` / `logs`（无参数时打印用法）。
+
+服务起来后：
+
+- <http://localhost:8765/docs> —— FastAPI 自动生成的接口文档
+- <http://localhost:8765/preview> —— **设计预览页**（见下文「预览页」一节）
+
+`.env` 的位置不敏感：`server/.env` 与**仓库根目录** `.env` 都会被加载（先命中的优先），
+所以按 README 的 `cd .. && cp .env.example .env`（落在根目录）也能生效。
+
+#### `.env` 的完整键位
+
+| 键 | 必填 | 说明 |
+|---|---|---|
+| `ZEEKR_PHONE` | ✅ | 极氪 App 注册手机号（+86） |
+| `ZEEKR_HMAC_ACCESS_KEY` | ✅ | 从 APK 提取的 6 个密钥之一 |
+| `ZEEKR_HMAC_SECRET_KEY` | ✅ | 同上 |
+| `ZEEKR_PASSWORD_PUBLIC_KEY` | ✅ | 同上（RSA 公钥，加密登录密码） |
+| `ZEEKR_PROD_SECRET` | ✅ | 同上（GW3 的 X-SIGNATURE 密钥） |
+| `ZEEKR_VIN_KEY` | ✅ | 同上（AES-128，加密 VIN） |
+| `ZEEKR_VIN_IV` | ✅ | 同上 |
+| `ZEEKR_VEHICLE_TOKEN` | ⬜ | **可选的「第 7 项」**。从 App 抓包得到的 `X-VIN` 头值；填了就用它，否则服务端自行 AES 加密 VIN |
+| `ALLOW_COMMANDS` | ⬜ | 车控总开关，**默认 `false`** |
+| `API_TOKEN` | ⬜ | 服务端鉴权令牌；留空则不鉴权（见「常见问题」） |
+| `DATA_SOURCE` | ⬜ | `auto`（默认）/ `mock` / `live` |
+| `APP_HOST` / `APP_PORT` | ⬜ | 默认 `0.0.0.0` / `8765` |
+| `APP_DEBUG` | ⬜ | 默认 `false` |
+| `POLL_INTERVAL_IDLE` / `POLL_INTERVAL_CHARGING` | ⬜ | 默认 300 / 60 秒 |
+
+`DATA_SOURCE=auto` 时的行为：密钥配置齐全走真实网关，否则**回落到 mock 并在日志里告警**。
 
 ### 第三步：编译 iOS App
+
+**有 Mac：**
 
 ```bash
 # 安装 XcodeGen（用于生成工程文件）
@@ -105,14 +140,40 @@ open ZeekrDash.xcodeproj
 2. 连接 iPhone，选择设备，点 **Run**
 3. 手机端：**设置 → 通用 → VPN与设备管理** → 信任你的开发者证书
 
+> `ZeekrDash.xcodeproj` 由 XcodeGen 从 `project.yml` 生成，**不入库**（见 `.gitignore`）。
+> 没有 XcodeGen 时也可手动新建 iOS App 工程，把 `ZeekrDash/` 下的 `.swift` 拖进去。
+
+**没有 Mac：** 用 GitHub Actions 借 `macos-26` runner 出**未签名 IPA**，再用
+AltStore / SideStore / Sideloadly 自签安装。详见「构建与 CI」一节。
+
 ### 第四步：连接服务
 
-打开 App → 设置 → 填入服务地址：
+打开 App → 设置 → 填入服务地址。
 
-- **模拟器**：`http://localhost:8765`
-- **真机**：`http://<你电脑的局域网IP>:8765`
+> ### ⚠️ 这里有个反直觉的坑，必须先看
+>
+> **填 `http://localhost:8765` 连不上服务端，只会看到内置模拟数据。**
+>
+> `ZeekrDash/Core/Network/EndpointMode.swift` 把下列 host 全部判定为
+> **loopback → 直接使用 App 内置 MockData，完全不发网络请求**：
+>
+> ```
+> localhost / 127.0.0.1 / 0.0.0.0 / ::1 / [::1]
+> ```
+>
+> 而 `APIClient.defaultBaseURL` 恰好就是 `http://localhost:8765`，
+> 所以**开箱状态就是演示模式**（顶栏会显示「模拟数据」徽标）。
+>
+> **要真正连上服务端，必须填非回环地址** —— 即使在同一台机器上，也要用局域网 IP：
+>
+> ```
+> http://192.168.x.x:8765
+> ```
+>
+> 真机还需要手机与电脑在同一 WiFi 下。
 
-> 真机需要手机与电脑在**同一 WiFi**下。
+切到真实地址后，App 会自动重新探测并补启轮询；连不上时回落模拟数据并**弹框提示一次**
+（顶栏徽标变成「模拟数据 · 后端不可达」）。
 
 ---
 
@@ -121,11 +182,41 @@ open ZeekrDash.xcodeproj
 | 模块 | 内容 | 状态 |
 |---|---|---|
 | **车况** | 电量环形图、续航、总里程、四轮胎压、门锁状态、充电状态 | ✅ |
-| **车控** | 锁车/解锁、空调、闪灯、鸣笛、充电控制 | ✅ |
+| **车控** | 见下方「车控指令可信度」——**只有 8 条可下发真车** | ⚠️ 部分 |
 | **行程** | 行程列表（时间/距离/能耗/起终点）、能耗趋势图（7/30/90 天） | ✅ |
 | **充电** | 跨服务商消费汇总、服务商分布、月度趋势、明细、账单导入 | ✅ |
 | **设置** | 服务地址、极氪账号、轮询间隔、车控总开关、连接诊断 | ✅ |
-| **电费测算** | 动态电价、智能充电、电费预算 | ⏸️ 仅前台占位 |
+| **电费测算** | 充电量统计、动态电价、智能充电 | ⏸️ 仅前台占位 |
+
+### ⚠️ 车控指令可信度
+
+`server/app/adapters/zeekr_signing.py` 把指令按**是否有逆向依据**严格分成两类，
+`COMMAND_MAP` 里共 18 条，但**「收录」不等于「可信」**：
+
+**已验证 · 可下发真车（8 条）** —— serviceId 有公开逆向成果佐证：
+
+| 指令 | serviceId |
+|---|---|
+| 锁车 / 解锁 | `RDL` / `RDU` |
+| 开 / 关空调 | `ZAF` |
+| 闪灯 / 鸣笛 | `RHL` |
+| 开始 / 结束充电 | `RCS` |
+
+**未验证 · live 模式一律拒绝（10 条）** —— serviceId 或参数是按缩写推断的，从未在真车验证：
+
+```
+前除霜 / 方向盘加热 / 座椅加热 / 座椅通风 / 遮阳帘 / 哨兵模式
+关车窗 / 出行规划 / 寻车 / 立即刷新
+```
+
+> 注意后 4 条**复用了已验证的 serviceId，但参数值是推断的**
+> （如 `closeWindows` 用 `RWS` + value `"close"`），所以同样不可信。
+>
+> 这些指令**只在 mock 模式放行**（便于联调 UI），live 模式由
+> `is_verified_command()` 显式拦截。真车逐条验证通过后，把 serviceId 从
+> `ServiceIDUnverified` 迁到 `ServiceID`，并从 `UNVERIFIED_COMMANDS` 移除。
+>
+> 安全理由：指令静默无效时用户会以为「锁了车其实没锁」，这本身就是安全问题。
 
 ---
 
@@ -133,24 +224,29 @@ open ZeekrDash.xcodeproj
 
 支持**支付宝**和**微信**两个渠道的账单导入。
 
+> ⚠️ **服务端目前只接受 `CSV` / `TXT`**（`server/app/api/charges.py` 的扩展名白名单）。
+> 解析器（`server/app/bills/parsers.py`）其实**已经完整支持 `.xlsx`**（按魔数 `PK\x03\x04`
+> 分流 + openpyxl），但 HTTP 入口的白名单尚未放行，传 `.xlsx` 会返回 `400`。
+> 微信「用于个人对账」若导出的是 Excel，请先另存为 **「CSV UTF-8」**。
+
 ### 导出账单
 
 **微信**
 1. 微信 →【我】→【服务】→【钱包】→ 右上角【账单】→【常见问题】→【下载账单】
-2. 用途选「**用于个人对账**」（导出 Excel 格式）
+2. 用途选「**用于个人对账**」
 3. **单次最长 90 天**，历史需分多次申请
 4. 填邮箱 → 约 5 分钟收到加密 ZIP
 
 **支付宝**
 1. 支付宝 →【我的】→【账单】→ 右上角筛选 → 账单导出
-2. 同样支持 CSV，按时间范围分批导出
+2. 按时间范围分批导出 CSV
 
 ### 导入
 
-App → 充电页 → 导入账单 → 选择 **CSV 或 Excel（.xlsx）** 文件。系统会自动：
+App → 充电页 → 右上角 `⋯` → 导入账单 → 选择 **CSV** 文件。系统会自动：
 
 - 识别**服务商**（极氪极充 / 特来电 / 星星充电 / 国家电网 / e充电）
-- **跨平台去重**（同一笔消费不会重复计入）
+- **跨平台去重**（订单号优先，无订单号才退化为「同分钟同额」指纹）
 - 自动排除「充电宝」「充电线」等非充电消费
 
 ### 识别不准怎么办
@@ -168,6 +264,30 @@ MANUAL_OVERRIDES = {
 
 ---
 
+## 预览页
+
+服务端挂载了一个**单文件设计预览页** `preview/index.html`（约 102 KB），
+用 Safari/浏览器打开即可，无需 Mac 也能先看界面与配色：
+
+```
+http://<服务地址>/preview
+```
+
+它复用**同一套后端接口**，是 iOS 原生版的「所见即所得」参照。
+
+两个必须知道的行为：
+
+1. **从预览页发的车控指令永远不会到服务端。** 预览页里 `DEMO = true`，
+   `/api/vehicle/command` 被本地拦截并模拟 620ms 下发耗时后回执成功，
+   只翻转本地状态用于预览动效。**端到端验车控只能靠 iOS 真机。**
+2. 设了 `API_TOKEN` 时，用 `?token=<令牌>` 打开：
+   `http://<服务地址>/preview?token=<令牌>`
+
+> ⚠️ 预览页是**独立的第二份前端实现**（JS 重写了渲染、格式化、配色与 mock 数据），
+> 它**不消费** `Theme.swift`。改配色时两边都要改。
+
+---
+
 ## 常见问题
 
 ### 提示「The account is currently logged in elsewhere」
@@ -175,13 +295,14 @@ MANUAL_OVERRIDES = {
 极氪 SNCTSP 网关**每个账号只保留一个会话**，新登录会顶掉旧令牌。
 
 - 使用**独立子账号**并共享车辆 ← 推荐做法
-- 服务端遇到此错误会自动重新登录并重试一次
+- 服务端遇到 `079021` 会自动重新登录并重试一次
 
 ### 车控指令点了没反应
 
 1. 检查 `.env` 里的 `ALLOW_COMMANDS=true`（默认关闭）
-2. 确认 App 设置里的「允许下发控制指令」是开启的
+2. 确认 App 设置里的「允许下发控制指令」是开启的（**这是客户端的独立开关，两边都要开**）
 3. **重要**：HA/服务里配置的手机号，必须和手机上能正常控车的账号**是同一个**
+4. 若指令属于上表「未验证」的 10 条，live 模式下服务端会拒绝，这是**预期行为**
 
 ### 实时状态拿不到 / 077001 接口未被授权
 
@@ -190,8 +311,11 @@ MANUAL_OVERRIDES = {
 - 旧令牌（`identityType: 5`）只能读车辆列表
 - 新令牌（`identityType: 10` + `tspCode`）才能读状态和下发指令
 
-服务端会在遇到 `079001` 时自动尝试新平台登录，成功后换用新令牌。
-如果持续失败，多半是**账号与该车没有绑定控制权限**。
+服务端会在遇到 `079001` 时**回退 GW2 通道**（注意：**不会**重新登录 ——
+误重登会作废自己正在用的令牌）。如果持续失败，多半是**账号与该车没有绑定控制权限**。
+
+返回 `079025 Signature authentication failed` 则是签名串构造问题，服务端会打一条
+指向具体排查点的 ERROR 日志。
 
 ### 服务端会不会被局域网里别人控制
 
@@ -214,6 +338,11 @@ API_TOKEN=<上面生成的值>
 
 不设 `API_TOKEN` 时行为与以前完全一致（不鉴权），方便本地联调。
 
+> ⚠️ **已知问题**：`server/tests/test_hardening.py` 的 `test_disabled_by_default`
+> 会断言 `config.api_token == ""`，而该单例会读取真实的 `.env`。
+> 因此**在 `.env` 里设了 `API_TOKEN` 之后，这条测试会失败**。
+> 也就是说「按本节加固安全」与「测试全绿」目前是互斥的，需要手工绕过或先修测试。
+
 ### 密钥会失效吗
 
 会。极氪 App 升级可能改变密钥的存储方式或轮换密钥。
@@ -223,34 +352,108 @@ API_TOKEN=<上面生成的值>
 
 ---
 
+## 构建与 CI
+
+仓库有**两条互不依赖**的流水线：
+
+| 流水线 | 位置 | 运行环境 | 做什么 |
+|---|---|---|---|
+| CNB | `.cnb.yml` | Linux `swift:6.1-noble` 容器 | 跑 `ci/typecheck.sh`：用真实 `swiftc` 做 `-parse` + `-typecheck`，SwiftUI/Charts 由 `ci/SwiftUIShim.swift` 桩替代 |
+| GitHub Actions | `.github/workflows/build-ios.yml` | `macos-26` + Xcode 26 | `xcodegen generate` → `xcodebuild` 不签名编译 → 打包**未签名 IPA** 作为 artifact |
+
+**借 GitHub 出未签名 IPA（没有 Mac 时的路径）：**
+
+1. push 到 `main`，或到 GitHub 的 **Actions → Build iOS App (unsigned IPA) → Run workflow** 手动触发
+2. 构建完成后在页面底部 **Artifacts** 下载 `ZeekrDash-unsigned-ipa`
+3. 用 AltStore / SideStore / Sideloadly 自签后安装到 iPhone
+
+> 自动触发带 **paths 过滤**：只有改动 `ZeekrDash/**`、`project.yml` 或工作流自身才会触发。
+> **只改 `server/**` 不会触发 iOS 构建**，需要手动 `workflow_dispatch`。
+
+**CI 的已知盲区**（改代码前请了解）：
+
+- **服务端 177 个测试不在任何 CI 里**。CNB 只做 Swift 类型检查，GitHub Actions 只编 iOS。
+- `ci/SwiftUIShim.swift` 是手写桩，**`@available` / 部署目标检查完全失效**
+  （`swiftc` 未传 `-target`），且桩的签名可能与真实 SDK 漂移。
+  它能抓语法/类型/参数/访问控制/MainActor 隔离错误，抓不到 iOS SDK 独有的 API 语义。
+- 仓库内**没有 XCTest target**，iOS 端零自动化测试。
+
+---
+
+## 测试
+
+服务端有一批**逐条对应历史缺陷**的回归测试，共 **177 个用例**：
+
+```bash
+cd server
+pip install -r requirements.txt
+pip install pytest          # ← requirements.txt 里没有声明 pytest，需单独装
+python -m pytest tests -q
+```
+
+`server/tests/` 三个文件：`test_core.py`（核心逻辑与签名）、`test_hardening.py`（审计缺陷回归）、
+`test_bills.py`（账单全链路）。
+
+> 注意：其中 19 个用例使用 `tempfile.mkdtemp()` 建临时 SQLite 库；
+> 若运行环境限制新建子目录写入，它们会以
+> `sqlite3.OperationalError: unable to open database file` 失败 —— 是环境问题，不是代码缺陷。
+
+---
+
+## 真机验证清单
+
+**本项目的真实数据链路（极氪国区三网关）尚未在实车上完整验证过。**
+服务端跑通的是**模拟数据**与**协议实现**。
+
+所有必须在真车上逐条核对的项目（GW3 签名、三级登录、字段映射、6 条车控指令的实际动作）
+都列在：
+
+```
+docs/真机验证清单.md
+```
+
+按风险从高到低排序，**建议严格按序执行** —— 前面不通过，后面没有意义。
+
+> 特别提醒：车控指令返回「已提交」只代表网关收下，**不代表车端已执行**。
+> 验证时必须以**车实际动作**为准，不能只看接口返回。
+
+---
+
 ## 项目结构
 
 ```
-zeekr-dashboard/
-├── ZeekrDash/                  # iOS App（SwiftUI）
-│   ├── App/                    # 入口与根视图
+zeekr-controller/
+├── ZeekrDash/                  # iOS App（SwiftUI，零第三方依赖）
+│   ├── App/                    # 入口与根视图（RootView 含 Tab 壳与玻璃导航）
 │   ├── Core/
 │   │   ├── Models/             # 数据模型（双端契约）
-│   │   ├── Network/            # 网络层
-│   │   ├── Store/              # 状态管理
+│   │   ├── Network/            # APIClient / APIRoutes / EndpointMode
+│   │   ├── Store/              # AppStore（车况+轮询+指令）、SettingsStore
 │   │   ├── Theme/              # 中国传统色设计系统
+│   │   ├── Mock/               # 内置演示数据（localhost 时使用）
 │   │   └── Components/         # 复用组件
 │   └── Features/               # 功能页
 │       ├── Dashboard/          # 车况
 │       ├── Trips/              # 行程
 │       ├── Charges/            # 充电
-│       ├── Controls/           # 车控
+│       ├── Controls/           # 车控（15 按钮面板）
 │       └── Settings/           # 设置
 │
 ├── server/                     # 服务端（FastAPI）
 │   ├── app/
-│   │   ├── adapters/           # 极氪网关适配层
+│   │   ├── adapters/           # 极氪网关适配层 + 签名（zeekr_signing.py）
 │   │   ├── api/                # 接口路由
 │   │   ├── bills/              # 账单解析与归集
-│   │   └── core/               # 配置与存储
-│   └── tests/                  # 测试
+│   │   └── core/               # 配置与 SQLite 存储
+│   ├── tests/                  # 177 个回归测试
+│   └── requirements.txt
 │
+├── ci/                         # Linux Swift 类型检查（typecheck.sh + 桩文件）
+├── preview/index.html          # 单文件设计预览页
+├── docs/真机验证清单.md          # 真机逐条核对清单
 ├── scripts/server.sh           # 服务管理脚本
+├── .github/workflows/build-ios.yml
+├── .cnb.yml
 ├── project.yml                 # XcodeGen 工程描述
 └── .env.example                # 环境变量模板
 ```
@@ -263,9 +466,12 @@ zeekr-dashboard/
 
 采用**中国传统色**体系（参考 [zhongguose.com](https://zhongguose.com/)）。
 
-**唯一真相源是 `ZeekrDash/Core/Theme/Theme.swift`** —— 下表是浅色模式的取值，
+iOS 端的**唯一真相源是 `ZeekrDash/Core/Theme/Theme.swift`** —— 下表是浅色模式的取值，
 深色模式由 `Theme.*(_:)` 按 `ColorScheme` 另行取值（背景 `#14171C`、卡片 `#1E2228`
 等）。改配色请改 Theme.swift，不要只改这张表。
+
+> ⚠️ 但 `preview/index.html` 是**独立的第二份实现**，自带一套配色常量、
+> **不消费 Theme.swift**。改配色时两边都要改。
 
 | 用途 | 色名 | 色值 |
 |---|---|---|
@@ -288,7 +494,20 @@ zeekr-dashboard/
 
 - iOS 端**零第三方依赖**，图表用系统 Swift Charts
 - 服务端 SQLite 单文件，无外部数据库
-- 轮询自适应：充电中 60 秒，空闲 5 分钟
+- 轮询自适应：充电中 60 秒，空闲默认 5 分钟（App 内可调 1–30 分钟）
+- 状态快照两道防膨胀：距上条不足 60 秒且 SOC/续航/里程都没变则丢弃；
+  每辆车只保留最近 2000 条（实测 17280 行/天 → 144 行/天）
+- 行程列表有 300 秒 TTL 缓存，网关失败时**降级返回旧缓存**而不是空结果
+
+### 数据来源三态
+
+App 顶栏徽标反映当前数据来源：
+
+| 模式 | 徽标 | 触发条件 |
+|---|---|---|
+| `mock` | **模拟数据** | 地址为空，或指向 loopback（localhost 等） |
+| `live` | 无 | 配置了非回环地址且请求成功 |
+| `offline` | **模拟数据 · 后端不可达** | 配置了非回环地址但连不上，已回落模拟数据并弹框提示一次 |
 
 ---
 
