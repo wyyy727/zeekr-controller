@@ -115,6 +115,158 @@ def _compact(path: str) -> str:
     return "".join(ch for ch in path.lower() if ch.isalnum())
 
 
+def _all_or_none(**fields: bool | None) -> dict[str, bool] | None:
+    """四个值全拿到才返回字典，否则返回 None。
+
+    用途：对外契约要求「字典里不允许出现 None 值」（iOS 侧按
+    `[String: Bool]?` 解码，None 会导致整个响应解码失败）。
+    因此"部分有值"只能降级成"整体未知"，不能用 False 填补 ——
+    那会把"没读到"谎报成"已关好"，比没有数据更危险。
+    """
+    if any(v is None for v in fields.values()):
+        return None
+    return {k: bool(v) for k, v in fields.items()}
+
+
+def _any_tyre_alert(*flags: bool | None) -> bool | None:
+    """把分轮位的胎压告警归并成一个总标志。
+
+    官方字段是分轮位的（`leftFrontTyrePressureAlert` 等），而前端只需要一个
+    "有没有告警"的布尔值。语义：
+
+    - 任一为 True → True（有告警）
+    - 全部为 None → None（网关没给这个数据，**不能**谎报为"无告警"）
+    - 其余（有值但都不是 True）→ False（明确无告警）
+
+    最后一条区分很关键：把"没有数据"和"确认无告警"混为一谈，会让用户
+    在胎压异常时看不到任何提示。
+    """
+    meaningful = [f for f in flags if f is not None]
+    if not meaningful:
+        return None
+    return any(meaningful)
+
+
+# ── 车控执行结果 / 能力集 / 预约计划的报文解析 ────────────────────
+#
+# 下面几个函数处理的报文结构**未在真车确认** —— 官方 APK 加壳，
+# DTO 取不到，只有路径是已验证的。因此统一采取"多候选 + 保守兜底"：
+#   · 能明确读出"成功"才说成功；
+#   · 读不出来一律落到安全的一侧（执行结果 → pending、能力 → None）。
+# 方向是不对称的：把"没执行完"说成"已执行"，用户会以为车锁好了 ——
+# 这个代价远大于"多等一会儿"或"少裁剪几个按钮"。
+
+#: 官方可能使用的"指令凭据"字段名
+_COMMAND_ID_KEYS = ("processId", "commandId", "id", "requestId", "traceId")
+
+
+def _extract_command_id(payload: Any) -> str:
+    """从指令下发响应里取出查询执行结果所需的凭据。取不到给空串。"""
+    if not isinstance(payload, dict):
+        return ""
+    for scope in (payload, payload.get("data"), payload.get("result")):
+        if not isinstance(scope, dict):
+            continue
+        for key in _COMMAND_ID_KEYS:
+            value = scope.get(key)
+            if value not in (None, ""):
+                return str(value)
+    return ""
+
+
+def _map_command_status(payload: Any) -> str:
+    """把 `queryProcessResult` 的响应映射成 pending / done / failed。
+
+    保守方向：**任何读不出来的情况都返回 pending**，绝不返回 done。
+    """
+    if not isinstance(payload, dict):
+        return "pending"
+    scope = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+
+    for key in ("processStatus", "status", "state", "result", "processResult"):
+        if key not in scope:
+            continue
+        value = scope[key]
+        if isinstance(value, bool):
+            return "done" if value else "failed"
+        text = str(value).strip().lower()
+        if text in ("1", "success", "done", "finished", "complete", "completed", "true", "ok"):
+            return "done"
+        if text in ("2", "3", "-1", "fail", "failed", "error", "false"):
+            return "failed"
+        if text in ("0", "pending", "processing", "running", "in_progress"):
+            return "pending"
+    return "pending"
+
+
+def _map_capabilities(raw: Any) -> dict[str, bool] | None:
+    """把能力集报文映射成「功能 → 是否支持」。
+
+    兼容两种常见形态：
+      ① 本身就是 `{键: 布尔}` 的扁平字典；
+      ② `{list|records|items: [{code/name, available/support}, ...]}`。
+    两种都对不上就返回 None —— 前端会退回"全部显示"，
+    这比给出一个错误的裁剪结果安全得多。
+    """
+    if not isinstance(raw, dict):
+        return None
+    scope = raw.get("data") if isinstance(raw.get("data"), dict) else raw
+
+    # 形态①：扁平布尔字典
+    flat = {k: v for k, v in scope.items() if isinstance(v, bool)}
+    if flat:
+        return flat
+
+    # 形态②：能力项列表
+    for key in ("list", "records", "items", "capabilities", "available"):
+        items = scope.get(key)
+        if not isinstance(items, list):
+            continue
+        mapped: dict[str, bool] = {}
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            name = (item.get("code") or item.get("name")
+                    or item.get("key") or item.get("capability"))
+            if not name:
+                continue
+            flag = item.get("available", item.get("support",
+                   item.get("supported", item.get("enable"))))
+            mapped[str(name)] = bool(flag) if flag is not None else False
+        if mapped:
+            return mapped
+    return None
+
+
+def _map_charge_plan(raw: Any) -> dict[str, Any] | None:
+    """把预约充电计划映射成前端契约。
+
+    字段名不确定 → 多候选尝试；一个都取不到就返回 None（前端不显示该卡），
+    绝不编造"已启用"这种会让用户误判的值。
+    """
+    if not isinstance(raw, dict):
+        return None
+    scope = raw.get("data") if isinstance(raw.get("data"), dict) else raw
+    if not scope:
+        return None
+
+    def pick(*keys: str) -> Any:
+        for k in keys:
+            value = scope.get(k)
+            if value not in (None, ""):
+                return value
+        return None
+
+    plan = {
+        "enabled": bool(pick("enable", "enabled", "planEnable", "switchStatus") or False),
+        "startTime": pick("startTime", "chargeStartTime", "beginTime"),
+        "endTime": pick("endTime", "chargeEndTime", "stopTime"),
+        "targetSoc": pick("targetSoc", "socLimit", "chargeLimit", "targetChargeSoc"),
+        "mode": pick("mode", "planMode", "strategy"),
+    }
+    return plan if any(v is not None for v in plan.values()) else None
+
+
 def _normalize_power(raw: Any) -> float | None:
     """归一化充电功率为 kW。
 
@@ -197,7 +349,12 @@ class LiveZeekrClient(ZeekrClient):
 
     async def send_sms_code(self, phone: str) -> dict[str, Any]:
         """请求短信验证码（GW1）。"""
-        path = "/zeekrlife-app-user/v1/user/pub/login/mobile/sendCode"
+        # 官方 App 的登录入口只有 `/zeekrlife-app-user/v1/user/pub/login/mobile`
+        # 一条（同族另有 `/bind`、`/oneClick`、`/platform`），
+        # **不存在 `/sendCode` 后缀** —— 该串在官方 APK 中 0 命中。
+        # 发码与校验共用这一条路径，靠 body 是否携带 `code` 区分阶段：
+        # 不带 code = 请求下发验证码；带 code = 校验登录（见 `_login_gw1`）。
+        path = "/zeekrlife-app-user/v1/user/pub/login/mobile"
         params = {"mobile": phone, "areaCode": "86"}
         headers = sign_gw1(params)
 
@@ -251,7 +408,10 @@ class LiveZeekrClient(ZeekrClient):
         }
 
     async def _login_gw1(self, phone: str, code: str) -> None:
-        """GW1 手机号 + 短信验证码登录，拿到 JWT。"""
+        """GW1 手机号 + 短信验证码登录，拿到 JWT。
+
+        与 `send_sms_code` 是同一条路径，区别只在 body 里**带 code**。
+        """
         path = "/zeekrlife-app-user/v1/user/pub/login/mobile"
         params = {"mobile": phone, "areaCode": "86", "code": code}
         headers = sign_gw1(params)
@@ -279,63 +439,122 @@ class LiveZeekrClient(ZeekrClient):
         if not jwt:
             raise ZeekrAuthError("缺少 GW1 令牌")
 
-        path = "/ms-user-auth/v1.0/auth/login"
-        headers = sign_gw2(
-            self.cfg.hmac_access_key, self.cfg.hmac_secret_key, "POST", path
+        # 换令牌的真实接口：官方 APK 里已验证存在 `/app/login/v1/getTokenByCode`
+        # （同族还有 `/app/login/v1/getJwtAuthorizationByToken`、`/auth/login/refresh`）。
+        #
+        # 原实现用的 `/ms-user-auth/v1.0/auth/login` 有两处问题：
+        #   ① 缺 `/api` 段 —— 官方 ms-* 路径一律是 `/ms-<服务>/api/<版本>/...`；
+        #   ② 该路径**在官方 APK 中 0 命中** —— ms-user-auth 下只有
+        #      `auth/scanLogin`、`auth/cloud/temp/code`，没有 `auth/login`。
+        #
+        # ⚠️ 未定项：该接口挂在哪个主机上，静态分析无法确定（字符串扫描只能证明
+        #    路径存在，证明不了 host 绑定）。故按置信度顺序逐个尝试，任一成功即返回。
+        # 只保留官方 APK 中**确实存在**的路径。原先还挂着两条兜底
+        # `/ms-user-auth[/api]/v1.0/auth/login` —— 已对官方 v5.0.7 的 classes.dex
+        # 做原始字节精确计数，**二者均为 0 命中**，属自造路径，留着只会白费两次
+        # 必然失败的请求，故移除。ms-user-auth 下真实存在的是
+        # `auth/scanLogin`、`auth/cloud/temp/code`。
+        candidates = (
+            (GW1_HOST, "/app/login/v1/getTokenByCode"),
+            (GW2_HOST, "/app/login/v1/getTokenByCode"),
         )
-        headers["Authorization"] = f"Bearer {jwt}"
 
-        resp = await self._http.post(f"{GW2_HOST}{path}", headers=headers)
-        payload = self._unwrap(resp.json())
+        last_error: ZeekrAPIError | None = None
+        payload: dict[str, Any] = {}
 
-        token = (payload.get("data") or {}).get("accessToken") or payload.get("accessToken")
-        if not token:
-            raise ZeekrAPIError(
+        for host, path in candidates:
+            headers = sign_gw2(
+                self.cfg.hmac_access_key, self.cfg.hmac_secret_key, "POST", path
+            )
+            headers["Authorization"] = f"Bearer {jwt}"
+
+            try:
+                resp = await self._http.post(f"{host}{path}", headers=headers)
+                payload = self._unwrap(resp.json())
+            except (ZeekrAPIError, httpx.HTTPError, json.JSONDecodeError) as exc:
+                logger.warning("GW2 换令牌尝试失败（%s%s）：%s", host, path, exc)
+                last_error = exc if isinstance(exc, ZeekrAPIError) else None
+                continue
+
+            token = (
+                (payload.get("data") or {}).get("accessToken")
+                or payload.get("accessToken")
+            )
+            if token:
+                self._session["gw2_token"] = token.replace("Bearer ", "")
+                refresh = (payload.get("data") or {}).get("refreshToken")
+                if refresh:
+                    self._session["gw2_refresh"] = refresh
+                logger.info("GW2 换令牌成功：%s%s", host, path)
+                # 立即落盘：此前只在 verify_sms_code 末尾存过一次，导致运行期间刷新出来的
+                # 新令牌从不持久化 —— 重启后载入的是磁盘上那份（可能已过期）的旧令牌。
+                self._save_session()
+                return
+
+            last_error = ZeekrAPIError(
                 str(payload.get("code", "unknown")),
                 payload.get("msg") or "GW2 登录失败",
                 payload,
             )
+            logger.warning("GW2 换令牌未返回令牌（%s%s）：%s", host, path, last_error.message)
 
-        self._session["gw2_token"] = token.replace("Bearer ", "")
-        refresh = (payload.get("data") or {}).get("refreshToken")
-        if refresh:
-            self._session["gw2_refresh"] = refresh
-
-        # 立即落盘：此前只在 verify_sms_code 末尾存过一次，导致运行期间刷新出来的
-        # 新令牌从不持久化 —— 重启后载入的是磁盘上那份（可能已过期）的旧令牌。
-        self._save_session()
+        raise last_error or ZeekrAuthError("GW2 换令牌全部候选失败")
 
     async def _login_gw3(self) -> None:
-        """GW3 登录（HMAC-SHA256 签名 + 加密 VIN）。"""
-        path = "/ms-user-auth/v1.0/auth/login"
+        """GW3 登录（HMAC-SHA256 签名 + 加密 VIN）。
+
+        路径候选说明同 `_login_gw2`：新版把 `/api` 段补上，并把官方包中
+        已验证的 `/app/login/v1/getTokenByCode` 放在首选。
+        """
+        candidates = (
+            "/app/login/v1/getTokenByCode",
+        )
+
         body = compact_json({
             "loginDeviceId": build_login_device_id(),
-            "appVersion": "5.0.5",
+            # 跟随官方 APK 实测版本（本次审计样本 com.zeekrlife.mobile v5.0.7 / 221）
+            "appVersion": APP_VERSION,
             "refreshToken": self._session.get("gw2_refresh", ""),
         })
 
-        # GW3 登录不带 Authorization，但带 X-VIN
-        headers = build_gw3_headers(
-            prod_secret=self.cfg.prod_secret,
-            method="POST",
-            path=path,
-            body=body,
-        )
+        last_error: ZeekrAPIError | None = None
 
-        resp = await self._http.post(
-            f"{GW3_HOST}{path}", content=body.encode("utf-8"), headers=headers
-        )
-        payload = self._unwrap(resp.json())
+        for path in candidates:
+            # GW3 登录不带 Authorization，但带 X-VIN
+            headers = build_gw3_headers(
+                prod_secret=self.cfg.prod_secret,
+                method="POST",
+                path=path,
+                body=body,
+            )
 
-        token = (payload.get("data") or {}).get("accessToken") or payload.get("accessToken")
-        if not token:
-            raise ZeekrAPIError(
+            try:
+                resp = await self._http.post(
+                    f"{GW3_HOST}{path}", content=body.encode("utf-8"), headers=headers
+                )
+                payload = self._unwrap(resp.json())
+            except (ZeekrAPIError, httpx.HTTPError, json.JSONDecodeError) as exc:
+                logger.warning("GW3 登录尝试失败（%s）：%s", path, exc)
+                last_error = exc if isinstance(exc, ZeekrAPIError) else None
+                continue
+
+            token = (
+                (payload.get("data") or {}).get("accessToken")
+                or payload.get("accessToken")
+            )
+            if token:
+                self._session["gw3_token"] = token.replace("Bearer ", "")
+                logger.info("GW3 登录成功：%s", path)
+                return
+
+            last_error = ZeekrAPIError(
                 str(payload.get("code", "unknown")),
                 payload.get("msg") or "GW3 登录失败",
                 payload,
             )
+            logger.warning("GW3 登录未返回令牌（%s）：%s", path, last_error.message)
 
-        self._session["gw3_token"] = token.replace("Bearer ", "")
+        raise last_error or ZeekrAuthError("GW3 登录全部候选失败")
 
         # 同上：GW3 重登（079021 自愈）换出来的新令牌也要落盘，
         # 否则重启后又回到那份旧令牌。
@@ -537,27 +756,45 @@ class LiveZeekrClient(ZeekrClient):
 
     async def list_vehicles(self) -> list[dict[str, Any]]:
         """获取车辆列表（该接口不需要 X-VIN，通常最稳）。"""
-        path = "/zeekrlife-app-vehicle/v1/vehicle/list"
+        # 车辆列表。
+        #
+        # 原路径 `/zeekrlife-app-vehicle/v1/vehicle/list` 在官方 APK 中 **0 命中**
+        # —— `zeekrlife-app-vehicle` 这个服务前缀根本不存在（官方只有
+        # `zeekrlife-app-user`、`zeekrlife-mp-*` 等）。官方把车辆相关接口拆到了
+        # ms-vehicle-core / ms-vehicle-account / ms-tsp-user-vehicle 等微服务下。
+        #
+        # ⚠️ 未定项：官方包里没有明文的"我的车辆列表"端点 —— 该步骤在官方 App
+        #    里走 `com.geely.snc.basevehicle` SDK（GRIC 网关），路径可能由 native
+        #    层构造，静态分析取不到。故按置信度顺序尝试，任一返回车辆即采用。
+        candidates = (
+            "/ms-vehicle-core/api/v1.0/vehicle/favorite-vehicles",
+            "/ms-vehicle-account/api/v1.0/vehicle-detail",
+            "/zeekrlife-app-vehicle/v1/vehicle/list",   # 旧路径，兜底
+        )
 
-        # 先试 GW3，被拒回退 GW2
-        for source in ("gw3", "gw2"):
-            try:
-                if source == "gw3":
-                    payload = await self._request_gw3(
-                        "POST", path, vin="", body={"pageNum": 1, "pageSize": 20}
+        for path in candidates:
+            for source in ("gw3", "gw2"):
+                try:
+                    if source == "gw3":
+                        payload = await self._request_gw3(
+                            "POST", path, vin="", body={"pageNum": 1, "pageSize": 20}
+                        )
+                    else:
+                        payload = await self._request_gw2(
+                            "POST", path, body={"pageNum": 1, "pageSize": 20}
+                        )
+                except (ZeekrAPIError, httpx.HTTPError) as exc:
+                    logger.warning(
+                        "%s 获取车辆列表失败（%s）：%s", source.upper(), path, exc
                     )
-                else:
-                    payload = await self._request_gw2(
-                        "POST", path, body={"pageNum": 1, "pageSize": 20}
-                    )
-            except (ZeekrAPIError, httpx.HTTPError) as exc:
-                logger.warning("%s 获取车辆列表失败：%s", source.upper(), exc)
-                continue
+                    continue
 
-            vehicles = self._extract_vehicle_list(payload)
-            if vehicles:
-                self._session["last_vehicle_list_source"] = source
-                return vehicles
+                vehicles = self._extract_vehicle_list(payload)
+                if vehicles:
+                    logger.info("车辆列表成功：%s via %s", path, source.upper())
+                    self._session["last_vehicle_list_source"] = source
+                    self._session["last_vehicle_list_path"] = path
+                    return vehicles
 
         return []
 
@@ -616,7 +853,10 @@ class LiveZeekrClient(ZeekrClient):
             target_vin = vehicles[0]["vin"]
             self._session["active_vin"] = target_vin
 
-        path = "/zeekrlife-app-vehicle/v1/vehicle/status/latest"
+        # 官方 APK 中已验证的路径为 `/ms-vehicle-status/api/v2.0/vehicle/status/latest`
+        # —— 注意两点：服务名是 `ms-vehicle-status`（不是 `zeekrlife-app-vehicle`），
+        # 且主车况接口是 **v2.0**（v1.0 只有 vtm/qrvs/carFridge/powerMode 等子集）。
+        path = "/ms-vehicle-status/api/v2.0/vehicle/status/latest"
         query = {"latest": "false", "target": "new"}
 
         # 优先 GW3（字段最全），失败回退 GW2
@@ -802,43 +1042,113 @@ class LiveZeekrClient(ZeekrClient):
             "battery12vVoltage": as_float(pick("mainbatterystatusvoltage", "12vvoltage")),
             "battery12vLevel": b12_level,
             "isCharging": is_charging,
-            "isPlugged": as_bool(pick("chargerconnected", "statusofchargerconnection")),
+            # 充电枪连接状态：官方真名是 statusOfChargerConnection（v5.0.7 命中 4 次）。
+            # 原先的首选名 "chargerConnected" 是自造名 —— 官方包里 0 命中，已移除。
+            "isPlugged": as_bool(pick("statusofchargerconnection")),
             # 网关的充电功率量纲在不同车型/固件下不一致（W 或 kW），
             # 已在上方由 _normalize_power 按量级归一到 kW
             "chargePowerKw": charge_power,
             "chargeVoltage": charge_voltage,
             "chargeCurrent": charge_current,
             "minutesToFull": minutes_to_full,
-            "chargeLimit": as_float(pick("chargelimit", "soclimit")),
+            "chargeLimit": as_float(pick("chargelimit", "soclimit")),  # 真名未确认，见下
             "isLocked": is_locked,
+            # 车门状态：改用官方 APK 中确认的字段名（源自 getter
+            # `getLeftFrontDoorStatus` / `getRightBackDoorStatus` 等）。
+            # 原别名 `doorStatusFrontLeft` 系列在官方包中 0 命中 —— 是自造名，
+            # 导致四个车门状态一直静默取不到值。
             "doors": {
-                "frontLeft": as_bool(pick("doorstatusfrontleft", "frontleftdoorstatus")),
-                "frontRight": as_bool(pick("doorstatusfrontright", "frontrightdoorstatus")),
-                "rearLeft": as_bool(pick("doorstatusrearleft", "rearleftdoorstatus")),
-                "rearRight": as_bool(pick("doorstatusrearright", "rearrightdoorstatus")),
+                "frontLeft": as_bool(pick("leftfrontdoorstatus", "doorstatusfrontleft")),
+                "frontRight": as_bool(pick("rightfrontdoorstatus", "doorstatusfrontright")),
+                "rearLeft": as_bool(pick("leftbackdoorstatus", "leftbehinddoorstatus")),
+                "rearRight": as_bool(pick("rightbackdoorstatus", "rightbehinddoorstatus")),
             },
-            # 车窗状态：网关在国区**没有稳定的车窗字段**（docs/真机验证清单.md
-            # 第三节把「车窗状态」列为待验证）。此前这里返回四个硬编码的 None，
-            # 形态上像"读到了但未知"，实际是拿假数据伪装成有数据 —— 客户端还会
-            # 把它渲染成「已关」。改为整体留空，语义诚实：就是没有这个数据。
-            # 等真机确认字段名后再补解析（届时可参照 doors 的 pick 写法）。
-            "windows": None,
-            "trunkOpen": as_bool(pick("trunkstatus", "taildoorstatus")),
-            "frunkOpen": as_bool(pick("frunkstatus", "fronttrunkstatus")),
-            "tyreFrontLeft": as_float(pick("tyrestatusdriver", "tyrepressurefrontleft")),
-            "tyreFrontRight": as_float(pick("tyrestatuspassenger", "tyrepressurefrontright")),
-            "tyreRearLeft": as_float(pick("tyrestatusdriverrear", "tyrepressurerearleft")),
-            "tyreRearRight": as_float(pick("tyrestatuspassengerrear", "tyrepressurerearright")),
-            "tyreWarning": as_bool(pick("tyrewarningstatus", "tyrepressurewarning")),
+            # 车窗状态：官方 APK 确认**存在**该组字段（getter
+            # `getLeftFrontWindowStatus` / `getRightBackWindowStatus` /
+            # `getWindowStatusSupported`）—— 此前"国区没有稳定车窗字段"的判断是错的。
+            #
+            # ⚠️ 对外形状必须严格保持「字典 或 None」：iOS 侧把它解码为
+            # `[String: Bool]?`（**值不可选**），只要有一个 None 就会
+            # valueNotFound、整个 VehicleStatus 解码失败并静默回落到模拟数据
+            # —— 这正是当初改成恒 None 的原因，不能倒退回去。
+            #
+            # 所以规则是：**四个窗都拿到值才给字典，否则整体 None**。
+            # 宁可报"未知"，也不能造出一个解码不过的中间态；更不能用
+            # False 填充缺失值（那是把"没读到"谎报成"已关好"）。
+            "windows": _all_or_none(
+                driver=as_bool(pick("leftfrontwindowstatus")),
+                passenger=as_bool(pick("rightfrontwindowstatus")),
+                rearLeft=as_bool(pick("leftbackwindowstatus", "leftbehindwindowstatus")),
+                rearRight=as_bool(pick("rightbackwindowstatus", "rightbehindwindowstatus")),
+            ),
+            # 后备箱：`trunkStatus` 已验证；官方另有上/下分段开启字段
+            # （`trunkOpenStatus` / `trunkUpperOpenStatus` / `trunkLowerOpenStatus`）。
+            # tailDoorStatus 是自造名（0 命中）。
+            "trunkOpen": as_bool(
+                pick(
+                    "trunkstatus",
+                    "trunkopenstatus",
+                    "trunkupperopenstatus",
+                    "trunkloweropenstatus",
+                )
+            ),
+            # 前备箱：真实字段是 `frunkOpenStatus`（getter `getFrunkOpenStatus`）；
+            # `frunkStatus` / `frontTrunkStatus` 均为自造名（0 命中）。
+            "frunkOpen": as_bool(pick("frunkopenstatus", "frunkstatus", "fronttrunkstatus")),
+            # 胎压：官方字段形如 `leftFrontTyrePressure`（getter
+            # `getLeftFrontTyrePressure`），另有 `?Alert` 与 `?Temp` / `?TempAlert`。
+            "tyreFrontLeft": as_float(
+                pick("leftfronttyrepressure", "tyrestatusdriver", "tyrepressurefrontleft")
+            ),
+            "tyreFrontRight": as_float(
+                pick("rightfronttyrepressure", "tyrestatuspassenger", "tyrepressurefrontright")
+            ),
+            "tyreRearLeft": as_float(
+                pick("leftbacktyrepressure", "leftbehindtyrepressure", "tyrestatusdriverrear")
+            ),
+            "tyreRearRight": as_float(
+                pick("rightbacktyrepressure", "rightbehindtyrepressure", "tyrestatuspassengerrear")
+            ),
+            # 四轮胎温（官方有 `leftFrontTyreTemp` 等）
+            "tyreTempFrontLeft": as_float(pick("leftfronttyretemp")),
+            "tyreTempFrontRight": as_float(pick("rightfronttyretemp")),
+            "tyreTempRearLeft": as_float(pick("leftbacktyretemp", "leftbehindtyretemp")),
+            "tyreTempRearRight": as_float(pick("rightbacktyretemp", "rightbehindtyretemp")),
+            # 胎压告警：真实字段是分轮位的 `?TyrePressureAlert`（原 `tyreWarningStatus`
+            # 为自造名）。这里把四轮告警归并成一个总标志，全为 null 时返回 None。
+            # 胎压告警：官方**只有** 4 个轮的独立告警字段，没有汇总字段 ——
+            # tyreWarningStatus / tyrePressureWarning / tyreWarning 在 v5.0.7 里
+            # 全部 0 命中（都是自造名，已移除）。归并由 _any_tyre_alert 完成。
+            "tyreWarning": _any_tyre_alert(
+                as_bool(pick("leftfronttyrepressurealert")),
+                as_bool(pick("rightfronttyrepressurealert")),
+                as_bool(pick("leftbacktyrepressurealert", "leftbehindtyrepressurealert")),
+                as_bool(pick("rightbacktyrepressurealert", "rightbehindtyrepressurealert")),
+            ),
             "climateOn": as_bool(pick("preclimateactive", "climatestatuspreclimateactive")),
+            # 空调目标温度的真名未在官方包中确认（`climateTargetTemperature` /
+            # `acTemperatureSetting` 均 0 命中），保留猜测别名并标记未验证。
             "climateTargetTemp": as_float(pick("climatetargettemperature", "actemperaturesetting")),
+            # 内温：官方有 `InteriorTemperature`，与已验证的 `temInterior` 一并尝试。
             "interiorTemp": as_float(pick("interiortemperature", "teminterior")),
+            # 外温真名未确认（exteriorTemperature / temExterior / temOutdoor 均 0 命中）。
             "exteriorTemp": as_float(pick("exteriortemperature", "temexterior", "temoutdoor")),
             "latitude": lat,
             "longitude": lon,
             "positionTrusted": as_bool(pick("poscanbetrusted")),
             "speedKmh": as_float(pick("speed", "vehiclespeed")),
-            "avgConsumption": as_float(pick("averageenergyconsumption", "avgconsumption")),
+            # 能耗：官方字段为 `averPowerConsumption`（累计）/
+            # `averTraPowerConsumption`（单程）/ `electricConsumption`。
+            # 原 `averageEnergyConsumption` 是自造名（0 命中），导致能耗一直取不到。
+            "avgConsumption": as_float(
+                pick(
+                    "averpowerconsumption",
+                    "avertrapowerconsumption",
+                    "electricconsumption",
+                    "averageenergyconsumption",
+                )
+            ),
+            # 保养里程真名未确认（maintainDistance / serviceDistance 均 0 命中）。
             "serviceDistanceKm": as_float(pick("maintaindistance", "servicedistance")),
             "serviceDays": None,
             "lastUpdateTs": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -847,14 +1157,17 @@ class LiveZeekrClient(ZeekrClient):
     async def get_trips(self, vin: str | None = None, days: int = 30) -> list[dict[str, Any]]:
         """获取行程记录。
 
-        极氪官方的行程接口在国区并无稳定端点，这里优先尝试 GW3，
-        失败则返回空列表（前端展示空态），不做伪造。
+        端点在官方 APK 中已确认存在（`ms-vehicle-trail`），此前"国区并无稳定端点"
+        的判断是错的。仍保留失败回空列表的行为（前端展示空态），不做伪造。
         """
         target_vin = vin or self._session.get("active_vin") or ""
         if not target_vin:
             return []
 
-        path = "/ms-lbs-service/v1.0/journey/list"
+        # 官方 APK 中已验证：行程走 `ms-vehicle-trail`（不是 `ms-lbs-service`）。
+        # 该服务下另有 `journalLog/trackpoint/list` 可取轨迹点，可用于行程回放；
+        # `ms-lbs-service` 实际只暴露了 `api/v2.0/sendToCar` 一条，与行程无关。
+        path = "/ms-vehicle-trail/api/v1.0/journalLog/trip/listForPage"
         end = datetime.now()
         start = end - timedelta(days=days)
 
@@ -978,7 +1291,9 @@ class LiveZeekrClient(ZeekrClient):
                 value = str(params["value"])
 
         body = build_control_body(service_id, key, value)
-        path = "/ms-remote-control/v1.0/remoteControl/control"
+        # 官方路径带 `/api` 段：`/ms-remote-control/api/v1.0/remoteControl/control`
+        # （原实现漏了 `/api`，该串在官方 APK 中 0 命中）。
+        path = "/ms-remote-control/api/v1.0/remoteControl/control"
 
         # 优先 GW3 通道。
         #
@@ -986,12 +1301,16 @@ class LiveZeekrClient(ZeekrClient):
         # `ZeekrAPIError`。因此「未抛异常」即代表网关接受了请求，
         # 无法也不应再去读 payload 里的 `code`（那里已不含该字段）。
         try:
-            await self._request_gw3("POST", path, vin=target_vin, body=body)
+            payload = await self._request_gw3("POST", path, vin=target_vin, body=body)
             return {
                 "success": True,
                 # 措辞保持克制：网关收下 ≠ 车端已执行
                 "message": "指令已提交至车辆",
                 "command": command,
+                # 查车端执行结果要用它。字段名未在真车确认，故按常见命名
+                # 逐个尝试；取不到就给空串 —— 前端拿到空 id 会直接判"未确认"，
+                # 而不是谎报成功。
+                "commandId": _extract_command_id(payload),
             }
         except (ZeekrAPIError, httpx.HTTPError) as exc:
             logger.warning("GW3 指令通道失败，回退 GW2：%s", exc)
@@ -1022,6 +1341,85 @@ class LiveZeekrClient(ZeekrClient):
                 "message": "指令下发失败，请检查网络与服务端日志",
                 "command": command,
             }
+
+    async def get_command_result(
+        self,
+        command_id: str,
+        vin: str | None = None,
+    ) -> dict[str, Any]:
+        """查询车控指令的车端执行结果。
+
+        对应官方接口（官方 APK 中已验证）：
+            /ms-remote-control/api/v1.0/remoteControl/queryProcessResult
+
+        ⚠️ 响应体结构未在真车确认 —— 加壳的 APK 里取不到 DTO。故这里对
+        状态字段做**多候选 + 多形态**解析（布尔 / 字符串 / 数字），
+        解析不出来时一律返回 `pending`，**绝不返回 done**
+        —— 猜错的代价是不对称的：把"没执行完"说成"已执行"，
+        用户会以为车锁好了。
+        """
+        if not command_id:
+            return {"status": "pending", "message": "缺少指令凭据，无法确认车端执行结果"}
+
+        target_vin = vin or self._session.get("active_vin") or ""
+        path = "/ms-remote-control/api/v1.0/remoteControl/queryProcessResult"
+
+        try:
+            payload = await self._request_gw3(
+                "POST", path, vin=target_vin, body={"processId": command_id}
+            )
+        except (ZeekrAPIError, httpx.HTTPError) as exc:
+            logger.warning("查询指令执行结果失败：%s", exc)
+            return {"status": "pending", "message": "查询执行结果失败，暂无法确认"}
+
+        return {
+            "status": _map_command_status(payload),
+            "message": "已查询车端执行结果",
+            "raw": payload,
+        }
+
+    async def get_capabilities(self, vin: str | None = None) -> dict[str, Any]:
+        """车辆能力集 + 预约充电计划。
+
+        官方接口（均已在 APK 中验证存在）：
+            /ms-vehicle-capability-set/api/app/v1/vehicle/capability/available
+            /ms-charge-manage/api/v1.0/charge/getChargingPlanNew
+
+        ⚠️ 两个接口的**响应体结构未在真车确认**（APK 加壳，取不到 DTO），
+        故这里只做"尽力而为"的归一化，并返回 `verified=False`
+        明确告知调用方这不是权威结论。首次真车联通时应以原始报文为准修正映射。
+        """
+        target_vin = vin or self._session.get("active_vin") or ""
+
+        capabilities: dict[str, bool] | None = None
+        try:
+            raw = await self._request_gw3(
+                "GET",
+                "/ms-vehicle-capability-set/api/app/v1/vehicle/capability/available",
+                vin=target_vin,
+            )
+            capabilities = _map_capabilities(raw)
+        except (ZeekrAPIError, httpx.HTTPError) as exc:
+            logger.warning("获取车辆能力集失败：%s", exc)
+
+        charge_plan: dict[str, Any] | None = None
+        try:
+            plan_raw = await self._request_gw3(
+                "GET",
+                "/ms-charge-manage/api/v1.0/charge/getChargingPlanNew",
+                vin=target_vin,
+            )
+            charge_plan = _map_charge_plan(plan_raw)
+        except (ZeekrAPIError, httpx.HTTPError) as exc:
+            logger.warning("获取预约充电计划失败：%s", exc)
+
+        return {
+            "capabilities": capabilities,
+            "chargePlan": charge_plan,
+            # 能力集映射未经真车确认 —— 前端拿到 false 时不应把它当权威结论，
+            # 只用来"少显示几个明显不支持的按钮"。
+            "verified": False,
+        }
 
     async def aclose(self) -> None:
         """释放底层连接。"""

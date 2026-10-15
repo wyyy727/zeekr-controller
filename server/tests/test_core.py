@@ -1064,7 +1064,13 @@ class TestTripsCacheRevalidation:
 
         store = Store(Path(tempfile.mkdtemp()) / "t.db")
         store.TRIPS_CACHE_TTL_SEC = 0  # 立即过期
-        store.save_trips([{"tripId": "old-1", "startTime": "2026-09-01 08:00:00"}])
+        # ⚠️ 行程日期必须**相对今天**生成，不能写死。
+        # `store.list_trips(days=...)` 是按时间窗过滤的，写死的 2026-09-01
+        # 会随真实时间流逝滑出 30 天窗口 → 缓存读成空 → 「TTL 内命中缓存」
+        # 与「回源失败降级用缓存」两条用例会莫名其妙变红。
+        # 这不是假设，2026-10-15 跑测试时就真的这样红掉了。
+        recent = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+        store.save_trips([{"tripId": "old-1", "startTime": recent}])
 
         calls: list[int] = []
 
@@ -1096,7 +1102,13 @@ class TestTripsCacheRevalidation:
         from app.core.store import Store
 
         store = Store(Path(tempfile.mkdtemp()) / "t.db")
-        store.save_trips([{"tripId": "old-1", "startTime": "2026-09-01 08:00:00"}])
+        # ⚠️ 行程日期必须**相对今天**生成，不能写死。
+        # `store.list_trips(days=...)` 是按时间窗过滤的，写死的 2026-09-01
+        # 会随真实时间流逝滑出 30 天窗口 → 缓存读成空 → 「TTL 内命中缓存」
+        # 与「回源失败降级用缓存」两条用例会莫名其妙变红。
+        # 这不是假设，2026-10-15 跑测试时就真的这样红掉了。
+        recent = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+        store.save_trips([{"tripId": "old-1", "startTime": recent}])
 
         calls: list[int] = []
 
@@ -1130,7 +1142,13 @@ class TestTripsCacheRevalidation:
         from app.core.store import Store
 
         store = Store(Path(tempfile.mkdtemp()) / "t.db")
-        store.save_trips([{"tripId": "old-1", "startTime": "2026-09-01 08:00:00"}])
+        # ⚠️ 行程日期必须**相对今天**生成，不能写死。
+        # `store.list_trips(days=...)` 是按时间窗过滤的，写死的 2026-09-01
+        # 会随真实时间流逝滑出 30 天窗口 → 缓存读成空 → 「TTL 内命中缓存」
+        # 与「回源失败降级用缓存」两条用例会莫名其妙变红。
+        # 这不是假设，2026-10-15 跑测试时就真的这样红掉了。
+        recent = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+        store.save_trips([{"tripId": "old-1", "startTime": recent}])
 
         class BrokenClient:
             async def get_trips(self, vin=None, days=30):

@@ -106,8 +106,12 @@ GW3_APP_ID = "ZEEKRCNCH001M0001"
 # 签名协议版本
 GW3_SIGNATURE_VERSION = "2.0"
 
-# 与官方 App 保持一致的客户端标识
-APP_VERSION = "5.0.5"
+# 与官方 App 保持一致的客户端标识。
+#
+# 版本号取自本次审计的官方 APK 样本（com.zeekrlife.mobile v5.0.7 / versionCode 221），
+# 旧值 5.0.5 已落后于线上包。注意 `User-Agent` 与 `X-APP-OS-VERSION`
+# **不在** GW3_SIGNED_HEADERS 白名单内，故不参与签名，改它们不影响验签结果。
+APP_VERSION = "5.0.7"
 APP_OS_VERSION = "18.5"
 USER_AGENT = f"ZeekrApp/{APP_VERSION} (iPhone; iOS {APP_OS_VERSION})"
 

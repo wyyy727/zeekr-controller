@@ -104,6 +104,34 @@ class TestWindowsNotFabricated:
         status = _normalize({"data": {"electricVehicleStatus": {"chargeLevel": 50}}})
         assert status["windows"] is None, "车窗无数据时应整体留空，而不是四个 None"
 
+    def test_windows_parsed_when_all_four_present(self) -> None:
+        """四个车窗都拿到值时应给出真正的字典。
+
+        对应本次修正：官方 APK 里确认存在车窗字段（getter
+        `getLeftFrontWindowStatus` / `getRightBackWindowStatus`），
+        旧实现恒返回 None，等于把本来能读到的数据丢了。
+        """
+        status = _normalize({"data": {
+            "leftFrontWindowStatus": 0,
+            "rightFrontWindowStatus": 0,
+            "leftBackWindowStatus": 1,
+            "rightBackWindowStatus": 0,
+        }})
+        assert status["windows"] == {
+            "driver": False, "passenger": False,
+            "rearLeft": True, "rearRight": False,
+        }
+
+    def test_windows_degrades_to_none_when_partly_missing(self) -> None:
+        """只有部分窗有值时，必须整体降级为 None。
+
+        两个方向都不能走：返回含 None 的字典会让 iOS 的
+        `[String: Bool]?`（值不可选）解码失败；用 False 补缺则是把
+        "没读到"谎报成"已关好"—— 比没有数据更危险。
+        """
+        status = _normalize({"data": {"leftFrontWindowStatus": 0}})
+        assert status["windows"] is None
+
     def test_doors_never_raises(self) -> None:
         """车门字段缺失时值为 None，iOS 侧已按可选值类型容错，这里不得抛异常。"""
         status = _normalize({"data": {"electricVehicleStatus": {"chargeLevel": 50}}})

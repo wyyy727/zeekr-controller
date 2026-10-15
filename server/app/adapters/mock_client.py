@@ -117,15 +117,22 @@ class MockZeekrClient(ZeekrClient):
             "minutesToFull": round((100 - soc) / 100 * 100 * 0.85, 0) if is_charging else None,
             "chargeLimit": 90.0,
             "isLocked": rng.random() > 0.15,
+            # 字段名与 `live_client._normalize_status` 保持一致 ——
+            # 两者的输出会被同一套前端消费，形状漂移会导致"模拟能看、
+            # 上真车就缺字段"这种最难查的问题。有回归测试守着（见
+            # tests/test_adapter_shape.py）。
             "doors": {
                 "frontLeft": False,
                 "frontRight": False,
                 "rearLeft": False,
                 "rearRight": False,
             },
+            # 车窗用 driver / passenger 命名主驾与副驾 ——
+            # 与 live 侧一致（官方字段是 leftFrontWindowStatus，
+            # 但对外的规范键名沿用 driver/passenger）。
             "windows": {
-                "frontLeft": False,
-                "frontRight": False,
+                "driver": False,
+                "passenger": False,
                 "rearLeft": False,
                 "rearRight": False,
             },
@@ -135,6 +142,12 @@ class MockZeekrClient(ZeekrClient):
             "tyreFrontRight": round(rng.uniform(235, 252), 0),
             "tyreRearLeft": round(rng.uniform(238, 255), 0),
             "tyreRearRight": round(rng.uniform(238, 255), 0),
+            # 四轮胎温：官方有 leftFrontTyreTemp 等独立字段，
+            # live 侧已解析，mock 侧必须同样给出，否则该卡在模拟模式下没有数据
+            "tyreTempFrontLeft": round(rng.uniform(28, 38), 0),
+            "tyreTempFrontRight": round(rng.uniform(28, 38), 0),
+            "tyreTempRearLeft": round(rng.uniform(28, 38), 0),
+            "tyreTempRearRight": round(rng.uniform(28, 38), 0),
             "tyreWarning": False,
             "climateOn": rng.random() > 0.6,
             "climateTargetTemp": 23.0,
@@ -228,8 +241,65 @@ class MockZeekrClient(ZeekrClient):
         # 指令白名单直接取自 COMMAND_MAP，避免两处定义漂移
         if command not in COMMAND_MAP:
             return {"success": False, "message": f"不支持的指令: {command}", "command": command}
+        # commandId 是查询车端执行结果用的凭据；模拟模式下用指令名构造一个稳定的值
         return {
             "success": True,
             "message": f"指令「{command}」已下发（模拟模式）",
             "command": command,
+            "commandId": f"mock-{command}",
+        }
+
+    async def get_command_result(
+        self,
+        command_id: str,
+        vin: str | None = None,
+    ) -> dict[str, Any]:
+        """模拟车端已执行。
+
+        刻意返回 `done` 而不是 `pending`：模拟模式的目的就是让"下发 →
+        等待确认 → 已执行"这条链路可视，卡在 pending 就看不到后半段。
+        """
+        return {"status": "done", "message": "车端确认已执行（模拟）"}
+
+    async def get_capabilities(self, vin: str | None = None) -> dict[str, Any]:
+        """车辆能力集（模拟）。
+
+        刻意让这台"车"缺少座椅通风 / 遮阳帘 / 车载冰箱 / 香氛 / 供氧 /
+        哨兵照片 —— 用来演示 UI 如何按能力裁剪控件（这些按钮根本不会出现）。
+
+        `verified=False`：能力集的**键名映射**尚未在真车上确认，
+        前端拿到 false 时不该把它当成权威结论。
+        """
+        return {
+            "capabilities": {
+                "doorLock": True,
+                "climate": True,
+                "window": True,
+                "trunk": True,
+                "frunk": True,
+                "tyrePressure": True,
+                "tyreTemp": True,
+                "seatHeat": True,
+                "seatVent": False,
+                "wheelHeat": True,
+                "defrost": True,
+                "sunshade": False,
+                "sentinel": True,
+                "sentinelPhoto": False,
+                "carFridge": False,
+                "fragrance": False,
+                "oxygenSupply": False,
+                "chargingPlan": True,
+                "travelPlan": True,
+                "tripTrack": True,
+                "geofence": True,
+            },
+            "chargePlan": {
+                "enabled": True,
+                "startTime": "23:30",
+                "endTime": "06:30",
+                "targetSoc": 90,
+                "mode": "谷电优先",
+            },
+            "verified": False,
         }

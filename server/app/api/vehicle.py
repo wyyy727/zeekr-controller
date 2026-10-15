@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
 from ..adapters import get_client
@@ -100,6 +100,56 @@ async def send_command(payload: CommandRequest) -> dict:
         "data": result,
         "error": None if success else result.get("message"),
     }
+
+
+@router.get("/capability")
+async def get_capability(vin: str | None = None) -> dict:
+    """获取车辆能力集与预约充电计划。
+
+    对应官方接口（路径已在 APK 中验证）：
+      · /ms-vehicle-capability-set/api/app/v1/vehicle/capability/available
+      · /ms-charge-manage/api/v1.0/charge/getChargingPlanNew
+
+    用途是「先问车支持什么，再决定 UI 显示什么」—— 前端据此隐藏
+    这台车根本没有的控件，而不是给出按了没反应的死按钮。
+
+    **取不到时不报错**：能力集缺失不该让整个页面不可用，
+    返回 capabilities=None 让前端退回"全部显示"。
+    """
+    client = get_client()
+    try:
+        data = await client.get_capabilities(vin=vin)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("获取车辆能力集失败：%s", exc)
+        data = {"capabilities": None, "chargePlan": None, "verified": False}
+
+    return {"success": True, "data": data}
+
+
+@router.get("/command/result")
+async def get_command_result(
+    command_id: str = Query(..., alias="id", description="下发指令时返回的 commandId"),
+    vin: str | None = None,
+) -> dict:
+    """查询车控指令的**车端执行结果**。
+
+    网关返回"已提交"只代表它收下了，不代表车动了 —— 不查结果的客户端
+    会把"已提交"当成功，造成"以为锁了车其实没锁"的假成功。
+
+    对应官方接口：
+      /ms-remote-control/api/v1.0/remoteControl/queryProcessResult
+
+    status 三态：`pending` / `done` / `failed`。
+    解析不出车端状态时**一律返回 pending**，不返回 done。
+    """
+    client = get_client()
+    try:
+        result = await client.get_command_result(command_id=command_id, vin=vin)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("查询指令执行结果失败：%s", exc)
+        result = {"status": "pending", "message": "查询失败，暂无法确认车端执行结果"}
+
+    return {"success": True, "data": result}
 
 
 @router.get("/snapshots")
