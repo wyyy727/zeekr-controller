@@ -12,17 +12,35 @@ HOST="${APP_HOST:-0.0.0.0}"
 PORT="${APP_PORT:-8765}"
 
 # 读取 .env（若存在）
-if [[ -f "$SERVER_DIR/.env" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source "$SERVER_DIR/.env"
-  set +a
-  HOST="${APP_HOST:-$HOST}"
-  PORT="${APP_PORT:-$PORT}"
-fi
+#
+# 查找顺序与 app/core/config.py 保持一致：server/.env → 仓库根目录/.env。
+# 之前只看 server/.env，而 README 教的是 `cd .. && cp .env.example .env`
+# （落在仓库根目录）→ 两处对不上，HOST/PORT 会静默用默认值。
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+for env_file in "$SERVER_DIR/.env" "$REPO_DIR/.env"; do
+  if [[ -f "$env_file" ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source "$env_file"
+    set +a
+    HOST="${APP_HOST:-$HOST}"
+    PORT="${APP_PORT:-$PORT}"
+    break
+  fi
+done
+
+port_alive() {
+  curl -sf "http://127.0.0.1:$PORT/api/health" > /dev/null 2>&1
+}
 
 is_running() {
-  [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
+  # `kill -0` 在 Windows 的 Git Bash 下对原生进程不可靠（通常直接返回失败），
+  # 只靠它会把「明明在跑」判成「未运行」，进而重复启动、撞端口。
+  # 故双判据：PID 存活 **或** 健康检查端口有响应。
+  if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+    return 0
+  fi
+  port_alive
 }
 
 start() {
@@ -31,9 +49,28 @@ start() {
     return 0
   fi
 
+  # 优先用服务端自己的虚拟环境解释器 —— 依赖（fastapi/uvicorn 等）装在
+  # server/.venv 里，直接用 PATH 上的 python3 会 import 失败。
+  local py="python3"
+  if [[ -x "$SERVER_DIR/.venv/Scripts/python.exe" ]]; then
+    py="$SERVER_DIR/.venv/Scripts/python.exe"      # Windows
+  elif [[ -x "$SERVER_DIR/.venv/bin/python" ]]; then
+    py="$SERVER_DIR/.venv/bin/python"              # Linux / macOS
+  fi
+
+  # setsid 用于让服务脱离当前终端；但 Windows 的 Git Bash **没有**这个命令，
+  # 直接调用会 "command not found" 而导致整个启动失败。故按可用性选择。
+  local launcher=()
+  if command -v setsid >/dev/null 2>&1; then
+    launcher=(setsid nohup)
+  else
+    launcher=(nohup)
+  fi
+
   echo "启动 ZeekrDash 服务 → http://$HOST:$PORT"
+  echo "  解释器：$py"
   cd "$SERVER_DIR"
-  setsid nohup python3 -m uvicorn app.main:app \
+  "${launcher[@]}" "$py" -m uvicorn app.main:app \
     --host "$HOST" --port "$PORT" \
     > "$LOG_FILE" 2>&1 < /dev/null &
   echo $! > "$PID_FILE"
