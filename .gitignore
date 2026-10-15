@@ -5,6 +5,16 @@
 zeekr_secrets.json
 **/session.json
 
+# ─────────── docs/ 下的逆向取证产物（本机保留，不入库）───────────
+# 这些内容是从官方 App 反编译 / 反汇编得到的结论（接口路径、字段名、能力标志），
+# 只在本机留作开发参考，不随仓库分发 —— 规避二次分发的法律风险。
+#
+# 注意：docs/真机验证清单.md 是自研内容，**要入库**，所以不在此列。
+# 以后若在 docs/ 下新增同类取证产物，请一并加入本清单。
+docs/zeekr-apk-reference.md
+docs/zeekr-apk-intel.json
+docs/zeekr_secrets.json
+
 # ─────────── 数据 ───────────
 data/
 *.db

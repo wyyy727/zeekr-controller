@@ -53,25 +53,30 @@ iOS 端拿不到这些，所以把签名与加密逻辑放在 Python 侧，iOS A
 
 ### 第一步：准备密钥（一次性）
 
-密钥是整个项目的前置门槛，需要**一台安卓设备或模拟器**。
+密钥是整个项目的前置门槛。**不需要安卓设备或模拟器** ——
+在 PC 上下载官方 APK 整包，用**仓库自带脚本**静态提取即可。
 
-1. 从安卓设备拉取极氪 App 的 APK：
+1. 下载官方 APK。国区包名是 **`com.zeekrlife.mobile`**，应用宝等商店都能下到整包。
 
-   ```bash
-   # 大多数市场的包名（国区同此）
-   adb shell pm path com.zeekr.global
-   adb pull <base.apk 路径> base.apk
-   adb pull <split_config.arm64_v8a.apk 路径> arm64.apk
-   ```
-
-2. 用 [wysie/zeekr_key_extractor](https://github.com/wysie/zeekr_key_extractor) 提取：
+2. 提取 6 个密钥并直接写进 `.env`：
 
    ```bash
    pip install capstone pyelftools
-   python zeekr_extract_secrets.py base.apk arm64.apk --region CN
+   cp .env.example .env
+   python scripts/extract_keys.py <下载的.apk> --write-env
    ```
 
-   会生成 `zeekr_secrets.json`，内含 6 个密钥。
+   几点说明：
+
+   - **整包即可**，不用再传 `split_config.arm64_v8a.apk` —— 整包里已含 `lib/arm64-v8a/libenv.so`。
+   - 默认**不回显密钥明文**，只显示掩码（`ab12…cd34`）；要看明文加 `--show`。
+   - 提取结果另存 `docs/zeekr_secrets.json`（已被 `.gitignore` 忽略，不会入库）。
+   - 该脚本移植自 [wysie/zeekr_key_extractor](https://github.com/wysie/zeekr_key_extractor)（MIT），
+     算法未改，只加了脱敏回显与写 `.env`。
+   - 官方 App 加了壳也不影响 —— 脚本不依赖类级反编译，只扫 DEX 明文字符串表与反汇编 `libenv.so`。
+
+   > ⚠️ `ZEEKR_PROD_SECRET` 可能提取出多个候选。若真机上报 `079025`（签名失败），
+   > 按脚本列出的候选逐个替换再试。
 
 3. **重要**：新建一个**极氪子账号**并把车辆共享给它。
    极氪每个账号只保留一个会话，用主账号会导致手机 App 被踢下线。
@@ -372,7 +377,7 @@ API_TOKEN=<上面生成的值>
 
 **CI 的已知盲区**（改代码前请了解）：
 
-- **服务端 177 个测试不在任何 CI 里**。CNB 只做 Swift 类型检查，GitHub Actions 只编 iOS。
+- **服务端 191 个测试不在任何 CI 里**。CNB 只做 Swift 类型检查，GitHub Actions 只编 iOS。
 - `ci/SwiftUIShim.swift` 是手写桩，**`@available` / 部署目标检查完全失效**
   （`swiftc` 未传 `-target`），且桩的签名可能与真实 SDK 漂移。
   它能抓语法/类型/参数/访问控制/MainActor 隔离错误，抓不到 iOS SDK 独有的 API 语义。
@@ -382,7 +387,7 @@ API_TOKEN=<上面生成的值>
 
 ## 测试
 
-服务端有一批**逐条对应历史缺陷**的回归测试，共 **177 个用例**：
+服务端有一批**逐条对应历史缺陷**的回归测试，共 **191 个用例**：
 
 ```bash
 cd server
@@ -391,8 +396,8 @@ pip install pytest          # ← requirements.txt 里没有声明 pytest，需�
 python -m pytest tests -q
 ```
 
-`server/tests/` 三个文件：`test_core.py`（核心逻辑与签名）、`test_hardening.py`（审计缺陷回归）、
-`test_bills.py`（账单全链路）。
+`server/tests/` 四个文件：`test_core.py`（核心逻辑与签名）、`test_hardening.py`（审计缺陷回归）、
+`test_bills.py`（账单全链路）、`test_adapter_shape.py`（mock 与 live 适配器的输出形状必须一致 —— 防字段漂移）。
 
 > 注意：其中 19 个用例使用 `tempfile.mkdtemp()` 建临时 SQLite 库；
 > 若运行环境限制新建子目录写入，它们会以
@@ -419,10 +424,63 @@ docs/真机验证清单.md
 
 ---
 
+## 官方接口情报与 APK 工具
+
+> **本项目的接口路径、请求头、字段名，一律以官方原版极氪 App 实际发出的 HTTP 请求为唯一权威。**
+> 社区逆向实现只作旁证。所有取证结论**已经固化进仓库，不需要重复逆向**。
+
+### 已固化的产物
+
+| 文件 | 内容 |
+|---|---|
+| **[`AGENTS.md`](AGENTS.md)** | 给 AI 编码助手的须知（铁律、工具用法、环境坑） |
+| `docs/zeekr-apk-reference.md` | 人读的接口与字段目录（网关主机、按服务分组的路径、请求头、能力标志、**字段名 ↔ ZeekrDash 归一化键对照表**） |
+| `docs/zeekr-apk-intel.json` | 机器可读的原始情报（不丢数据） |
+| `scripts/apk_intel.py` | 一条命令重新提取 / 渲染 / **对比历史版本**（纯标准库） |
+| `scripts/extract_keys.py` | 从 APK 提取 6 个网关密钥（见「第一步」） |
+
+**取证方式**：官方 App 已加固（包内含 `libconch.so` 31 MB、`libHHSecurity.so` 等），
+JADX 加载后**只能解析出 23 个类 —— 类级反编译不可用**。但 DEX 的**字符串表是明文可读的**，
+所以「某条路径/某个字段是否存在」是可判定命题，脚本据此提取，加固不影响结论。
+边界说明见参考文档开头的「取证边界」一节。
+
+### 重新提取
+
+```bash
+python scripts/apk_intel.py <apk路径>          # 重新生成上面两个文件
+python scripts/apk_intel.py <apk路径> --json-only   # 只要 JSON
+```
+
+### 官方 App 更新后怎么验证
+
+```bash
+python scripts/apk_intel.py <新版.apk> --compare docs/zeekr-apk-intel.json
+```
+
+产出 `docs/zeekr-apk-diff.md`，重点看**第一节「契约回归」**：
+它逐条检查本项目**正在使用**的路径与字段（脚本里的 `CONTRACT_PATHS` /
+`CONTRACT_FIELDS`，与 `server/app/adapters/live_client.py` 一一对应）在新版本里是否还在。
+
+- **契约项消失 = 破坏性变更** → 脚本以**退出码 1** 结束（方便 CI 拦截）。
+  正确做法是按参考文档找到官方新名字、改 `live_client.py`，
+  **而不是删掉那一行** —— 那等于功能静默失效。
+- 无破坏性变更 → 报告末尾会给出替换快照的命令。
+
+新快照另存为 `zeekr-apk-intel-new.json`，**不覆盖**基准文件，人工确认后再手动替换。
+
+> 设计取舍：只有"契约项消失"才算阻断级。每次 App 更新都会带来成百上千条无关字符串，
+> 把噪声当风险会让这个检查失去意义。
+>
+> 顺带一提：刚写好契约清单时，用**同一个 APK 与自己对比**就能发现清单里写错的项
+> （正常应全绿）。这是校验契约真实性的最简办法。
+
+---
+
 ## 项目结构
 
 ```
 zeekr-controller/
+├── AGENTS.md                   # 给 AI 编码助手的须知（铁律 / 工具用法 / 环境坑）
 ├── ZeekrDash/                  # iOS App（SwiftUI，零第三方依赖）
 │   ├── App/                    # 入口与根视图（RootView 含 Tab 壳与玻璃导航）
 │   ├── Core/
@@ -445,13 +503,22 @@ zeekr-controller/
 │   │   ├── api/                # 接口路由
 │   │   ├── bills/              # 账单解析与归集
 │   │   └── core/               # 配置与 SQLite 存储
-│   ├── tests/                  # 177 个回归测试
+│   ├── tests/                  # 191 个回归测试
 │   └── requirements.txt
 │
+├── preview/
+│   ├── index.html              # 单文件设计预览页（**功能改动的唯一落点**）
+│   └── debug.html              # 预览页的调试副本（可连本机/远程后端看接口响应）
+├── docs/
+│   ├── zeekr-apk-reference.md  # 官方接口情报（人读；**先查这里，别重新逆向**）
+│   ├── zeekr-apk-intel.json    # 官方接口情报（机器可读）
+│   └── 真机验证清单.md          # 真机逐条核对清单
+├── scripts/
+│   ├── server.sh               # 服务管理脚本
+│   ├── apk_intel.py            # APK 接口情报提取 / 渲染 / 版本对比
+│   └── extract_keys.py         # 从 APK 提取 6 个网关密钥
+│
 ├── ci/                         # Linux Swift 类型检查（typecheck.sh + 桩文件）
-├── preview/index.html          # 单文件设计预览页
-├── docs/真机验证清单.md          # 真机逐条核对清单
-├── scripts/server.sh           # 服务管理脚本
 ├── .github/workflows/build-ios.yml
 ├── .cnb.yml
 ├── project.yml                 # XcodeGen 工程描述
