@@ -520,6 +520,51 @@ body.is-scrolled .topbar::before {
   /* 关闭态的 chip 本体压暗一档，避免与卡片底色糊在一起 */
   .chip.off { background: rgba(91,100,114,.05); }
 
+  /* 未知态 —— 网关没给这个字段。
+     与 off（确认关闭）严格区分：off 是"读了，是关的"，
+     unknown 是"没读到"。把两者混同会让用户在没有数据时看到
+     「已关」这种假结论（车窗尤其危险 —— 以为关了其实没关）。 */
+  .chip.unknown .ico { background: rgba(91,100,114,.08); color: var(--text-3); opacity: .75; }
+  .chip.unknown .s { color: var(--text-3); font-weight: 400; }
+  .chip.unknown { background: rgba(91,100,114,.03); }
+  .chip.unknown .s::after { content: ''; }
+
+/* ─────────── 轨迹缩略图（行程回放）─────────── */
+.track {
+  margin-top: 8px; border-radius: 10px; overflow: hidden;
+  background: var(--glass-inner-2); padding: 8px 10px;
+}
+  .track svg { display: block; width: 100%; height: 52px; }
+  .track .tk-legend {
+    display: flex; justify-content: space-between;
+    font-size: 10.5px; color: var(--text-3); margin-top: 2px;
+  }
+
+/* ─────────── 预约充电卡 ─────────── */
+.plan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
+.plan-item {
+  background: var(--glass-inner-2); border-radius: 11px; padding: 10px 12px;
+}
+  .plan-item .k { font-size: 11px; color: var(--text-3); }
+  .plan-item .v { font-size: 15px; font-weight: 600; margin-top: 2px; }
+  .plan-item .v small { font-size: 11px; font-weight: 400; color: var(--text-3); margin-left: 2px; }
+  .plan-item.off .v { color: var(--text-3); font-weight: 400; }
+
+/* ─────────── 车辆能力集 ─────────── */
+.cap-list { display: flex; flex-wrap: wrap; gap: 6px; }
+  .cap {
+    font-size: 11.5px; padding: 4px 9px; border-radius: 999px;
+    background: rgba(22,184,154,.10); color: var(--qing-bi);
+  }
+  .cap.no { background: rgba(91,100,114,.08); color: var(--text-3); text-decoration: line-through; }
+  .cap-badge { font-size: 10.5px; font-weight: 400; color: var(--text-3); }
+  .cap-hint {
+    margin-top: 10px; font-size: 11px; color: var(--text-3);
+    padding: 7px 10px; border-radius: 9px; background: rgba(91,100,114,.05);
+  }
+  /* 胎温（与胎压同格显示，小字附在主值下方） */
+  .tyre .t { font-size: 10px; color: var(--text-3); margin-top: 1px; }
+
 /* ─────────── 车控按钮（含完整按压 / 下发 / 成功动效）─────────── */
 .ctrl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap); }
 .ctrl-grid + .ctrl-grid { margin-top: var(--gap); }
@@ -624,6 +669,19 @@ body.is-scrolled .topbar::before {
 
 .ctrl.busy { pointer-events: none; }
 .ctrl.busy .ctrl-spin { display: flex; }
+
+/* ⑧ 第二段：等待车端执行确认（queryProcessResult）
+   与 busy（HTTP 请求中）在语义上必须分开 ——
+   网关收下令只是"已受理"，车不一定动了。用琥珀色转圈区分两个阶段，
+   避免出现"以为锁了车其实没锁"的假成功。 */
+.ctrl.pending { pointer-events: none; }
+.ctrl.pending .ctrl-spin { display: flex; }
+.ctrl.pending .ctrl-spin::after { border-top-color: var(--teng-huang); }
+.ctrl.pending .ctrl-sub { color: var(--teng-huang); }
+
+/* ⑨ 超时未确认：琥珀告警，不当作成功也不当作失败 */
+.ctrl.unconfirmed .ico { color: var(--teng-huang); }
+.ctrl.unconfirmed .ctrl-sub { color: var(--teng-huang); }
 
 /* ⑧ 成功反馈：图标弹跳 + 着色 + 外圈脉冲，1 秒后自动复位。
 
@@ -984,6 +1042,13 @@ const state = {
   records: [],
   days: 30,
   health: null,
+  /* 车辆能力集（/ms-vehicle-capability-set/api/app/v1/vehicle/capability/available）。
+     原则：**先问车支持什么，再决定 UI 显示什么**。
+     未拿到时为 null —— 此时按"保守显示"处理（不隐藏功能，但数据缺失处标注未知），
+     避免网络问题导致整页功能凭空消失。 */
+  capabilities: null,
+  /* 预约充电 / 出行计划（/ms-charge-manage/api/v1.0/charge/getChargingPlanNew） */
+  chargePlan: null,
   /* 数据来源：mock（模拟）/ live（真实）/ offline（配置了真实地址但连不上） */
   mode: PREFERS_MOCK ? 'mock' : 'live',
 };
@@ -1006,16 +1071,59 @@ const MOCK = {
     battery12vVoltage: 13.2,
     tyreFrontLeft: 250, tyreFrontRight: 248,
     tyreRearLeft: 252, tyreRearRight: 249,
+    tyreTempFrontLeft: 32, tyreTempFrontRight: 31,
+    tyreTempRearLeft: 33, tyreTempRearRight: 32,
     tyreWarning: false,
     isLocked: true,
     isCharging: false,
     climateOn: false,
     trunkOpen: false,
+    frunkOpen: false,
+    /* 四门 / 四窗 —— 字段名对齐官方 APK（leftFrontDoorStatus 等）。
+       值语义：true = 开，false = 关，null = 网关没给 */
+    doors: { frontLeft: false, frontRight: false, rearLeft: false, rearRight: false },
     windows: { driver: false, passenger: false, rearLeft: false, rearRight: false },
   },
+  /* 能力集样例：模拟"这台车没有车载冰箱 / 香氛 / 供氧"的车型差异，
+     以及"未开放哨兵照片"的情况 —— 用来演示 UI 如何按能力裁剪。 */
+  capabilities: {
+    doorLock: true,
+    climate: true,
+    window: true,
+    trunk: true,
+    frunk: true,
+    tyrePressure: true,
+    tyreTemp: true,
+    seatHeat: true,
+    seatVent: false,
+    wheelHeat: true,
+    defrost: true,
+    sunshade: false,
+    sentinel: true,
+    sentinelPhoto: false,
+    carFridge: false,
+    fragrance: false,
+    oxygenSupply: false,
+    chargingPlan: true,
+    travelPlan: true,
+    tripTrack: true,
+    geofence: true,
+  },
+  /* 预约充电计划样例 */
+  chargePlan: {
+    enabled: true,
+    startTime: '23:30',
+    endTime: '06:30',
+    targetSoc: 90,
+    mode: '谷电优先',
+  },
   trips: [
-    { startTime: '2026-09-17 08:15', startPlace: '家 · 锦绣江南', endPlace: '公司 · 张江高科', distanceKm: 12.4, energyKwh: 2.10, consumption: 16.9, durationMinutes: 28 },
-    { startTime: '2026-09-16 18:40', startPlace: '公司 · 张江高科', endPlace: '家 · 锦绣江南', distanceKm: 13.1, energyKwh: 1.90, consumption: 14.5, durationMinutes: 32 },
+    { startTime: '2026-09-17 08:15', startPlace: '家 · 锦绣江南', endPlace: '公司 · 张江高科', distanceKm: 12.4, energyKwh: 2.10, consumption: 16.9, durationMinutes: 28,
+      /* 轨迹点来自 /ms-vehicle-trail/api/v1.0/journalLog/trackpoint/list，
+         用于行程回放。这里用 [lng, lat] 的简化序列演示。 */
+      trackpoints: [[121.4021,31.1856],[121.4188,31.1922],[121.4365,31.1968],[121.4502,31.2006],[121.4721,31.2044],[121.4908,31.2071],[121.5122,31.2088],[121.5330,31.2095]] },
+    { startTime: '2026-09-16 18:40', startPlace: '公司 · 张江高科', endPlace: '家 · 锦绣江南', distanceKm: 13.1, energyKwh: 1.90, consumption: 14.5, durationMinutes: 32,
+      trackpoints: [[121.5330,31.2095],[121.5104,31.2081],[121.4880,31.2060],[121.4655,31.2022],[121.4421,31.1975],[121.4210,31.1930],[121.4021,31.1856]] },
     { startTime: '2026-09-15 09:02', startPlace: '家 · 锦绣江南', endPlace: '万象城', distanceKm: 8.6, energyKwh: 1.40, consumption: 16.3, durationMinutes: 22 },
     { startTime: '2026-09-14 21:10', startPlace: '万象城', endPlace: '家 · 锦绣江南', distanceKm: 9.2, energyKwh: 1.30, consumption: 14.1, durationMinutes: 25 },
     { startTime: '2026-09-13 08:20', startPlace: '家 · 锦绣江南', endPlace: '公司 · 张江高科', distanceKm: 12.0, energyKwh: 2.00, consumption: 16.7, durationMinutes: 30 },
@@ -1442,11 +1550,15 @@ function renderDashboard() {
         ? `<div class="charge-eta">${SVG.clock} 预计 ${fmtDuration(s.minutesToFull)} 充满</div>` : ''}
     </div>` : '';
 
-  const tyre = (label, v) => {
+  /* 胎压格：胎温作为副行显示（官方有 leftFrontTyreTemp 等独立字段，
+     原实现只显示胎压，浪费了数据）。 */
+  const tyre = (label, v, temp) => {
     const bad = v !== null && v !== undefined && (v < 220 || v > 280);
+    const t = (cap('tyreTemp') && temp != null) ? `<div class="t">${fmt(temp, 0)} °C</div>` : '';
     return `<div class="tyre${bad ? ' warn' : ''}">
       <div class="k">${label}</div>
       <div class="v">${fmt(v, 0)}</div>
+      ${t}
     </div>`;
   };
 
@@ -1465,14 +1577,25 @@ function renderDashboard() {
       <div class="s">${text}</div></div>
     </div>`;
 
-  const lockTone = s.isLocked === true ? 'good' : 'bad';
-  const lockText = s.isLocked === true ? '已锁' : '未锁';
-  const lockIcon = s.isLocked === true ? SVG.lock : SVG.unlock;
+  /* 三态 chip：显式区分「确认已关」「确认未关」「没读到」。
+     旧实现用 `x !== true` 判断，字段缺失时会渲染成「已关」——
+     在没有数据的情况下给出一个肯定的安全结论，这是最危险的假数据形态。 */
+  const triChip = (title, icon, v, o = {}) => {
+    const { onText = '开启', offText = '已关', onTone = 'bad', offTone = 'good' } = o;
+    if (v === null || v === undefined) return chip(title, 'unknown', '—', icon);
+    return v ? chip(title, onTone, onText, icon) : chip(title, offTone, offText, icon);
+  };
+
+  /* 三态取值：null 表示网关未提供该字段 */
+  const tri = (v) => (v === null || v === undefined ? null : v === true);
 
   const climateOn = s.climateOn === true;
-  const winClosed = !hasOpenWindow(s);
-  const trunkClosed = s.trunkOpen !== true;
   const locked = s.isLocked === true;
+  const lock3 = tri(s.isLocked);
+  const doorOpen3 = anyTrue(...Object.values(s.doors || {}));
+  const winOpen3 = anyTrue(...Object.values(s.windows || {}));
+  const trunkOpen3 = tri(s.trunkOpen);
+  const frunkOpen3 = tri(s.frunkOpen);
 
   // ── 车控按钮：三种形态 ──────────────────────────
   // 1) toggle：开关型（对应 zeekr_ha 的 switch / lock），显示目标动作，
@@ -1497,6 +1620,11 @@ function renderDashboard() {
       <span class="ctrl-spin" aria-hidden="true"></span>
     </button>`;
   };
+
+  /* 带能力门控的车控按钮：车辆不支持该能力时**整格不渲染**。
+     旧版把 18 条指令全列出来（其中 10 条未经真车验证），点了只会静默失败 ——
+     先问车支持什么，能一次性消掉这批死按钮。 */
+  const capBtn = (key, o) => (cap(key) ? ctrlBtn(o) : '');
 
   return `
     <div class="card">
@@ -1541,27 +1669,42 @@ function renderDashboard() {
       </div>
     </div>
 
+    ${cap('tyrePressure') ? `
     <div class="card">
       <div class="card-title">
         <span>胎压 <span style="font-size:11px;font-weight:400;color:var(--text-3)">kPa</span></span>
-        ${s.tyreWarning ? '<span style="font-size:11px;color:var(--zhu-sha);font-weight:500">异常</span>' : ''}
+        ${s.tyreWarning === true
+          ? '<span style="font-size:11px;color:var(--zhu-sha);font-weight:500">异常</span>'
+          : (s.tyreWarning === null || s.tyreWarning === undefined
+              ? '<span style="font-size:11px;color:var(--text-3)">告警状态未知</span>' : '')}
       </div>
       <div class="tyre-grid">
-        ${tyre('左前', s.tyreFrontLeft)}
-        ${tyre('右前', s.tyreFrontRight)}
-        ${tyre('左后', s.tyreRearLeft)}
-        ${tyre('右后', s.tyreRearRight)}
+        ${tyre('左前', s.tyreFrontLeft, s.tyreTempFrontLeft)}
+        ${tyre('右前', s.tyreFrontRight, s.tyreTempFrontRight)}
+        ${tyre('左后', s.tyreRearLeft, s.tyreTempRearLeft)}
+        ${tyre('右后', s.tyreRearRight, s.tyreTempRearRight)}
       </div>
-    </div>
+    </div>` : ''}
 
     <div class="card">
-      <div class="card-title">车身状态</div>
-      <div class="grid2">
-        ${chip('车门', lockTone, lockText, lockIcon)}
-        ${chip('空调', climateOn ? 'mid' : 'off', climateOn ? '开启' : '关闭', SVG.snow)}
-        ${chip('车窗', winClosed ? 'good' : 'bad', winClosed ? '已关' : '未关', SVG.window)}
-        ${chip('后备箱', trunkClosed ? 'good' : 'bad', trunkClosed ? '已关' : '开启', SVG.trunk)}
+      <div class="card-title">
+        <span>车身状态</span>
+        ${state.capabilities ? '<span class="cap-badge">按车辆能力显示</span>' : ''}
       </div>
+      <div class="grid2">
+        ${cap('doorLock') ? triChip('锁车', lock3 ? SVG.lock : SVG.unlock, lock3,
+              { onText: '已锁', offText: '未锁', onTone: 'good', offTone: 'bad' }) : ''}
+        ${cap('doorLock') ? triChip('车门', SVG.car, doorOpen3,
+              { onText: '有门未关', offText: '全部关闭' }) : ''}
+        ${cap('climate') ? triChip('空调', SVG.snow, tri(s.climateOn),
+              { onText: '开启', offText: '关闭', onTone: 'mid', offTone: 'off' }) : ''}
+        ${cap('window') ? triChip('车窗', SVG.window, winOpen3,
+              { onText: '有窗未关', offText: '全部关闭' }) : ''}
+        ${cap('trunk') ? triChip('后备箱', SVG.trunk, trunkOpen3, { onText: '开启', offText: '已关' }) : ''}
+        ${cap('frunk') ? triChip('前备箱', SVG.trunk, frunkOpen3, { onText: '开启', offText: '已关' }) : ''}
+      </div>
+      ${!state.capabilities
+        ? `<div class="cap-hint">未取到车辆能力集，已按「全部显示」处理</div>` : ''}
     </div>
 
     <div class="card">
@@ -1571,32 +1714,32 @@ function renderDashboard() {
       </div>
 
       <div class="ctrl-grid">
-        ${ctrlBtn({
+        ${capBtn('doorLock', {
           cmd: locked ? 'unlock' : 'lock',
           label: locked ? '解锁' : '锁车',
           sub: locked ? '当前已锁' : '当前未锁',
           icon: locked ? SVG.carUnlock : SVG.carLock,
           kind: 'toggle', on: locked,
         })}
-        ${ctrlBtn({
+        ${capBtn('climate', {
           cmd: climateOn ? 'climateOff' : 'climateOn',
           label: climateOn ? '关空调' : '开空调',
           sub: climateOn ? '运行中' : '已关闭',
           icon: SVG.snow, kind: 'toggle', on: climateOn,
         })}
-        ${ctrlBtn({
+        ${capBtn('defrost', {
           cmd: 'defrost', label: '前除霜', sub: '风挡除雾',
           icon: SVG.defrost, kind: 'toggle',
         })}
-        ${ctrlBtn({
+        ${capBtn('wheelHeat', {
           cmd: 'wheelHeat', label: '方向盘', sub: '加热',
           icon: SVG.wheelHeat, kind: 'toggle',
         })}
-        ${ctrlBtn({
+        ${capBtn('seatHeat', {
           cmd: 'seatHeat', label: '座椅加热', sub: '主 / 副驾',
           icon: SVG.seats, kind: 'toggle',
         })}
-        ${ctrlBtn({
+        ${capBtn('seatVent', {
           cmd: 'ventSeat', label: '座椅通风', sub: '主 / 副驾',
           icon: SVG.vent, kind: 'toggle',
         })}
@@ -1607,20 +1750,20 @@ function renderDashboard() {
       <div class="ctrl-grid">
         ${ctrlBtn({ cmd: 'flash', label: '闪灯', icon: SVG.light, kind: 'action' })}
         ${ctrlBtn({ cmd: 'honk', label: '鸣笛', icon: SVG.horn, kind: 'action' })}
-        ${ctrlBtn({ cmd: 'closeWindows', label: '关车窗', icon: SVG.window, kind: 'action' })}
-        ${ctrlBtn({ cmd: 'sunshade', label: '遮阳帘', icon: SVG.sunshade, kind: 'action' })}
+        ${capBtn('window', { cmd: 'closeWindows', label: '关车窗', icon: SVG.window, kind: 'action' })}
+        ${capBtn('sunshade', { cmd: 'sunshade', label: '遮阳帘', icon: SVG.sunshade, kind: 'action' })}
         ${ctrlBtn({
           cmd: charging ? 'chargeStop' : 'chargeStart',
           label: charging ? '结束充电' : '开始充电',
           icon: SVG.plug, kind: 'action', disabled: !charging && !s.isPlugged,
         })}
-        ${ctrlBtn({ cmd: 'sentinel', label: '哨兵模式', icon: SVG.shield, kind: 'toggle' })}
+        ${capBtn('sentinel', { cmd: 'sentinel', label: '哨兵模式', icon: SVG.shield, kind: 'toggle' })}
       </div>
 
       <div class="ctrl-sep">场景</div>
 
       <div class="ctrl-grid ctrl-grid--scene">
-        ${ctrlBtn({ cmd: 'tripPlan', label: '出行规划', sub: '预设出发时间', icon: SVG.route, kind: 'scene' })}
+        ${capBtn('travelPlan', { cmd: 'tripPlan', label: '出行规划', sub: '预设出发时间', icon: SVG.route, kind: 'scene' })}
         ${ctrlBtn({ cmd: 'carFinder', label: '寻车', sub: '定位车辆', icon: SVG.pin, kind: 'scene' })}
         ${ctrlBtn({ cmd: 'refresh', label: '立即刷新', sub: '同步车况', icon: SVG.refresh, kind: 'scene' })}
       </div>
@@ -1632,8 +1775,63 @@ function renderDashboard() {
     </div>`;
 }
 
+/* ═══════════════════════════════════════════════
+   能力集与三态判断
+   ═══════════════════════════════════════════════ */
+
+/* 先问车支持什么，再决定 UI 显示什么。
+   `cap(key)` 的三态语义：
+     true  —— 车辆明确支持
+     false —— 车辆明确不支持 → UI 隐藏该功能
+     能力集未拿到（null）→ 一律 true（保守显示）
+
+   刻意不做"拿不到就隐藏"：网络抖动不该让整页功能凭空消失。
+   而"某个字段网关没给"是另一回事，由 chip 的 unknown 态表达 ——
+   两者职责分开，不要混用。 */
+function cap(key) {
+  const c = state.capabilities;
+  if (!c || c[key] === undefined) return true;
+  return c[key] !== false;
+}
+
+/* 三态归并：任一为 true → true；全为 null/undefined → null（未知）；否则 false。
+   用于把四门 / 四窗归并成一个"有没有开"。
+   返回 null 而不是 false 是关键 —— 后者会把"没数据"谎报成"已关好"。 */
+function anyTrue(...vals) {
+  const meaningful = vals.filter((v) => v !== null && v !== undefined);
+  if (!meaningful.length) return null;
+  return meaningful.some((v) => v === true);
+}
+
 function hasOpenWindow(s) {
-  return Object.values(s.windows || {}).some((v) => v === true);
+  return anyTrue(...Object.values(s.windows || {})) === true;
+}
+
+/* 行程轨迹缩略图：把 trackpoint 序列画成一条折线。
+   经纬度跨度可能极小，故按自身包围盒归一化，不依赖地图。 */
+function trackSvg(points) {
+  if (!Array.isArray(points) || points.length < 2) return '';
+  const W = 300, H = 52, PAD = 4;
+  const lngs = points.map((p) => p[0]);
+  const lats = points.map((p) => p[1]);
+  const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+  const spanLng = maxLng - minLng || 1e-9;
+  const spanLat = maxLat - minLat || 1e-9;
+  const x = (lng) => PAD + ((lng - minLng) / spanLng) * (W - PAD * 2);
+  const y = (lat) => H - PAD - ((lat - minLat) / spanLat) * (H - PAD * 2);
+  const d = points.map((p, i) => `${i ? 'L' : 'M'}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join(' ');
+  const s = points[0], e = points[points.length - 1];
+  return `
+    <div class="track">
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="行程轨迹">
+        <path d="${d}" fill="none" stroke="var(--tian-qing)" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round" opacity=".85"/>
+        <circle cx="${x(s[0]).toFixed(1)}" cy="${y(s[1]).toFixed(1)}" r="3.2" fill="var(--qing-bi)"/>
+        <circle cx="${x(e[0]).toFixed(1)}" cy="${y(e[1]).toFixed(1)}" r="3.2" fill="var(--zhu-sha)"/>
+      </svg>
+      <div class="tk-legend"><span>起点</span><span>${points.length} 个轨迹点</span><span>终点</span></div>
+    </div>`;
 }
 
 /* ═══════════════════════════════════════════════
@@ -1689,6 +1887,10 @@ function renderTrips() {
 }
 
 function tripItem(t) {
+  /* 轨迹回放：仅在车辆具备该能力（cap('tripTrack')）且本行程确实带回轨迹点时渲染。
+     数据来自 /ms-vehicle-trail/api/v1.0/journalLog/trackpoint/list。 */
+  const track = (cap('tripTrack') && t.trackpoints) ? trackSvg(t.trackpoints) : '';
+
   return `
     <div class="item">
       <div class="item-top">
@@ -1700,7 +1902,10 @@ function tripItem(t) {
         <span class="tag a">${fmt(t.energyKwh, 2)} kWh</span>
         <span class="tag w">${fmt(t.consumption, 1)} kWh/100km</span>
         ${t.durationMinutes ? `<span class="tag">${fmtDuration(t.durationMinutes)}</span>` : ''}
+        ${t.avgSpeedKmh != null ? `<span class="tag">均速 ${fmt(t.avgSpeedKmh, 0)} km/h</span>` : ''}
+        ${t.maxSpeedKmh != null ? `<span class="tag">最高 ${fmt(t.maxSpeedKmh, 0)} km/h</span>` : ''}
       </div>
+      ${track}
     </div>`;
 }
 
@@ -1720,6 +1925,7 @@ function renderCharges() {
           导入支付宝 / 微信账单后，这里会自动归集各服务商的充电消费
         </div>
       </div>
+      ${chargePlanCard()}
       ${soonCard()}`;
   }
 
@@ -1744,6 +1950,8 @@ function renderCharges() {
         </div>
       </div>
     </div>
+
+    ${chargePlanCard()}
 
     <div class="card">
       <div class="card-title">服务商分布</div>
@@ -1794,6 +2002,43 @@ function chargeItem(r) {
     </div>`;
 }
 
+/* 预约充电卡。
+   数据来自官方 /ms-charge-manage 系列（ZeekrDash 完全没做）：
+     v1.0: getChargingPlanNew / setChargingPlan、getLatestTravelPlanNew / setTravelPlan
+     v2.0: getBookingCharge / setBookingCharge、getTravelPlan / setTravelPlan
+   峰谷电价省钱的实用功能，且官方接口完整开放。 */
+function chargePlanCard() {
+  if (!cap('chargingPlan')) return '';
+  const p = state.chargePlan;
+  if (!p) return '';
+  const on = p.enabled === true;
+  return `
+    <div class="card">
+      <div class="card-title">
+        <span>预约充电</span>
+        <span class="cap-badge">${on ? '已启用' + (p.mode ? ' · ' + esc(p.mode) : '') : '未启用'}</span>
+      </div>
+      <div class="plan-grid">
+        <div class="plan-item${on ? '' : ' off'}">
+          <div class="k">开始时间</div>
+          <div class="v">${esc(p.startTime || '--')}</div>
+        </div>
+        <div class="plan-item${on ? '' : ' off'}">
+          <div class="k">结束时间</div>
+          <div class="v">${esc(p.endTime || '--')}</div>
+        </div>
+        <div class="plan-item${on ? '' : ' off'}">
+          <div class="k">目标电量</div>
+          <div class="v">${p.targetSoc != null ? p.targetSoc : '--'}<small>%</small></div>
+        </div>
+        <div class="plan-item">
+          <div class="k">当前电量</div>
+          <div class="v">${fmt(state.status && state.status.soc, 0)}<small>%</small></div>
+        </div>
+      </div>
+    </div>`;
+}
+
 function soonCard() {
   return `
     <div class="soon">
@@ -1809,6 +2054,49 @@ function soonCard() {
 /* ═══════════════════════════════════════════════
    视图：设置
    ═══════════════════════════════════════════════ */
+/* 车辆能力集卡。
+   把 /ms-vehicle-capability-set/api/app/v1/vehicle/capability/available 的结果
+   摊开展示 —— 目的是让"为什么某些按钮不见了"变得**可解释**，
+   否则用户会以为功能丢了。 */
+const CAP_LABELS = {
+  doorLock: '车门 / 锁', climate: '空调', window: '车窗', trunk: '后备箱',
+  frunk: '前备箱', tyrePressure: '胎压', tyreTemp: '胎温',
+  seatHeat: '座椅加热', seatVent: '座椅通风', wheelHeat: '方向盘加热',
+  defrost: '前除霜', sunshade: '遮阳帘', sentinel: '哨兵模式',
+  sentinelPhoto: '哨兵照片', carFridge: '车载冰箱', fragrance: '香氛',
+  oxygenSupply: '供氧', chargingPlan: '预约充电', travelPlan: '出行计划',
+  tripTrack: '行程轨迹', geofence: '电子围栏',
+};
+
+function capabilityCard() {
+  const c = state.capabilities;
+  if (!c) {
+    return `
+    <div class="card">
+      <div class="card-title">车辆能力</div>
+      <div class="cap-hint">
+        尚未取到能力集，界面按「全部显示」处理。<br>
+        接口：/ms-vehicle-capability-set/api/app/v1/vehicle/capability/available
+      </div>
+    </div>`;
+  }
+  const keys = Object.keys(CAP_LABELS).filter((k) => k in c);
+  const on = keys.filter((k) => c[k] !== false);
+  const off = keys.filter((k) => c[k] === false);
+  return `
+    <div class="card">
+      <div class="card-title">
+        <span>车辆能力</span>
+        <span class="cap-badge">支持 ${on.length} / ${keys.length}</span>
+      </div>
+      <div class="cap-list">
+        ${on.map((k) => `<span class="cap">${CAP_LABELS[k]}</span>`).join('')}
+        ${off.map((k) => `<span class="cap no">${CAP_LABELS[k]}</span>`).join('')}
+      </div>
+      <div class="cap-hint">界面已按此裁剪 —— 不支持的能力不会出现在车控面板里。</div>
+    </div>`;
+}
+
 function renderSettings() {
   const h = state.health;
 
@@ -1832,6 +2120,8 @@ function renderSettings() {
   }[state.mode];
 
   return `
+    ${capabilityCard()}
+
     <div class="card">
       <div class="card-title">服务连接</div>
       <div class="mini-row" style="padding:5px 0">
@@ -2052,9 +2342,29 @@ function seedMock() {
   state.summary = MOCK.summary;
   state.records = MOCK.records;
   state.health = MOCK.health;
+  state.capabilities = MOCK.capabilities;
+  state.chargePlan = MOCK.chargePlan;
   const d = new Date();
   state.lastRefresh = String(d.getHours()).padStart(2, '0') + ':' +
                      String(d.getMinutes()).padStart(2, '0');
+}
+
+/* 能力集与预约计划：真实模式下尝试拉取。
+   后端接口尚未实现（属待确认的新功能），拿不到时静默退化为
+   capabilities = null —— cap() 会按「全部显示」处理，
+   数据缺失由 chip 的 unknown 态表达。不阻断主流程。 */
+async function loadCapabilities() {
+  try {
+    const data = await api('/api/vehicle/capability');
+    if (data && data.capabilities) {
+      state.capabilities = data.capabilities;
+    }
+    if (data && data.chargePlan) {
+      state.chargePlan = data.chargePlan;
+    }
+  } catch {
+    state.capabilities = state.capabilities || null;
+  }
 }
 
 /* 模拟数据模式提示：只在「配置了真实地址却连不上」时弹一次，
@@ -2088,7 +2398,7 @@ async function loadAll() {
     //    以「车辆状态 + 健康检查」是否都拿到作为后端可用的判据，
     //    任一失败即视为不可达，回落模拟数据
     const [statusOk, healthOk] = await Promise.all([loadStatus(), loadHealth()]);
-    await Promise.all([loadTrips(), loadCharges()]);
+    await Promise.all([loadTrips(), loadCharges(), loadCapabilities()]);
 
     if (statusOk && healthOk) {
       state.mode = 'live';
@@ -2147,14 +2457,61 @@ function spawnRipple(btn, e) {
   setTimeout(() => span.remove(), 600);
 }
 
-/* 车控指令：三段式反馈 —— 下发中转圈 → 成功对勾 / 失败抖动 */
+/* 车端执行结果确认。
+   对应官方接口 `/ms-remote-control/api/v1.0/remoteControl/queryProcessResult`
+   —— 网关返回"已提交"只代表它收下了，**不代表车动了**。
+
+   返回值三态：
+     true  —— 车端确认已执行
+     false —— 车端明确执行失败
+     null  —— 超时未确认（既不能当成功，也不能当失败） */
+async function pollCommandResult(commandId) {
+  // 演示模式：本地模拟一次车端确认，保证三态链路可视
+  if (DEMO || state.mode === 'mock') {
+    await new Promise((r) => setTimeout(r, 1100));
+    return true;
+  }
+  // 真实模式：后端该接口尚未实现（属待确认的新功能），
+  // 请求失败时如实返回 null —— 宁可报"未确认"，不谎报成功。
+  for (let i = 0; i < 5; i++) {
+    try {
+      const r = await api('/api/vehicle/command/result?id=' + encodeURIComponent(commandId));
+      if (r && r.status === 'done') return true;
+      if (r && r.status === 'failed') return false;
+    } catch { /* 接口未实现 / 网络异常 → 继续轮询 */ }
+    await new Promise((res) => setTimeout(res, 1500));
+  }
+  return null;
+}
+
+/* 车控指令：四段式反馈
+   ① busy        —— 请求已发出，等网关受理
+   ② pending     —— 网关已受理，等**车端执行确认**
+   ③ done        —— 车端确认已执行
+   ④ fail / unconfirmed —— 执行失败 / 超时未确认
+
+   ② 与 ③ 必须分开：旧实现把"网关已提交"直接当成功，
+   会造成"以为锁了车其实没锁"的假成功 —— 这是安全问题，不是体验问题。 */
 async function sendCommand(btn) {
   const cmd = btn.dataset.cmd;
   const label = btn.dataset.label || '指令';
   const isToggle = btn.classList.contains('ctrl--toggle');
 
-  if (btn.classList.contains('busy')) return;
+  if (btn.classList.contains('busy') || btn.classList.contains('pending')) return;
   btn.classList.add('busy');
+
+  const subEl = btn.querySelector('.ctrl-sub');
+  const origSub = subEl ? subEl.textContent : '';
+
+  const settle = (cls, keepMs) => {
+    btn.classList.remove('busy', 'pending');
+    btn.classList.add(cls);
+    setTimeout(() => {
+      btn.classList.remove('done', 'fail', 'unconfirmed', cls);
+      if (subEl) subEl.textContent = origSub;
+      loadStatus().then(render);
+    }, keepMs);
+  };
 
   try {
     const res = await api('/api/vehicle/command', {
@@ -2163,23 +2520,29 @@ async function sendCommand(btn) {
       body: JSON.stringify({ command: cmd }),
     });
 
-    // 成功：对勾脉冲
-    btn.classList.add('done');
-    // 开关型先本地乐观翻转，再以服务端真实状态校正
-    if (isToggle) btn.classList.toggle('on');
-    toast(res.message || (label + '已下发'));
+    // ── 阶段 ②：网关已受理，等车端执行确认 ──
+    btn.classList.remove('busy');
+    btn.classList.add('pending');
+    if (subEl) subEl.textContent = '等待车端确认…';
 
-    setTimeout(() => {
-      btn.classList.remove('done', 'busy');
-      // 拉取真实车况以校正开关状态
-      loadStatus().then(render);
-    }, 950);
+    const confirmed = await pollCommandResult(res.commandId || cmd);
+
+    if (confirmed === true) {
+      if (isToggle) btn.classList.toggle('on');
+      toast(res.message || (label + '已执行'));
+      settle('done', 950);
+    } else if (confirmed === false) {
+      toast(label + '车端执行失败');
+      settle('fail', 1400);
+    } else {
+      // 未确认：既不是成功也不是失败，如实告知
+      if (subEl) subEl.textContent = '未确认';
+      toast(label + '已下发，但未在时限内确认车端执行');
+      settle('unconfirmed', 2200);
+    }
   } catch (err) {
-    btn.classList.add('done', 'fail');
     toast(label + '失败：' + err.message);
-    setTimeout(() => {
-      btn.classList.remove('done', 'fail', 'busy');
-    }, 900);
+    settle('fail', 900);
   }
 }
 
