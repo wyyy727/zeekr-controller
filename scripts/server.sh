@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # ZeekrDash 服务管理脚本
-# 用法：./server.sh start|stop|restart|status|logs
+#
+# 用法（在**仓库根目录**执行）：
+#   ./scripts/server.sh start|stop|restart|status|logs
+#
+# 注意脚本在 scripts/ 下，不在仓库根 —— 写成 ./server.sh 会 "No such file"。
+# （本注释原先就漏了 scripts/ 前缀，会误导人。）
+# 脚本内部用 SCRIPT_DIR 定位，因此从任何目录调用都可以，只要路径写对。
 
 set -euo pipefail
 
@@ -33,19 +39,40 @@ port_alive() {
   curl -sf "http://127.0.0.1:$PORT/api/health" > /dev/null 2>&1
 }
 
-is_running() {
-  # `kill -0` 在 Windows 的 Git Bash 下对原生进程不可靠（通常直接返回失败），
-  # 只靠它会把「明明在跑」判成「未运行」，进而重复启动、撞端口。
-  # 故双判据：PID 存活 **或** 健康检查端口有响应。
-  if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
-    return 0
+# 监听该端口的进程 PID（拿不到则输出空）。
+#
+# 为什么不直接用 PID 文件：`nohup "$py" ... &` 记下的 $! 是 **nohup 包装 shell**
+# 的 PID，与真正的 python 进程不是同一个。Git Bash + Windows 原生 python 下，
+# 杀包装 shell 完全不会影响 python —— 表现为 stop 谎报「已停止」，服务照跑，
+# 随后 start 又因端口被占而拒绝启动。所以进程定位一律以端口反查为准。
+listen_pid() {
+  local pid=""
+  if command -v netstat >/dev/null 2>&1; then
+    # Windows / Git Bash：netstat -ano 的最后一列是 PID。
+    # tr -d '\r' 不可省 —— Windows 输出是 CRLF，PID 会带上 \r 让 taskkill 失败。
+    pid="$(netstat -ano 2>/dev/null | tr -d '\r' \
+           | grep -E "[:.]${PORT}[[:space:]].*LISTENING" \
+           | awk '{print $NF}' | head -1 || true)"
+    if [[ -n "$pid" ]]; then echo "$pid"; return 0; fi
   fi
-  port_alive
+  if command -v lsof >/dev/null 2>&1; then
+    pid="$(lsof -ti tcp:"$PORT" -sTCP:LISTEN 2>/dev/null | head -1 || true)"
+    if [[ -n "$pid" ]]; then echo "$pid"; return 0; fi
+  fi
+  return 0
+}
+
+is_running() {
+  # 以「端口有监听」为准；拿不到端口信息时退回健康检查。
+  # 不再依赖 PID 文件存活 —— 见 listen_pid 的说明。
+  [[ -n "$(listen_pid || true)" ]] || port_alive
 }
 
 start() {
   if is_running; then
-    echo "服务已在运行（PID $(cat "$PID_FILE")）"
+    local cur
+    cur="$(listen_pid || true)"
+    echo "服务已在运行（端口 $PORT${cur:+，PID $cur}）"
     return 0
   fi
 
@@ -73,12 +100,21 @@ start() {
   "${launcher[@]}" "$py" -m uvicorn app.main:app \
     --host "$HOST" --port "$PORT" \
     > "$LOG_FILE" 2>&1 < /dev/null &
+  # 这只是 nohup 包装 shell 的 PID，仅供粗查；真正的进程 PID 在下面的就绪
+  # 检测里用 listen_pid 回填 —— 别拿这里的值去 kill（见 listen_pid 的说明）。
   echo $! > "$PID_FILE"
 
   # 等待端口就绪
   for _ in $(seq 1 20); do
     if curl -sf "http://127.0.0.1:$PORT/api/health" > /dev/null 2>&1; then
-      echo "✓ 服务已就绪（PID $(cat "$PID_FILE")）"
+      local real
+      real="$(listen_pid || true)"
+      if [[ -n "$real" ]]; then
+        echo "$real" > "$PID_FILE"
+        echo "✓ 服务已就绪（PID $real）"
+      else
+        echo "✓ 服务已就绪（端口 $PORT）"
+      fi
       return 0
     fi
     sleep 0.5
@@ -90,33 +126,52 @@ start() {
 }
 
 stop() {
-  if ! is_running; then
-    echo "服务未在运行"
+  local pid
+  pid="$(listen_pid || true)"
+
+  if [[ -z "$pid" ]]; then
+    echo "服务未在运行（端口 $PORT 无监听）"
     rm -f "$PID_FILE"
     return 0
   fi
 
-  local pid
-  pid="$(cat "$PID_FILE")"
-  echo "停止服务（PID $pid）"
-  kill "$pid" 2>/dev/null || true
+  echo "停止服务（PID $pid，端口 $PORT）"
 
+  # Windows 下 kill 对原生进程无效，必须用 taskkill。
+  # Git Bash 会把 /PID 误当路径，故写成 //PID 转义。
+  if command -v taskkill >/dev/null 2>&1; then
+    taskkill //PID "$pid" //F > /dev/null 2>&1 || true
+  fi
+  kill "$pid" 2>/dev/null || true          # 非 Windows 走这条
+
+  # 以「端口是否真的没了」为准，而不是「杀过命令了」——
+  # 旧实现只管发 kill，于是出现了「报已停止、服务照跑」的假成功。
   for _ in $(seq 1 20); do
-    kill -0 "$pid" 2>/dev/null || break
+    [[ -z "$(listen_pid || true)" ]] && break
     sleep 0.3
   done
+  if [[ -n "$(listen_pid || true)" ]]; then
+    kill -9 "$pid" 2>/dev/null || true
+    sleep 0.5
+  fi
 
-  kill -9 "$pid" 2>/dev/null || true
+  if [[ -n "$(listen_pid || true)" ]]; then
+    echo "✗ 端口 $PORT 仍被占用，未能停止（占用进程 PID $(listen_pid)）"
+    return 1
+  fi
+
   rm -f "$PID_FILE"
   echo "✓ 已停止"
 }
 
 status() {
   if is_running; then
-    echo "✓ 运行中（PID $(cat "$PID_FILE")）"
+    local cur
+    cur="$(listen_pid || true)"
+    echo "✓ 运行中（端口 $PORT${cur:+，PID $cur}）"
     curl -s "http://127.0.0.1:$PORT/api/health" 2>/dev/null | python3 -m json.tool 2>/dev/null || true
   else
-    echo "✗ 未运行"
+    echo "✗ 未运行（端口 $PORT 无监听）"
     return 1
   fi
 }
