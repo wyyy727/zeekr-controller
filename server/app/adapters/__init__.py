@@ -39,7 +39,7 @@ def get_client() -> ZeekrClient:
             logger.info("按配置要求使用模拟数据源")
         _client = MockZeekrClient()
     else:
-        logger.info("使用真实极氪国区数据源（手机号：%s****）", config.zeekr.phone[:3])
+        logger.info("使用真实极氪国区数据源（密钥已配置，等待客户端登录）")
         _client = LiveZeekrClient(config.zeekr)
 
     return _client

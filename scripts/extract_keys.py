@@ -787,6 +787,11 @@ def extract_secrets(
         print("      Looking for prod secret...")
         prod_candidates = find_prod_secret(dex_files)
         if prod_candidates:
+            # ⚠️ 取候选里的第 1 个，但它**不保证**是网关真正使用的密钥：
+            # 2026-10-16 实测确认，CN 版 GW3 实际使用的密钥**不在这 119 个候选里**
+            # —— 用第 1 个会得到 `079025 Signature authentication failed`，
+            # 而「逐个换候选」同样无效（池子里没有正确答案）。
+            # 详见 docs/zeekr-implementation-diff.md 的 GW3 一节。
             secrets["prod_secret"] = prod_candidates[0]
             secrets["prod_secret_candidates"] = prod_candidates
             if len(prod_candidates) == 1:
@@ -801,10 +806,17 @@ def extract_secrets(
         print("      Looking for VIN encryption key and IV...")
         vin_key, vin_iv = find_vin_keys(dex_files)
         if vin_key and vin_iv:
+            # ⚠️ 与 prod_secret 同理：从 DEX 里搜到的这组常量**不保证**是网关
+            # 真正用来解密 `X-VIN` 的那组。2026-10-16 实测：提取器给的值发到
+            # 网关一律 `079025 Decrypt X-VIN failed`，换成另一组常量后立即
+            # 200 —— 算法（AES-128-CBC + PKCS7 + Base64）没错，错的只是常量。
+            # 判定信号：车辆列表能拿到、车况却恒为 079025 ⇒ 本组值不对。
             secrets["vin_key"] = vin_key
             secrets["vin_iv"] = vin_iv
             print(f"      [OK] VIN Key: {mask(vin_key)}")
             print(f"      [OK] VIN IV:  {mask(vin_iv)}")
+            print("      [!!] 注意：以上不保证是网关实际使用的常量 —— 若车况接口恒报")
+            print("           '079025 Decrypt X-VIN failed'，需另寻正确值")
         else:
             print("      [!!] VIN Key/IV: NOT FOUND in plaintext DEX")
             if uses_iwall_ecies(dex_files):

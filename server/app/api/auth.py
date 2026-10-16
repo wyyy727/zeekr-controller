@@ -32,7 +32,7 @@ class SendCodeRequest(BaseModel):
 
 class VerifyCodeRequest(BaseModel):
     phone: str = Field(..., description="中国大陆手机号")
-    code: str = Field(..., description="短信验证码（6 位）")
+    code: str = Field(..., description="短信验证码（国区为 4 位）")
 
 
 @router.post("/sendCode")
@@ -64,8 +64,10 @@ async def verify_code(payload: VerifyCodeRequest) -> dict:
 
     if not (phone.isdigit() and len(phone) == 11):
         raise HTTPException(status_code=400, detail="请输入有效的 11 位手机号")
-    if not (code.isdigit() and len(code) == 6):
-        raise HTTPException(status_code=400, detail="请输入 6 位数字验证码")
+    # 极氪国区的验证码是 **4 位**（2026-10-16 实测）。此前硬校验 6 位，会把
+    # 合法验证码直接挡在门外。长度交给网关判断，客户端只做基本格式校验。
+    if not (code.isdigit() and 4 <= len(code) <= 8):
+        raise HTTPException(status_code=400, detail="请输入验证码（4-8 位数字）")
 
     client = get_client()
     try:

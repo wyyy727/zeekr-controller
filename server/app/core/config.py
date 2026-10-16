@@ -82,14 +82,14 @@ def _env_int(key: str, default: int) -> int:
 
 @dataclass
 class ZeekrConfig:
-    """极氪国区账号与密钥配置。
+    """极氪国区密钥配置。
 
     密钥来源：wysie/zeekr_key_extractor 从官方安卓 APK 提取（--region CN）。
     本文件不提供、不分发任何密钥，请自行提取后填入环境变量。
     """
 
-    # 极氪 App 注册手机号（中国大陆 +86）
-    phone: str = field(default_factory=lambda: _env("ZEEKR_PHONE"))
+    # 注意：登录手机号**不在这里配置**。它由客户端在登录时输入并随请求传入
+    # （POST /api/auth/sendCode 的 phone 字段），服务端启动阶段并不需要知道它。
 
     # 6 个密钥（从安卓 APK 提取）
     hmac_access_key: str = field(default_factory=lambda: _env("ZEEKR_HMAC_ACCESS_KEY"))
@@ -102,6 +102,16 @@ class ZeekrConfig:
     # 可选：从 App 抓包得到的 X-VIN 令牌（部分车型的 GW3 实时状态/车控需要）
     vehicle_token: str = field(default_factory=lambda: _env("ZEEKR_VEHICLE_TOKEN"))
 
+    # TSP 平台号 —— `/ms-app-bff/api/1.0/permissions` 的必填参数。
+    #
+    # 2026-10-16 用真车令牌枚举实测（网关自己回的错，不需要猜）：
+    #   非数字        → 000002 param check failed（参数校验就挂了）
+    #   1 / 2 / 3     → 037021 平台类型未定义
+    #   4             → 000000 ok，但 data 为空数组
+    #   5 / 7 / 8 / 21…27 → 000000 ok，返回该车 21 项权限（内容一致）
+    # 故取 5。若不适用可在 .env 用 ZEEKR_TSP_PLATFORM 覆盖。
+    tsp_platform: str = field(default_factory=lambda: _env("ZEEKR_TSP_PLATFORM") or "5")
+
     # 会话持久化路径
     session_file: Path = field(
         default_factory=lambda: Path(_env("ZEEKR_SESSION_FILE") or (DATA_DIR / "session.json"))
@@ -109,13 +119,17 @@ class ZeekrConfig:
 
     @property
     def is_configured(self) -> bool:
-        """是否已具备登录所需的最小配置。"""
-        return bool(self.phone and self.hmac_access_key and self.hmac_secret_key)
+        """是否已具备对接真实网关的最小配置。
+
+        只看密钥。手机号由客户端在登录时提供，服务端启动时无从得知，
+        也不该成为「能否走真实网关」的前置条件 —— 否则「换一个账号登录」
+        会变成一件需要改配置文件并重启服务的事。
+        """
+        return bool(self.hmac_access_key and self.hmac_secret_key)
 
     def missing_keys(self) -> list[str]:
         """返回缺失的密钥名，便于前端提示。"""
         required = {
-            "ZEEKR_PHONE": self.phone,
             "ZEEKR_HMAC_ACCESS_KEY": self.hmac_access_key,
             "ZEEKR_HMAC_SECRET_KEY": self.hmac_secret_key,
             "ZEEKR_PASSWORD_PUBLIC_KEY": self.password_public_key,
@@ -154,6 +168,23 @@ class AppConfig:
     poll_interval_charging: int = field(default_factory=lambda: _env_int("POLL_INTERVAL_CHARGING", 60))
 
     database: Path = field(default_factory=lambda: DATA_DIR / "zeekr.db")
+
+    # ── 浩汉充电（第三方网关）─────────────────────────────────
+    #
+    # **极氪 App 的充电地图并不是极氪自己做的** —— 地图页内嵌的是浩汉能源
+    # （`haohanpower.tech`）的 SDK（APK 里的 `com.haohan.*` 包）。极氪侧的
+    # `getListV2` 只给坐标与枪数，**电价在浩汉网关**，两边认证毫无关系。
+    #
+    # `channelId=1` 读自浩汉小程序前端的硬编码（`{"sourceCode":4,"channelId":1}`），
+    # 实测即极氪渠道。**做成配置项而不是常量** —— 这是逆向得到的值，
+    # 对方改动渠道号时应当改 .env 就能恢复，而不是等一次发版。
+    haohan_host: str = field(
+        default_factory=lambda: _env("ZEEKR_HAOHAN_HOST")
+        or "https://gateway-prod.haohanpower.tech"
+    )
+    haohan_channel_id: str = field(
+        default_factory=lambda: _env("ZEEKR_HAOHAN_CHANNEL_ID") or "1"
+    )
 
     zeekr: ZeekrConfig = field(default_factory=ZeekrConfig)
 

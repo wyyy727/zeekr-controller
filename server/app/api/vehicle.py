@@ -121,7 +121,12 @@ async def get_capability(vin: str | None = None) -> dict:
         data = await client.get_capabilities(vin=vin)
     except Exception as exc:  # noqa: BLE001
         logger.warning("获取车辆能力集失败：%s", exc)
-        data = {"capabilities": None, "chargePlan": None, "verified": False}
+        data = {
+            "permissions": None,
+            "capabilities": None,
+            "chargePlan": None,
+            "verified": False,
+        }
 
     return {"success": True, "data": data}
 

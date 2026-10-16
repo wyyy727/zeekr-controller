@@ -65,6 +65,8 @@ import base64
 import hashlib
 import hmac
 import json
+import os
+import random
 import time
 import uuid
 from typing import Any
@@ -106,6 +108,17 @@ GW3_APP_ID = "ZEEKRCNCH001M0001"
 # 签名协议版本
 GW3_SIGNATURE_VERSION = "2.0"
 
+# GW3 的其余客户端标识（取自抓包的官方 App 请求）。
+#
+# ⚠️ GW3 会在**验签之前**先校验一批必需头，缺哪个报哪个（错误码 00A02），
+# 所以头必须发齐 —— 否则永远走不到验签那一步。其中 `accept-language` /
+# `x-project-id` / `x-device-id` / `x-platform` **在签名白名单内**，须参与签名。
+GW3_APPID_HEADER = "ONEX97FB91F061405"      # `AppId` 头，与 X-APP-ID 并存
+GW3_PROJECT_ID = "ZEEKR"
+GW3_ACCEPT_LANGUAGE = "en-US"
+GW3_ACCEPT_ENCODING = "gzip"
+GW3_USER_AGENT = "okhttp/4.12.0"            # 安卓 OkHttp，不是 iPhone UA
+
 # 与官方 App 保持一致的客户端标识。
 #
 # 版本号取自本次审计的官方 APK 样本（com.zeekrlife.mobile v5.0.7 / versionCode 221），
@@ -114,6 +127,32 @@ GW3_SIGNATURE_VERSION = "2.0"
 APP_VERSION = "5.0.7"
 APP_OS_VERSION = "18.5"
 USER_AGENT = f"ZeekrApp/{APP_VERSION} (iPhone; iOS {APP_OS_VERSION})"
+
+
+# MARK: - GW1 客户端身份与认证
+#
+# ⚠️ 关键机制：GW1 **根据客户端身份决定提供哪些服务、进而决定哪些路由存在**。
+# 以错误的身份请求，路由会回 **404 而不是被拒绝** —— 所以 404 不能用来证明
+# 「路由不存在」。官方 App 在 GW1 上是**安卓**客户端：
+#
+#     app_code=toc_android_zeekrapp + app_type=android + platform=ANDROID
+#
+# 本项目此前发 iPhone UA + X-APP-ID，这是 401/404 的根源之一（2026-10-16 实测更正）。
+GW1_APP_CODE = "toc_android_zeekrapp"
+GW1_APP_TYPE = "android"
+GW1_PLATFORM = "ANDROID"
+GW1_USER_AGENT = "okhttp/4.12.0"                      # 安卓 OkHttp，不是 iPhone UA
+GW1_ACCEPT_LANGUAGE = "zh-Hans-CN;q=1, en-CN;q=0.9"
+GW1_DEVICE_MODEL = "Android SDK built for arm64"      # 官方 App 上报的设备型号
+GW1_DEVICE_SDK = "26"
+
+# GW1 的客户端认证密钥（App 内置常量，可用 ZEEKR_CA_SECRET 覆盖）。
+# 注意：这是 **GW1 的 x_ca_secret**，与 GW3 的 X-SIGNATURE 密钥、与从 APK
+# 提取的那 6 个密钥都不是同一套东西。
+GW1_CA_SECRET = os.environ.get("ZEEKR_CA_SECRET") or (
+    "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCz09z6e9WOcNq+nUMX8Vq1Xe2EmJxuR3XbtureDCS90dfkok"
+)
+GW1_CA_KEY = "APP-SIGN-SECRET-KEY"                    # 固定字面量，随请求发送但不参与签名
 
 
 # MARK: - 工具函数
@@ -140,34 +179,71 @@ def build_login_device_id() -> str:
     return f"Apple-iPhone-{APP_OS_VERSION}-iOS"
 
 
-# MARK: - GW1 签名（SHA1 排序签名）
+# MARK: - GW1 客户端认证（x_ca_* 系列）
 
 
-def sign_gw1(params: dict[str, Any], body: str = "") -> dict[str, str]:
-    """GW1 请求签名。
+def _sign_gw1(ts: str, nonce: int) -> str:
+    """GW1 客户端签名。
 
-    GW1 用于短信验证码与手机号登录，签名方式为参数排序后 SHA1。
+    算法：`sha1(" | ".join(sorted([ts, str(nonce), CA_SECRET])))` → hex。
+
+    注意是**把三个字符串排序后再拼接**，不是"拼接后排序"，也不是对请求
+    参数排序 —— 与 GW3 的 X-SIGNATURE 完全是两套机制。
+
+    历史缺陷（2026-10-16 实测更正）：此处原实现是「参数排序后 SHA1」，
+    且把签名塞进自造的 `signature` / `nonce` / `timestamp` 三个头里。
+    官方网关不认这三个头名，导致 GW1 所有请求一律
+    `401 (xzk-gw: micro-auth, x-resp-error-code: 4010001)`。
+    """
+    return hashlib.sha1(
+        "".join(sorted([ts, str(nonce), GW1_CA_SECRET])).encode("utf-8")
+    ).hexdigest()
+
+
+def build_gw1_headers(
+    device_id: str = "",
+    authorization: str = "",
+) -> dict[str, str]:
+    """构造 GW1 请求头（含客户端认证）。
+
+    GW1 承担短信验证码与手机号登录。它**不认** GW3 的 `X-SIGNATURE`，
+    而是靠 `x_ca_*` 一组头 + **安卓客户端身份**通过 `micro-auth` 校验。
+
+    Args:
+        device_id: 设备标识；留空则临时生成一个
+        authorization: 已登录时传 `Bearer <JWT>`，登录前留空
 
     Returns:
-        需要附加到请求头的签名字段
+        可直接用于请求的完整头字典
     """
     ts = str(int(time.time() * 1000))
-    nonce = _nonce()
-
-    # 参与签名的字段按 key 字典序排序
-    items = [f"{k}={v}" for k, v in sorted(params.items()) if v is not None]
-    raw = "&".join(items) + f"&timestamp={ts}&nonce={nonce}"
-
-    signature = hashlib.sha1(raw.encode("utf-8")).hexdigest()
+    nonce = random.randrange(0, 10**8)
 
     return {
-        "timestamp": ts,
-        "nonce": nonce,
-        "signature": signature,
-        "X-APP-ID": GW3_APP_ID,
-        "X-APP-OS-VERSION": APP_OS_VERSION,
-        "User-Agent": USER_AGENT,
-        "Content-Type": "application/json; charset=utf-8",
+        # —— 客户端身份：GW1 靠这三项决定暴露哪些路由 ——
+        "app_code": GW1_APP_CODE,
+        "app_type": GW1_APP_TYPE,
+        "app_version": APP_VERSION,
+        "platform": GW1_PLATFORM,
+        "phone_model": GW1_DEVICE_MODEL,
+        "phone_version": GW1_DEVICE_SDK,
+        "workspaceId": "prod",
+        "x_gray_code": "",
+        # —— 传输用头 ——
+        "User-Agent": GW1_USER_AGENT,
+        "request-original": "zeekr-app",
+        "Accept-Language": GW1_ACCEPT_LANGUAGE,
+        "Accept-Encoding": "gzip",
+        "Content-Type": "application/json; charset=UTF-8",
+        # —— 客户端认证：x_ca_* ——
+        "x_ca_secret": GW1_CA_SECRET,
+        "x_ca_key": GW1_CA_KEY,
+        "x_ca_timestamp": ts,
+        "x_ca_nonce": str(nonce),
+        "x_ca_sign": _sign_gw1(ts, nonce),
+        # —— 会话 ——
+        "device_id": device_id or uuid.uuid4().hex,
+        "Authorization": authorization,
     }
 
 
@@ -284,24 +360,41 @@ def build_gw3_headers(
     body: str | None = None,
     authorization: str | None = None,
     encrypted_vin: str | None = None,
+    device_id: str = "",
 ) -> dict[str, str]:
     """构造 GW3 完整请求头（含签名）。
 
-    仅白名单内的头参与签名（见 `GW3_SIGNED_HEADERS`）；
-    `User-Agent` 等会照常发送但不参与签名。
+    仅白名单内的头参与签名（见 `GW3_SIGNED_HEADERS`）；`AppId` / `X-P` /
+    `X-APP-OS-VERSION` / `User-Agent` 等照常发送但不参与签名。
+
+    ⚠️ **头必须发齐**：GW3 在验签之前先校验必需头，缺一个就回
+    `00A02 header property 'X' is required`，永远走不到验签。
+    2026-10-16 按实测补齐（此前只发了 4 个签名头 + 4 个传输头）。
 
     注意签名与发送的字节必须完全一致，因此请求体须用紧凑 JSON 序列化，
     并以 `content=` 发送原文（用 `json=` 会因序列化差异导致验签失败）。
+
+    Args:
+        device_id: 设备标识。**同一会话内应保持一致**（落到 session 里复用），
+                   每次换新值容易被网关当成「更换设备」。留空则临时生成。
     """
     headers: dict[str, str] = {
+        # —— 参与签名（GW3_SIGNED_HEADERS 白名单内）——
         "X-APP-ID": GW3_APP_ID,
         "X-API-SIGNATURE-VERSION": GW3_SIGNATURE_VERSION,
         "X-TIMESTAMP": str(int(time.time() * 1000)),
         "X-API-SIGNATURE-NONCE": _nonce(),
+        "X-PROJECT-ID": GW3_PROJECT_ID,
+        "X-DEVICE-ID": device_id or uuid.uuid4().hex,
+        "X-PLATFORM": "APP",
+        "Accept-Language": GW3_ACCEPT_LANGUAGE,
         "Content-Type": "application/json; charset=utf-8",
-        # 以下为参与传输但不参与签名的头
+        # —— 仅传输，不参与签名 ——
+        "AppId": GW3_APPID_HEADER,
+        "X-P": "Android",
         "X-APP-OS-VERSION": APP_OS_VERSION,
-        "User-Agent": USER_AGENT,
+        "Accept-Encoding": GW3_ACCEPT_ENCODING,
+        "User-Agent": GW3_USER_AGENT,
     }
 
     if authorization:

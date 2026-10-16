@@ -42,6 +42,25 @@ def _seeded_rng(seed_text: str) -> random.Random:
     return random.Random(int(digest[:16], 16))
 
 
+def _current_period_index(frames: list[str], now: datetime) -> int:
+    """按当前时刻找出所处时段下标。
+
+    存在的意义：让模拟模式下"当前时段"高亮也是**真的对**的 ——
+    否则这个特性在演示环境里永远指向第一段，等于从没验证过。
+    """
+    minutes = now.hour * 60 + now.minute
+    for index, frame in enumerate(frames):
+        start, _, end = frame.partition("-")
+        try:
+            start_h, start_m = (int(part) for part in start.split(":"))
+            end_h, end_m = (int(part) for part in end.split(":"))
+        except ValueError:
+            continue
+        if start_h * 60 + start_m <= minutes <= end_h * 60 + end_m:
+            return index
+    return 0
+
+
 class MockZeekrClient(ZeekrClient):
     """生成仿真数据的客户端。"""
 
@@ -261,16 +280,132 @@ class MockZeekrClient(ZeekrClient):
         """
         return {"status": "done", "message": "车端确认已执行（模拟）"}
 
+    # MARK: 附近充电站
+
+    async def get_nearby_stations(
+        self,
+        lat: float,
+        lng: float,
+        zoom: int = 13,
+    ) -> list[dict[str, Any]]:
+        """附近充电站（模拟），**含站名与电价**。
+
+        与真实侧的唯一差别：真实侧这两样必须另问浩汉网关才有，
+        这里一并给出 —— 离线演示时若整页只有坐标没名字，看不出设计好坏。
+
+        用**传入坐标做随机种子**：同一位置反复请求结果稳定，换个位置结果就变。
+        这一点是有意设计的 —— 若无论怎么定位列表都纹丝不动，说明坐标根本没
+        传下去，而这种故障光看界面是发现不了的。
+
+        站名一律带「演示」字样：模拟数据不该长得像真实场站，
+        否则截图流出后会被当成真的站点信息。
+        """
+        rng = _seeded_rng(f"stations-{lat:.3f}-{lng:.3f}")
+
+        # (站名, 距离km, 可用枪, 总枪, 交流枪, 直流枪, 自营)
+        presets: list[tuple[str, float, int, int, int, int, bool]] = [
+            ("极氪超充·演示站 A", 0.35, 6, 8, 0, 8, True),
+            ("演示站 B · 商场地下层", 0.80, 2, 12, 12, 0, False),
+            ("演示站 C · 高架旁", 1.40, 11, 16, 4, 12, False),
+            ("极氪超充·演示站 D", 2.10, 3, 4, 0, 4, True),
+            ("演示站 E · 写字楼", 2.60, 0, 6, 6, 0, False),
+            ("演示站 F · 客运站", 3.20, 9, 10, 0, 10, False),
+        ]
+        # 分时电价：(电费, 服务费) 序列，长度 1 = 全天一口价，>1 = 尖峰平谷
+        plans: list[list[tuple[float, float]]] = [
+            [(1.10, 0.80)],
+            [(0.37, 0.98), (0.72, 0.98), (1.10, 0.55), (0.83, 0.72)],
+            [(0.95, 0.60)],
+            [(0.42, 1.05), (1.05, 0.60), (0.78, 0.80)],
+            [(1.20, 0.90)],
+            [(0.55, 0.85), (0.95, 0.65)],
+        ]
+        frames: list[list[str]] = [
+            ["00:00-23:59"],
+            ["00:00-06:00", "06:00-11:00", "11:00-22:00", "22:00-23:59"],
+            ["00:00-23:59"],
+            ["00:00-07:00", "07:00-10:00", "10:00-23:59"],
+            ["00:00-23:59"],
+            ["00:00-08:00", "08:00-23:59"],
+        ]
+        # 固定方位角：让坐标与距离大致自洽（距离由服务端 haversine 重算）
+        bearings = [35, 110, 200, 290, 155, 245]
+        now = datetime.now()
+
+        stations: list[dict[str, Any]] = []
+        for index, (name, distance, available, total, ac, dc, self_operate) in enumerate(presets):
+            bearing = math.radians(bearings[index % len(bearings)])
+            # 纬度 1° ≈ 111km；经度还要除以 cos(纬度)
+            lat_offset = (distance / 111.0) * math.cos(bearing)
+            lng_offset = (distance / (111.0 * max(math.cos(math.radians(lat)), 0.2))) * math.sin(bearing)
+
+            station_frames = frames[index % len(frames)]
+            station_plan = plans[index % len(plans)]
+            current = _current_period_index(station_frames, now)
+            periods = [
+                {
+                    "timeFrame": frame,
+                    "electric": plan[0],
+                    "service": plan[1],
+                    "total": round(plan[0] + plan[1], 2),
+                }
+                for frame, plan in zip(station_frames, station_plan)
+            ]
+            active = periods[current]
+            # 可用枪按"直流优先"拆分（只是一个自洽的演示分配，不追求真实调度）
+            able_dc = min(available, dc)
+            able_ac = max(0, available - able_dc)
+
+            stations.append({
+                "stationId": f"mock-station-{index + 1}",
+                "name": name,
+                "address": f"演示路 {index + 1} 号（模拟数据）",
+                "lat": round(lat + lat_offset, 6),
+                "lng": round(lng + lng_offset, 6),
+                "score": round(rng.uniform(3.6, 4.9), 1),
+                "tags": ["演示数据"],
+                "selfOperate": self_operate,
+                "marketingPrice": False,
+                "availableCount": available,
+                "totalCount": total,
+                "acCount": ac,
+                "dcCount": dc,
+                "ableAcCount": able_ac,
+                "ableDcCount": able_dc,
+                "stationStatus": 50,
+                "price": {
+                    "totalPrice": active["total"],
+                    "feeElectric": active["electric"],
+                    "serviceFee": active["service"],
+                    "currentPeriod": active["timeFrame"],
+                    "periods": periods,
+                    "parkingFee": "按停车场标准收费" if not self_operate else "充电期间免费",
+                    "parkFree": self_operate,
+                    "holdFee": index == 3,
+                    "feeDesc": "模拟数据：分时段计费，不同枪功率存在定价差异",
+                },
+            })
+
+        return stations
+
     async def get_capabilities(self, vin: str | None = None) -> dict[str, Any]:
-        """车辆能力集（模拟）。
+        """车辆权限包 + 能力集（模拟）。
 
         刻意让这台"车"缺少座椅通风 / 遮阳帘 / 车载冰箱 / 香氛 / 供氧 /
         哨兵照片 —— 用来演示 UI 如何按能力裁剪控件（这些按钮根本不会出现）。
 
-        `verified=False`：能力集的**键名映射**尚未在真车上确认，
-        前端拿到 false 时不该把它当成权威结论。
+        `permissions` 与 `capabilities` 的关系照抄真实侧：
+        权限包只覆盖「服务类」功能（充电管理 / 车辆守卫 / 行程），
+        硬件能力（胎压 / 空调 / 车窗…）由 `capabilities` 表达 ——
+        真实侧对硬件能力**不下判断**，这里保留完整表只是为了演示裁剪效果。
+
+        `verified=False`：这是模拟数据，不是真车实测结论。
         """
         return {
+            "permissions": [
+                "vehicle-share", "remote-control", "charge-manage",
+                "view-vehicle-location", "owner-vehicle-trail",
+            ],
             "capabilities": {
                 "doorLock": True,
                 "climate": True,
