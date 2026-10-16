@@ -550,6 +550,77 @@ body.is-scrolled .topbar::before {
   .plan-item .v small { font-size: 11px; font-weight: 400; color: var(--text-3); margin-left: 2px; }
   .plan-item.off .v { color: var(--text-3); font-weight: 400; }
 
+/* ─────────── 附近充电站 ───────────
+   一行一站：左侧站名 + 元信息，右侧当前电价。
+   价格刻意用靛青（--dian-qing，本项目"电"的语义色），与消费卡的
+   青碧/朱砂互不干扰。点击一行展开分时电价表。 */
+.st-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-top: 10px;
+}
+.st-list { display: flex; flex-direction: column; gap: 8px; margin-top: 9px; }
+.st {
+  background: var(--glass-inner-2); border-radius: 11px;
+  padding: 11px 12px; cursor: pointer;
+  transition: background .15s;
+}
+.st:active { background: var(--glass-inner); }
+.st-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.st-name {
+  font-size: 13.5px; font-weight: 500; color: var(--text-1); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.st-price {
+  flex: none; font-size: 16px; font-weight: 600; color: var(--dian-qing);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.st-price .u { font-size: 10.5px; font-weight: 400; color: var(--text-3); margin-left: 1px; }
+/* 价格缺失 ≠ 免费 —— 用弱化灰而非 0，避免被读成"这个站不要钱" */
+.st-price.na { color: var(--text-3); font-size: 13px; font-weight: 400; }
+.st-meta {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  font-size: 11px; color: var(--text-3); margin-top: 5px;
+}
+.st-meta .ok { color: var(--qing-bi); }
+.st-meta .gone { color: var(--zhu-sha); }
+.st-tag {
+  font-size: 10px; padding: 2px 6px; border-radius: 5px;
+  background: rgba(30,127,194,.12); color: var(--dian-qing);
+}
+.st-periods {
+  margin-top: 9px; padding-top: 8px;
+  border-top: 1px solid var(--glass-inner-2);
+  display: flex; flex-direction: column; gap: 5px;
+}
+.st-period {
+  display: flex; justify-content: space-between; gap: 10px;
+  font-size: 11.5px; color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+/* 当前时段高亮 —— 这张卡最该被一眼看到的信息 */
+.st-period.now { color: var(--dian-qing); font-weight: 600; }
+.st-note { font-size: 10.5px; color: var(--text-3); margin-top: 7px; line-height: 1.6; }
+.st-actions { display: flex; gap: 8px; margin-top: 9px; }
+.st-btn {
+  flex: 1; border: none; font: inherit; font-size: 12px; cursor: pointer;
+  padding: 8px 0; border-radius: 9px;
+  background: rgba(30,127,194,.12); color: var(--dian-qing);
+}
+.st-btn.ghost { background: var(--glass-inner-2); color: var(--text-2); }
+.st-btn:active { opacity: .72; }
+.st-input {
+  flex: 1; min-width: 0; font: inherit; font-size: 12px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  padding: 8px 10px; border-radius: 9px;
+  border: 1px solid var(--separator);
+  background: var(--surface-alt); color: var(--text-1);
+}
+@media (prefers-color-scheme: dark) {
+  .st-price, .st-period.now { color: var(--accent); }
+  .st-tag { background: rgba(77,163,220,.16); color: var(--accent); }
+  .st-btn { background: rgba(77,163,220,.16); color: var(--accent); }
+}
+
 /* ─────────── 车辆能力集 ─────────── */
 .cap-list { display: flex; flex-wrap: wrap; gap: 6px; }
   .cap {
@@ -562,6 +633,34 @@ body.is-scrolled .topbar::before {
     margin-top: 10px; font-size: 11px; color: var(--text-3);
     padding: 7px 10px; border-radius: 9px; background: rgba(91,100,114,.05);
   }
+
+/* ─────────── 开关（车控总开关）。
+   只是包一层 label，视觉上仍是 iOS 那种系统开关：
+   轨道灰 → 开启时染主色，圆点带轻微投影。 */
+.sw-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.sw-txt { min-width: 0; }
+.sw-txt .t { display: block; font-size: 14px; color: var(--text-1); }
+.sw-txt .d { display: block; font-size: 11px; color: var(--text-3); margin-top: 3px; }
+.sw {
+  flex: none; position: relative; margin: 0;
+  width: 46px; height: 28px; border-radius: 999px;
+  -webkit-appearance: none; appearance: none;
+  background: rgba(91, 100, 114, .22);
+  transition: background .22s ease; cursor: pointer;
+}
+.sw::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 24px; height: 24px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 3px rgba(20, 30, 45, .30);
+  transition: transform .22s cubic-bezier(.22, .61, .36, 1);
+}
+.sw:checked { background: var(--tian-qing); }
+.sw:checked::after { transform: translateX(18px); }
+/* 开启后的风险提示：用缇色（非告警朱砂）—— 是提醒，不是错误 */
+.sw-warn {
+  margin-top: 10px; font-size: 11px; line-height: 1.6;
+  color: var(--ti-se);
+}
   /* 胎温（与胎压同格显示，小字附在主值下方） */
   .tyre .t { font-size: 10px; color: var(--text-3); margin-top: 1px; }
 
@@ -889,6 +988,46 @@ canvas { display: block; width: 100%; }
   margin-left: auto; font-size: 10px; padding: 3px 8px; border-radius: 6px;
   background: var(--glass-inner-2); color: var(--text-3); white-space: nowrap;
 }
+
+/* ─────────── 账号登录 ───────────
+   预览页在「地址指向本机」时默认走内置模拟数据、不发请求（便于没后端时也能看设计）；
+   但登录必须真的落到服务端 —— 会话存在后端，debug 页也要用它。
+   所以登录相关请求走 apiNoMock()，不受那条默认策略影响。 */
+.auth-row { display: flex; gap: 8px; }
+.auth-row + .auth-row { margin-top: 9px; }
+.auth-input {
+  flex: 1; min-width: 0;
+  font: inherit; font-size: 13.5px;
+  padding: 10px 12px; border-radius: 11px;
+  border: 1px solid var(--separator);
+  background: var(--glass-inner);
+  color: var(--text-1);
+  -webkit-appearance: none;
+}
+.auth-input::placeholder { color: var(--text-3); }
+.auth-input:focus {
+  outline: none;
+  border-color: var(--qing-bi);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--qing-bi) 18%, transparent);
+}
+.auth-input.code { flex: 0 0 106px; text-align: center; letter-spacing: 2px; }
+.auth-btn {
+  font: inherit; font-size: 13px; font-weight: 500;
+  padding: 10px 15px; border-radius: 11px; border: 0;
+  background: var(--qing-bi); color: #fff;
+  cursor: pointer; white-space: nowrap;
+}
+.auth-btn:disabled { opacity: .45; cursor: default; }
+.auth-btn.ghost { background: var(--glass-inner-2); color: var(--text-2); }
+.auth-note {
+  font-size: 11.5px; color: var(--text-3);
+  margin-top: 10px; line-height: 1.7;
+}
+.auth-note.warn { color: var(--zhu-sha); }
+.auth-who { display: flex; align-items: center; gap: 9px; }
+.auth-who .ico { font-size: 19px; color: var(--qing-bi); }
+.auth-who .t { font-size: 13.5px; font-weight: 500; }
+.auth-who .d { font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
 
 /* ─────────── 页脚 ─────────── */
 .foot {
@@ -1261,6 +1400,15 @@ let PREFERS_MOCK = false;
    要观察的行为，用本地模拟会把它掩盖掉。 */
 let DEMO = false;
 
+/* 车控总开关的持久化。localStorage 在隐私模式 / 沙箱下可能直接抛异常，
+   失败时静默回落为「关」—— 这是安全方向上的默认值。 */
+function readAllowCommands() {
+  try { return localStorage.getItem('zk.allowCommands') === '1'; } catch { return false; }
+}
+function writeAllowCommands(on) {
+  try { localStorage.setItem('zk.allowCommands', on ? '1' : '0'); } catch { /* 忽略 */ }
+}
+
 const state = {
   tab: 'dash',
   status: null,
@@ -1270,13 +1418,46 @@ const state = {
   records: [],
   days: 30,
   health: null,
-  /* 车辆能力集（/ms-vehicle-capability-set/api/app/v1/vehicle/capability/available）。
-     原则：**先问车支持什么，再决定 UI 显示什么**。
+  /* 登录状态（GET /api/auth/status）。
+     独立于数据来源：即使预览页数据走内置模拟，登录也真的落到服务端 ——
+     会话存在后端，debug 页和后续 live 请求都要用它。 */
+  auth: null,
+  /* 车辆权限包（/ms-app-bff/api/1.0/permissions）。
+     原则：**先问车开通了什么，再决定 UI 显示什么**。
      未拿到时为 null —— 此时按"保守显示"处理（不隐藏功能，但数据缺失处标注未知），
      避免网络问题导致整页功能凭空消失。 */
   capabilities: null,
+  /* 权限包的原始 ID 列表（如 charge-manage / vehicle-defence）。
+     与 capabilities 的分工：capabilities 是"界面该不该显示某个按钮"的结论，
+     permissions 是**原始凭据**，供设置页如实展示"这台车开通了什么" ——
+     没有它，"某个按钮为什么不见了"就没法解释。 */
+  permissions: null,
   /* 预约充电 / 出行计划（/ms-charge-manage/api/v1.0/charge/getChargingPlanNew） */
   chargePlan: null,
+  /* 车控指令总开关（**客户端**，默认关，存 localStorage）。
+     与 iOS `SettingsStore.commandsEnabled` 同语义：关闭时车控面板只可查看、
+     点击不下发。刻意与 `health.allowCommands`（**服务端**是否允许下发）分开 ——
+     两者都为开时指令才真正生效。把客户端开关当成服务端开关，会让
+     「开关开着却发不出去」变成没法解释的谜。 */
+  allowCommands: readAllowCommands(),
+  /* ── 附近充电站（GET /api/stations/nearby）──
+     数据由**服务端**合并两跳而来：极氪给坐标与枪数，第三方网关给站名与电价。
+     前端只吃结构化结果 —— 既不接触签名，也不接触渠道号，更不会把
+     用户坐标发给第三方（服务端只把 stationId 转出去）。 */
+  stations: null,
+  /* `priceAvailable=false` 表示**价格服务整体不可用**，不是"这些站都免费"。
+     两者在界面上必须能区分 —— 把缺价格显示成 0 元是安全事故级误导。 */
+  stationsPriceOk: true,
+  stationsTotal: 0,
+  stationsLoading: false,
+  /* 定位状态机：idle → locating → ok / denied / unsupported / error */
+  locStatus: 'idle',
+  locError: '',
+  /* 当前位置。**只存在内存里**：不写 localStorage、不进日志 ——
+     它是最敏感的一类个人数据，而本页唯一的用途就是"查一次附近的站"。 */
+  loc: null,
+  stationOpen: '',            // 当前展开的 stationId
+  stationSort: 'distance',    // distance | price
   /* 数据来源：mock（模拟）/ live（真实）/ offline（配置了真实地址但连不上） */
   mode: PREFERS_MOCK ? 'mock' : 'live',
 };
@@ -1312,6 +1493,11 @@ const MOCK = {
     doors: { frontLeft: false, frontRight: false, rearLeft: false, rearRight: false },
     windows: { driver: false, passenger: false, rearLeft: false, rearRight: false },
   },
+  /* 权限包样例（对应 /ms-app-bff/api/1.0/permissions 的 data）。 */
+  permissions: [
+    'vehicle-share', 'remote-control', 'charge-manage',
+    'view-vehicle-location', 'owner-vehicle-trail',
+  ],
   /* 能力集样例：模拟"这台车没有车载冰箱 / 香氛 / 供氧"的车型差异，
      以及"未开放哨兵照片"的情况 —— 用来演示 UI 如何按能力裁剪。 */
   capabilities: {
@@ -1345,6 +1531,62 @@ const MOCK = {
     targetSoc: 90,
     mode: '谷电优先',
   },
+  /* 附近充电站样例。
+     结构**与 /api/stations/nearby 的返回逐字段一致** —— 预览页在没有后端时
+     也要能呈现完整设计，否则这套 UI 只有连着车的人看得见。
+     站名一律带「演示」字样：模拟数据不该长得像真实场站，
+     否则截图流出去会被当成真的站点信息。 */
+  stations: [
+    {
+      stationId: 'mock-station-1', name: '极氪超充·演示站 A', address: '演示路 1 号',
+      distanceKm: 0.35, availableCount: 6, totalCount: 8,
+      ableDcCount: 6, dcCount: 8, ableAcCount: 0, acCount: 0,
+      selfOperate: true, score: 4.6, tags: ['演示数据'],
+      price: {
+        totalPrice: 1.90, feeElectric: 1.10, serviceFee: 0.80, currentPeriod: '00:00-23:59',
+        periods: [{ timeFrame: '00:00-23:59', electric: 1.10, service: 0.80, total: 1.90 }],
+        parkingFee: '充电期间免费', parkFree: true, holdFee: false,
+        feeDesc: '演示数据：全天一口价',
+      },
+    },
+    {
+      stationId: 'mock-station-2', name: '演示站 B · 商场地下层', address: '演示路 2 号',
+      distanceKm: 0.80, availableCount: 2, totalCount: 12,
+      ableDcCount: 0, dcCount: 0, ableAcCount: 2, acCount: 12,
+      selfOperate: false, score: 4.1, tags: ['演示数据'],
+      price: {
+        totalPrice: 1.65, feeElectric: 1.10, serviceFee: 0.55, currentPeriod: '11:00-22:00',
+        periods: [
+          { timeFrame: '00:00-06:00', electric: 0.37, service: 0.98, total: 1.35 },
+          { timeFrame: '06:00-11:00', electric: 0.72, service: 0.98, total: 1.70 },
+          { timeFrame: '11:00-22:00', electric: 1.10, service: 0.55, total: 1.65 },
+          { timeFrame: '22:00-23:59', electric: 0.83, service: 0.72, total: 1.55 },
+        ],
+        parkingFee: '按停车场标准收费', parkFree: false, holdFee: false,
+        feeDesc: '演示数据：尖峰平谷分时计价，谷段最划算',
+      },
+    },
+    {
+      stationId: 'mock-station-3', name: '演示站 C · 高架旁', address: '演示路 3 号',
+      distanceKm: 1.40, availableCount: 0, totalCount: 16,
+      ableDcCount: 0, dcCount: 12, ableAcCount: 0, acCount: 4,
+      selfOperate: false, score: 3.8, tags: ['演示数据'],
+      price: {
+        totalPrice: 1.55, feeElectric: 0.95, serviceFee: 0.60, currentPeriod: '00:00-23:59',
+        periods: [{ timeFrame: '00:00-23:59', electric: 0.95, service: 0.60, total: 1.55 }],
+        parkingFee: '按停车场标准收费', parkFree: false, holdFee: true,
+        feeDesc: '演示数据：满位状态，超时占位另收费',
+      },
+    },
+    {
+      /* 价格缺失的一例：用来验证"取不到价格"与"免费"在界面上确实长得不一样 */
+      stationId: 'mock-station-4', name: '演示站 D · 客运站', address: '演示路 4 号',
+      distanceKm: 3.20, availableCount: 9, totalCount: 10,
+      ableDcCount: 9, dcCount: 10, ableAcCount: 0, acCount: 0,
+      selfOperate: false, score: 4.9, tags: ['演示数据'],
+      price: null,
+    },
+  ],
   trips: [
     { startTime: '2026-09-17 08:15', startPlace: '家 · 锦绣江南', endPlace: '公司 · 张江高科', distanceKm: 12.4, energyKwh: 2.10, consumption: 16.9, durationMinutes: 28,
       /* 轨迹点来自 /ms-vehicle-trail/api/v1.0/journalLog/trackpoint/list，
@@ -1442,8 +1684,10 @@ function fmt(v, d = 0, fallback = '--') {
   return Number(v).toFixed(d);
 }
 function fmtDist(km) {
-  if (km === null || km === undefined) return '--';
-  return km >= 10000 ? (km / 10000).toFixed(1) + ' 万 km' : Math.round(km) + ' km';
+  // 里程一律显示原始公里数 —— 不做「万」换算：15545 被压成「1.6 万」后
+  // 既有精度损失，也无法比对官方 App 里的读数。
+  if (km === null || km === undefined || Number.isNaN(km)) return '--';
+  return Math.round(Number(km)).toLocaleString('en-US') + ' km';
 }
 function fmtDuration(min) {
   if (!min || min <= 0) return '--';
@@ -1523,7 +1767,11 @@ function dbgRecord(entry) {
 
 async function api(path, opts) {
   // 模拟数据模式：不发起任何网络请求（调试台默认为 false）
-  if (PREFERS_MOCK) throw new Error('mock 模式：不访问网络');
+  // 未登录前不调任何数据接口。live 模式下服务端要求登录态，调了只会失败，
+  // 还会把服务端日志刷满无意义的报错 —— 登录相关的几个接口走 apiNoMock()，
+  // 不受这里限制（否则连"查登录状态"都发不出去）。
+  if (!isLoggedIn()) throw new Error('未登录：请先在「设置」里登录极氪账号');
+  if (state.mode === 'mock') throw new Error('mock 模式：不访问网络');
 
   if (DEMO && path === '/api/vehicle/command') {
     const cmd = JSON.parse((opts && opts.body) || '{}').command;
@@ -1805,6 +2053,11 @@ function renderDashboard() {
 
   const charging = s.isCharging === true;
 
+  /* 车控总开关（设置页那个，默认关）。关闭时**保留按钮但置为 disabled** ——
+     与 iOS ControlsPanel 一致：整格消失会让人以为功能丢了，
+     置灰 + 一行说明才说得清"要先去设置里开"。 */
+  const cmdsOn = state.allowCommands;
+
   const chargingCard = charging ? `
     <div class="card card-charging">
       <div class="charge-head">${SVG.bolt} 充电中</div>
@@ -1887,10 +2140,13 @@ function renderDashboard() {
       o.wide ? 'wide' : '',
     ].filter(Boolean).join(' ');
     const sub = o.sub ? `<span class="ctrl-sub">${o.sub}</span>` : '';
+    // 两种禁用来源：① 该指令当前不适用（如未插枪不能开充）；② 车控总开关关闭。
+    // 用同一个 `disabled` 属性 —— 视觉（.ctrl[disabled] 半透明）与行为一致，
+    // 不必再造一套"半禁用"状态。
     return `
     <button class="${cls}" data-cmd="${o.cmd}" data-label="${o.label}"
             aria-pressed="${o.kind === 'toggle' ? String(!!o.on) : 'false'}"
-            ${o.disabled ? 'disabled' : ''}>
+            ${(o.disabled || !cmdsOn) ? 'disabled' : ''}>
       <span class="ico">${o.icon}</span>
       <span class="ctrl-txt">${o.label}${sub}</span>
       <span class="ctrl-spin" aria-hidden="true"></span>
@@ -1986,7 +2242,9 @@ function renderDashboard() {
     <div class="card">
       <div class="card-title">
         <span>快捷车控</span>
-        <span class="ctrl-hint">${locked ? '车辆已上锁' : '车辆未上锁'}</span>
+        <span class="ctrl-hint">${cmdsOn
+          ? (locked ? '车辆已上锁' : '车辆未上锁')
+          : '已禁用'}</span>
       </div>
 
       <div class="ctrl-grid">
@@ -2043,6 +2301,11 @@ function renderDashboard() {
         ${ctrlBtn({ cmd: 'carFinder', label: '寻车', sub: '定位车辆', icon: SVG.pin, kind: 'scene' })}
         ${ctrlBtn({ cmd: 'refresh', label: '立即刷新', sub: '同步车况', icon: SVG.refresh, kind: 'scene' })}
       </div>
+
+      ${cmdsOn ? '' : `
+      <div class="cap-hint">在「设置」中开启控制指令开关后可用</div>`}
+      ${(cmdsOn && state.health && state.health.allowCommands === false) ? `
+      <div class="cap-hint">服务端也没有开启车控（<code>.env</code> 里 <code>ALLOW_COMMANDS=true</code>），即便本开关打开，指令仍会被拒绝</div>` : ''}
     </div>
 
     <div class="foot">
@@ -2191,9 +2454,14 @@ function tripItem(t) {
 function renderCharges() {
   const sum = state.summary;
   const records = state.records;
+  /* 附近充电站与消费账单是**两块独立的数据**（前者实时、后者是导入的历史），
+     所以它必须在空态判断**之外**渲染 —— 没导入过账单，不代表看不到
+     "附近哪能充、现在多少钱"，而那恰恰是充电页最有用的信息。 */
+  const nearby = nearbyStationsCard();
 
   if (!sum || !sum.totalCount) {
     return `
+      ${nearby}
       <div class="empty">
         <div class="ico">${SVG.bolt}</div>
         <div>还没有充电消费记录</div>
@@ -2226,6 +2494,8 @@ function renderCharges() {
         </div>
       </div>
     </div>
+
+    ${nearby}
 
     ${chargePlanCard()}
 
@@ -2276,6 +2546,267 @@ function chargeItem(r) {
         ${r.channel ? `<span class="tag">${r.channel === 'alipay' ? '支付宝' : r.channel === 'wechat' ? '微信' : r.channel}</span>` : ''}
       </div>
     </div>`;
+}
+
+/* ═══════════════════════════════════════════════
+   附近充电站
+   ───────────────────────────────────────────────
+   数据由**服务端**合并两跳后下发：极氪给坐标与枪数，第三方网关给站名与电价。
+   前端只吃结构化结果 —— 既不接触签名，也接触不到渠道号，更不会把
+   用户坐标发给第三方（服务端只把 stationId 转出去）。
+
+   位置来源是**手机定位**，刻意不用车辆位置：车况接口虽然也带经纬度，
+   但人车分离时"车停哪儿"对"我现在要去哪充"毫无帮助，而它又属于隐私数据。
+   ═══════════════════════════════════════════════ */
+
+/* 排序：距离升序；价格缺失的站点永远排最后。
+   把"没有价格"当 0 排到首位，是这里最典型也最危险的排序错误。 */
+function sortStations(list) {
+  const copy = list.slice();
+  if (state.stationSort === 'price') {
+    copy.sort((a, b) => {
+      const pa = a.price && a.price.totalPrice != null ? a.price.totalPrice : Infinity;
+      const pb = b.price && b.price.totalPrice != null ? b.price.totalPrice : Infinity;
+      return (pa - pb) || ((a.distanceKm || 0) - (b.distanceKm || 0));
+    });
+  } else {
+    copy.sort((a, b) => (a.distanceKm || 0) - (b.distanceKm || 0));
+  }
+  return copy;
+}
+
+function stationRow(s) {
+  const p = s.price || null;
+  const open = state.stationOpen === s.stationId;
+  const total = s.totalCount || 0;
+  const avail = s.availableCount || 0;
+
+  /* 枪数按快慢充分开显示。上游没给总枪数时**不显示 0/x** ——
+     "0 个可用"和"不知道几个可用"是两回事，前者会让人白白放弃一个站。 */
+  const guns = [];
+  if (s.dcCount) guns.push(`快充 ${s.ableDcCount == null ? '--' : s.ableDcCount}/${s.dcCount}`);
+  if (s.acCount) guns.push(`慢充 ${s.ableAcCount == null ? '--' : s.ableAcCount}/${s.acCount}`);
+  if (!guns.length && total) guns.push(`可用 ${avail}/${total}`);
+  const gunClass = (total && avail === 0) ? 'gone' : 'ok';
+
+  const hasPrice = p && p.totalPrice != null;
+  const priceHtml = hasPrice
+    ? `${fmt(p.totalPrice, 2)}<span class="u">/度</span>`
+    : '<span class="u">价格 --</span>';
+
+  const tags = (s.tags || []).slice(0, 2)
+    .map((t) => `<span class="st-tag">${esc(t)}</span>`).join('');
+
+  return `<div class="st" data-sid="${esc(s.stationId)}">
+    <div class="st-head">
+      <div class="st-name">${esc(s.name || '未命名站点')}</div>
+      <div class="st-price${hasPrice ? '' : ' na'}">${priceHtml}</div>
+    </div>
+    <div class="st-meta">
+      <span>${s.distanceKm == null ? '--' : fmt(s.distanceKm, 2) + ' km'}</span>
+      ${guns.length ? `<span class="${gunClass}">${guns.join(' · ')}</span>` : ''}
+      ${s.score ? `<span>评分 ${s.score}</span>` : ''}
+      ${s.selfOperate ? '<span class="st-tag">自营</span>' : ''}
+      ${tags}
+    </div>
+    ${open ? stationDetail(s) : ''}
+  </div>`;
+}
+
+/* 展开区：分时电价表 + 停车 / 占位费 + 导航。
+   当前时段**必须指认出来** —— 用户看这张卡就是为了知道"现在充多少钱"，
+   把 7 段电价平铺而不标出当前段，等于让他自己算。 */
+function stationDetail(s) {
+  const p = s.price;
+  if (!p) {
+    return `<div class="st-periods">
+      <div class="st-period"><span>该站点暂时取不到价格</span><span>--</span></div>
+    </div>`;
+  }
+
+  const periods = (p.periods || []).map((f) => {
+    const now = !!f.timeFrame && f.timeFrame === p.currentPeriod;
+    return `<div class="st-period${now ? ' now' : ''}">
+      <span>${esc(f.timeFrame || '--')}${now ? ' · 当前' : ''}</span>
+      <span>${f.total == null ? '--' : fmt(f.total, 2)} 元/度</span>
+    </div>`;
+  }).join('');
+
+  const notes = [];
+  if (p.feeDesc) notes.push(esc(p.feeDesc));
+  if (p.parkingFee) notes.push(`停车：${esc(p.parkingFee)}${p.parkFree ? '（免费）' : ''}`);
+  if (p.holdFee) notes.push('超时占用另收占位费');
+
+  return `
+    <div class="st-periods">${periods
+      || '<div class="st-period"><span>分时电价未提供</span><span>--</span></div>'}</div>
+    ${notes.length ? `<div class="st-note">${notes.join('<br>')}</div>` : ''}
+    <div class="st-actions">
+      <button class="st-btn" data-nav="${esc(s.stationId)}">导航到这里</button>
+    </div>`;
+}
+
+function nearbyStationsCard() {
+  // 未登录时服务端会拒绝 /api/stations —— 放出卡片只会诱导用户点一个
+  // 必然失败的按钮，那比不显示更糟。
+  if (state.mode === 'needLogin') return '';
+
+  const title = (right) => `
+    <div class="card-title">
+      <span>附近充电站</span>
+      <span class="cap-badge">${right}</span>
+    </div>`;
+
+  // ① 定位失败 / 环境不支持：**给出具体原因**，否则用户只会以为页面坏了
+  if (!state.loc && ['denied', 'error', 'unsupported'].includes(state.locStatus)) {
+    return `<div class="card">
+      ${title('需定位')}
+      <div class="st-note">${esc(state.locError || '无法获取位置')}</div>
+      <div class="st-actions">
+        <button class="st-btn" onclick="locate(true)">重试定位</button>
+      </div>
+      <div class="st-actions">
+        <input class="st-input" id="manualLoc" placeholder="或手动输入：纬度, 经度">
+        <button class="st-btn ghost" style="flex:0 0 62px" onclick="useManualLoc()">使用</button>
+      </div>
+    </div>`;
+  }
+
+  // ② 尚未定位 / 定位中
+  if (!state.loc) {
+    const busy = state.locStatus === 'locating';
+    return `<div class="card">
+      ${title(busy ? '定位中' : '待定位')}
+      <div class="st-note">${busy
+        ? '正在获取当前位置…'
+        : '查找充电站需要手机定位。位置只用于本次查询 —— 不落盘，也不会发给第三方。'}</div>
+      ${busy ? '' : `<div class="st-actions">
+        <button class="st-btn" onclick="locate(true)">获取附近充电站</button>
+      </div>`}
+    </div>`;
+  }
+
+  // ③ 已定位但没拿到站点
+  const list = state.stations || [];
+  if (!list.length) {
+    return `<div class="card">
+      ${title(state.stationsLoading ? '加载中' : '无数据')}
+      <div class="st-note">${state.stationsLoading
+        ? '正在查找附近充电站…'
+        : (state.locError ? esc(state.locError) : '附近没有查到充电站。')}</div>
+      <div class="st-actions">
+        <button class="st-btn ghost" onclick="locate(true)">重新定位</button>
+      </div>
+    </div>`;
+  }
+
+  const sorted = sortStations(list);
+  return `<div class="card">
+    ${title(`${state.stationsTotal} 站`)}
+    ${state.stationsPriceOk ? '' : `<div class="st-note">价格服务暂时不可用，以下仅显示距离与枪数。</div>`}
+    <div class="st-bar">
+      <span class="cap-badge">点卡片看分时电价</span>
+      <div class="seg">
+        <button class="${state.stationSort === 'distance' ? 'on' : ''}" data-sort="distance">距离</button>
+        <button class="${state.stationSort === 'price' ? 'on' : ''}" data-sort="price">价格</button>
+      </div>
+    </div>
+    <div class="st-list">${sorted.map(stationRow).join('')}</div>
+    <div class="st-note">位置仅用于本次查询，不落盘、不发给第三方。</div>
+  </div>`;
+}
+
+/* 一键导航：交给系统/地图 App，不在本页画地图 ——
+   画地图要引入瓦片、手势与坐标系纠偏，成本远高于收益。 */
+function openStationNav(stationId) {
+  const s = (state.stations || []).find((x) => x.stationId === stationId);
+  if (!s || s.lat == null || s.lng == null) { toast('该站点缺少坐标，无法导航'); return; }
+  const name = encodeURIComponent(s.name || '充电站');
+  window.open(`https://uri.amap.com/marker?position=${s.lng},${s.lat}&name=${name}`, '_blank');
+}
+
+/* ── 定位 ──
+   唯一的位置来源是手机定位。坐标只在内存里活到本次查询结束：
+   不写 localStorage、不进日志、不随请求发给第三方网关。 */
+function locate(force) {
+  if (state.mode === 'mock' || state.mode === 'offline') {
+    // 预览兜底数据已经带了位置，无需（也做不到）真去定位
+    state.locStatus = 'ok';
+    render();
+    return;
+  }
+  // 未登录时连 /api/stations 都调不了，此时弹权限框纯属骚扰
+  if (state.mode === 'needLogin') return;
+  if (!navigator.geolocation) {
+    state.locStatus = 'unsupported';
+    state.locError = '当前环境不支持定位：浏览器只在 HTTPS 或 localhost 下提供定位能力。';
+    render();
+    return;
+  }
+  if (state.locStatus === 'locating' && !force) return;
+
+  state.locStatus = 'locating';
+  state.locError = '';
+  render();
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      state.loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      state.locStatus = 'ok';
+      loadStations().then(render);
+    },
+    (err) => {
+      // 1 = 用户拒绝；2 = 位置不可用；3 = 超时
+      state.locStatus = err.code === 1 ? 'denied' : 'error';
+      state.locError = err.code === 1
+        ? '定位权限被拒绝。可在浏览器地址栏左侧重新允许，或手动输入坐标。'
+        : `定位失败（${err.message || '超时或位置不可用'}）。可重试，或手动输入坐标。`;
+      render();
+    },
+    { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 },
+  );
+}
+
+/* 手动兜底：坐标只留在前端内存，与定位结果走同一条加载路径。
+   存在意义：局域网 HTTP 访问时浏览器**不提供**定位能力，
+   没有这条退路，那种环境下的充电页永远是空的。 */
+function useManualLoc() {
+  const el = document.getElementById('manualLoc');
+  const parts = ((el && el.value) || '').split(/[\s,，]+/).filter(Boolean).map(Number);
+  if (parts.length !== 2 || !parts.every(Number.isFinite)) {
+    toast('请输入「纬度, 经度」，例如 31.2304, 121.4737');
+    return;
+  }
+  const [lat, lng] = parts;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) { toast('坐标超出有效范围'); return; }
+  state.loc = { lat, lng };
+  state.locStatus = 'ok';
+  state.locError = '';
+  loadStations().then(render);
+}
+
+async function loadStations() {
+  if (!state.loc) return false;
+  state.stationsLoading = true;
+  render();
+  try {
+    const data = await api(
+      `/api/stations/nearby?lat=${state.loc.lat}&lng=${state.loc.lng}&limit=20`);
+    state.stations = data.stations || [];
+    state.stationsTotal = data.total == null ? state.stations.length : data.total;
+    // 显式判 `!== false`：后端不返回该字段时按"有价格"处理，避免误报不可用
+    state.stationsPriceOk = data.priceAvailable !== false;
+    state.locError = '';
+    return true;
+  } catch (e) {
+    console.warn('附近充电站加载失败', e);
+    state.stations = [];
+    state.stationsPriceOk = false;
+    state.locError = e.message;
+    return false;
+  } finally {
+    state.stationsLoading = false;
+  }
 }
 
 /* 预约充电卡。
@@ -2330,10 +2861,9 @@ function soonCard() {
 /* ═══════════════════════════════════════════════
    视图：设置
    ═══════════════════════════════════════════════ */
-/* 车辆能力集卡。
-   把 /ms-vehicle-capability-set/api/app/v1/vehicle/capability/available 的结果
-   摊开展示 —— 目的是让"为什么某些按钮不见了"变得**可解释**，
-   否则用户会以为功能丢了。 */
+/* 车辆权限卡。
+   把 /ms-app-bff/api/1.0/permissions 的结果摊开展示 —— 目的是让
+   "为什么某些按钮不见了"变得**可解释**，否则用户会以为功能丢了。 */
 const CAP_LABELS = {
   doorLock: '车门 / 锁', climate: '空调', window: '车窗', trunk: '后备箱',
   frunk: '前备箱', tyrePressure: '胎压', tyreTemp: '胎温',
@@ -2344,32 +2874,222 @@ const CAP_LABELS = {
   tripTrack: '行程轨迹', geofence: '电子围栏',
 };
 
+/* 权限包 ID → 中文名。
+   **只翻译有把握的**：表里没有的一律原样显示 ID。
+   编一个像模像样的中文名比显示原始 ID 更糟 —— 那是在编造事实。 */
+const PERM_LABELS = {
+  'vehicle-share': '车辆分享',
+  'vehicle-defence': '车辆守卫',
+  'digital-key': '数字钥匙',
+  'owner-digital-key': '车主数字钥匙',
+  'view-vehicle-location': '查看车辆位置',
+  'view-vehicle-album': '查看车辆相册',
+  'remote-control': '远程车控',
+  'traffic-card-owner': '车主流量卡',
+  'digital-key1.0': '数字钥匙 1.0',
+  'digital-key2.0': '数字钥匙 2.0',
+  'digital-key3.0': '数字钥匙 3.0',
+  'charge-manage': '充电管理',
+  'ETC-LU-function': 'ETC',
+  'VIVO-watch': 'vivo 手表',
+  'journey-h5-owner': '行程（H5）',
+  'owner-vehicle-trail': '行程轨迹',
+  'owner-ai-cloud': 'AI 云',
+  'owner-ota-server': 'OTA 升级',
+  'ZK_face_recognition': '人脸识别',
+  'Rear_seat_ventilation': '后排座椅通风',
+};
+
 function capabilityCard() {
   const c = state.capabilities;
-  if (!c) {
+  const perms = state.permissions;
+  if (!c && !perms) {
     return `
     <div class="card">
-      <div class="card-title">车辆能力</div>
+      <div class="card-title">车辆权限</div>
       <div class="cap-hint">
-        尚未取到能力集，界面按「全部显示」处理。<br>
-        接口：/ms-vehicle-capability-set/api/app/v1/vehicle/capability/available
+        尚未取到权限包，界面按「全部显示」处理。<br>
+        接口：/ms-app-bff/api/1.0/permissions
       </div>
     </div>`;
   }
-  const keys = Object.keys(CAP_LABELS).filter((k) => k in c);
-  const on = keys.filter((k) => c[k] !== false);
-  const off = keys.filter((k) => c[k] === false);
+  /* off = 后端明确判定"没有此项"的功能（只有服务类会出现在这里；
+     胎压/空调/车窗这类硬件能力后端不下判断，因此永远不会被隐藏）。 */
+  const off = (c ? Object.keys(CAP_LABELS).filter((k) => k in c && c[k] === false) : []);
   return `
     <div class="card">
       <div class="card-title">
-        <span>车辆能力</span>
-        <span class="cap-badge">支持 ${on.length} / ${keys.length}</span>
+        <span>车辆权限</span>
+        ${perms ? `<span class="cap-badge">${perms.length} 项</span>` : ''}
       </div>
+      ${perms && perms.length ? `
       <div class="cap-list">
-        ${on.map((k) => `<span class="cap">${CAP_LABELS[k]}</span>`).join('')}
+        ${perms.map((p) => `<span class="cap" title="${p}">${PERM_LABELS[p] || p}</span>`).join('')}
+      </div>` : ''}
+      ${off.length ? `
+      <div class="cap-list">
         ${off.map((k) => `<span class="cap no">${CAP_LABELS[k]}</span>`).join('')}
+      </div>` : ''}
+      <div class="cap-hint">
+        来源：ms-app-bff/api/1.0/permissions${off.length
+          ? ' · 灰项为本账号未开通、已从界面隐藏的功能'
+          : ' · 界面已按此裁剪'}
       </div>
-      <div class="cap-hint">界面已按此裁剪 —— 不支持的能力不会出现在车控面板里。</div>
+    </div>`;
+}
+
+/* ─────────── 账号登录 ───────────
+   为什么另起一套请求函数：预览页在「地址指向本机」时会走内置模拟数据、
+   完全不发请求（这样没有后端也能看设计）。但登录不能这样 —— 会话存在
+   服务端，必须真的请求，否则 debug 页拿不到登录态。
+   所以 apiNoMock() 跳过那层判断，只用于登录相关接口。 */
+async function apiNoMock(path, opts) {
+  const res = await fetch(API_SOURCE + path, withAuth(Object.assign({
+    headers: { 'Content-Type': 'application/json' },
+  }, opts || {})));
+
+  let json = null;
+  try { json = await res.json(); } catch (_) { /* 可能没有响应体 */ }
+
+  if (!res.ok) {
+    const detail = (json && (json.detail || json.error)) || ('HTTP ' + res.status);
+    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+  }
+  if (json && json.success === false) throw new Error(json.error || '服务端返回失败');
+  return json && typeof json === 'object' && 'data' in json ? json.data : json;
+}
+
+async function loadAuth() {
+  try {
+    state.auth = Object.assign({}, await apiNoMock('/api/auth/status'), { error: null });
+  } catch (err) {
+    state.auth = { error: err.message, authenticated: false };
+  }
+  render();
+}
+
+let authBusy = false;
+
+async function authSendCode() {
+  const el = document.getElementById('authPhone');
+  const phone = ((el && el.value) || '').trim();
+  if (!/^\d{11}$/.test(phone)) { toast('请输入 11 位手机号'); return; }
+  if (authBusy) return;
+  authBusy = true;
+
+  const btn = document.getElementById('authSendBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '发送中'; }
+  try {
+    const r = await apiNoMock('/api/auth/sendCode', {
+      method: 'POST', body: JSON.stringify({ phone }),
+    });
+    toast((r && r.message) || '验证码已发送，请查看短信');
+    const code = document.getElementById('authCode');
+    if (code) code.focus();
+  } catch (err) {
+    toast('发送失败：' + err.message);
+  } finally {
+    authBusy = false;
+    const b = document.getElementById('authSendBtn');
+    if (b) { b.disabled = false; b.textContent = '发送验证码'; }
+  }
+}
+
+async function authLogin() {
+  const phoneEl = document.getElementById('authPhone');
+  const codeEl = document.getElementById('authCode');
+  const phone = ((phoneEl && phoneEl.value) || '').trim();
+  const code = ((codeEl && codeEl.value) || '').trim();
+  if (!/^\d{11}$/.test(phone)) { toast('请输入 11 位手机号'); return; }
+  if (!/^\d{4,6}$/.test(code)) { toast('请输入短信验证码'); return; }
+  if (authBusy) return;
+  authBusy = true;
+
+  const btn = document.getElementById('authLoginBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '登录中'; }
+  try {
+    await apiNoMock('/api/auth/verifyCode', {
+      method: 'POST', body: JSON.stringify({ phone, code }),
+    });
+    toast('登录成功');
+    await loadAuth();
+    await loadAll();          // 登录之后才开始加载数据
+  } catch (err) {
+    toast('登录失败：' + err.message);
+  } finally {
+    authBusy = false;
+    const b = document.getElementById('authLoginBtn');
+    if (b) { b.disabled = false; b.textContent = '登录'; }
+  }
+}
+
+async function authLogout() {
+  if (authBusy) return;
+  authBusy = true;
+  try {
+    await apiNoMock('/api/auth/logout', { method: 'POST' });
+    toast('已退出登录');
+    // 退出后清掉已加载的数据 —— 否则页面上还留着上一位用户的车辆信息
+    state.status = null; state.trips = []; state.trend = [];
+    state.summary = null; state.records = []; state.health = null;
+    state.capabilities = null; state.permissions = null; state.chargePlan = null;
+    /* 充电站与**坐标**一并清掉：坐标属于个人位置数据，不该跨会话留存，
+       而且它只对"这一次查询"有意义。 */
+    state.stations = null; state.stationsTotal = 0; state.stationsPriceOk = true;
+    state.loc = null; state.locStatus = 'idle'; state.locError = ''; state.stationOpen = '';
+    await loadAuth();
+    state.mode = 'needLogin';
+    render();
+  } catch (err) {
+    toast('退出失败：' + err.message);
+  } finally {
+    authBusy = false;
+  }
+}
+
+/* 登录卡片：查询中 / 连不上后端 / 已登录 / 未登录 四种形态 */
+function authCard() {
+  const a = state.auth;
+
+  if (a === null) {
+    return `<div class="auth-note">正在查询登录状态…</div>`;
+  }
+  if (a.error) {
+    return `
+      <div class="auth-note warn">无法连接后端：${esc(a.error)}</div>
+      <div class="auth-note">
+        预览页在「地址指向本机」时默认不请求后端（便于没有服务时也能看设计）。
+        要登录请在 debug 页操作，或用带 <code>?api=</code> 参数的地址打开本页。
+      </div>`;
+  }
+  if (a.authenticated) {
+    return `
+      <div class="auth-who">
+        <span class="ico">${SVG.phone}</span>
+        <div>
+          <div class="t">已登录</div>
+          <div class="d">${a.mock ? '模拟数据模式' : '真实数据模式'} · 会话保存在服务端</div>
+        </div>
+        <button class="auth-btn ghost" style="margin-left:auto"
+                onclick="authLogout()">退出登录</button>
+      </div>
+      <div class="auth-note">${esc(a.note || '')}</div>`;
+  }
+  return `
+    <div class="auth-row">
+      <input class="auth-input" id="authPhone" type="tel" inputmode="numeric"
+             placeholder="极氪账号手机号（建议用子账号）" autocomplete="tel">
+    </div>
+    <div class="auth-row">
+      <input class="auth-input code" id="authCode" type="text" inputmode="numeric"
+             placeholder="验证码" autocomplete="one-time-code">
+      <button class="auth-btn" id="authSendBtn" onclick="authSendCode()">发送验证码</button>
+    </div>
+    <div class="auth-row">
+      <button class="auth-btn" id="authLoginBtn" style="flex:1" onclick="authLogin()">登录</button>
+    </div>
+    <div class="auth-note warn">
+      登录会踢掉该账号在手机 App 上的会话 —— 建议用子账号并共享车辆。
     </div>`;
 }
 
@@ -2420,13 +3140,28 @@ function renderSettings() {
       </div>
       ${h ? `
       <div class="mini-row" style="padding:5px 0">
-        <span class="mini-label">极氪账号</span>
-        <span class="mini-val" style="font-size:12px">${h.configured ? '已配置' : '未配置'}</span>
-      </div>
-      <div class="mini-row" style="padding:5px 0">
-        <span class="mini-label">车控指令</span>
+        <span class="mini-label">服务端车控</span>
         <span class="mini-val" style="font-size:12px">${h.allowCommands ? '已开启' : '已禁用'}</span>
       </div>` : ''}
+    </div>
+
+    <div class="card">
+      <div class="card-title">车辆控制</div>
+      <label class="sw-row">
+        <span class="sw-txt">
+          <span class="t">允许下发控制指令</span>
+          <span class="d">关闭时仅可查看，不能操作车辆</span>
+        </span>
+        <input type="checkbox" class="sw" id="allowCmdsSw"${state.allowCommands ? ' checked' : ''}>
+      </label>
+      ${state.allowCommands ? `
+      <div class="sw-warn">⚠ 远程控制存在风险，请确认车辆处于安全场景${
+        h && h.allowCommands === false
+          ? '<br>服务端开关也未打开：在 <code>.env</code> 里设 <code>ALLOW_COMMANDS=true</code> 后重启服务'
+          : ''}</div>` : ''}
+      <div class="cap-hint">
+        总开关（默认关）与上面的「服务端车控」是两把锁，都要打开才能下发指令。
+      </div>
     </div>
 
     ${state.mode !== 'live' ? `
@@ -2455,14 +3190,7 @@ function renderSettings() {
 
     <div class="card">
       <div class="card-title">账号与凭据</div>
-      <div class="soon" style="background:var(--surface-alt)">
-        <span class="ico">${SVG.phone}</span>
-        <div>
-          <div class="t">极氪账号登录</div>
-          <div class="d">手机号 + 短信验证码</div>
-        </div>
-        <span class="soon-badge">原生版提供</span>
-      </div>
+      ${authCard()}
       <div class="soon" style="background:var(--surface-alt);margin-top:10px">
         <span class="ico">${SVG.file}</span>
         <div>
@@ -2488,6 +3216,14 @@ function renderSettings() {
    ═══════════════════════════════════════════════ */
 function render() {
   const view = $('#view');
+
+  // 未登录：除「设置」（登录表单在那里）外一律显示登录引导，
+  // 不渲染任何依赖数据的内容
+  if (state.mode === 'needLogin' && state.tab !== 'settings') {
+    view.innerHTML = renderLoginWall();
+    return;
+  }
+
   const html = {
     dash: renderDashboard,
     trips: renderTrips,
@@ -2619,7 +3355,16 @@ function seedMock() {
   state.records = MOCK.records;
   state.health = MOCK.health;
   state.capabilities = MOCK.capabilities;
+  state.permissions = MOCK.permissions;
   state.chargePlan = MOCK.chargePlan;
+  state.stations = MOCK.stations;
+  state.stationsTotal = MOCK.stations.length;
+  state.stationsPriceOk = true;
+  /* 预览兜底数据的位置：与 MOCK.stations 里各站的距离基准一致（上海市中心）。
+     直接给值而不是走定位 —— 预览页的本职是"看设计"，
+     不该一打开就弹权限框。 */
+  state.loc = { lat: 31.2304, lng: 121.4737 };
+  state.locStatus = 'ok';
   const d = new Date();
   state.lastRefresh = String(d.getHours()).padStart(2, '0') + ':' +
                      String(d.getMinutes()).padStart(2, '0');
@@ -2634,6 +3379,9 @@ async function loadCapabilities() {
     const data = await api('/api/vehicle/capability');
     if (data && data.capabilities) {
       state.capabilities = data.capabilities;
+    }
+    if (data && Array.isArray(data.permissions)) {
+      state.permissions = data.permissions;
     }
     if (data && data.chargePlan) {
       state.chargePlan = data.chargePlan;
@@ -2656,6 +3404,69 @@ function notifyFallback(reason) {
 /* 并发保护：启动与 visibilitychange 可能同时触发，避免重复请求与状态抖动 */
 let loading = false;
 
+/* 是否已建立登录会话 —— 所有数据接口的前置条件。 */
+function isLoggedIn() {
+  return !!(state.auth && state.auth.authenticated === true);
+}
+
+/* 启动流程：**先确认登录态，再决定要不要加载数据**。
+   未登录时一个数据接口都不调 —— live 模式下服务端要求登录，
+   调了只会失败，还把日志刷满无意义的报错。
+   唯一允许的请求是 /api/auth/status：不查它就无法判断
+   该显示登录表单还是数据。 */
+async function bootstrap() {
+  await loadAuth();
+  const a = state.auth || {};
+
+  if (a.authenticated) {
+    state.mode = 'live';
+    await loadAll();
+    return;
+  }
+
+  if (a.error) {
+    // 连不上后端：这正是预览页的本职场景 —— 用内置数据把设计呈现出来
+    seedMock();
+    state.mode = 'mock';
+    render();
+    return;
+  }
+
+  // 后端在，但还没登录：停在登录引导，不碰任何数据接口
+  state.status = null; state.trips = []; state.trend = [];
+  state.summary = null; state.records = []; state.health = null;
+  /* 未登录时不定位、也不保留上一会话的站点与坐标 */
+  state.stations = null; state.loc = null; state.locStatus = 'idle';
+  state.mode = 'needLogin';
+  render();
+}
+
+/* 切标签页（底部导航与「去登录」按钮共用） */
+function goTab(name) {
+  const btn = document.querySelector(`.tab[data-tab="${name}"]`);
+  state.tab = name;
+  document.querySelectorAll('.tab').forEach((b) =>
+    b.classList.toggle('on', b === btn));
+  /* 首次进充电页时自动请求一次定位 —— **只自动做一次**：
+     被拒绝后反复弹权限框是骚扰，之后交给用户点「重试定位」。 */
+  if (name === 'charges' && state.locStatus === 'idle') locate();
+  render();
+}
+
+/* 未登录时的占位 —— 明确说明"没有请求接口"，免得看起来像页面坏了 */
+function renderLoginWall() {
+  return `
+    <div class="card" style="text-align:center;padding:36px 20px">
+      <div style="font-size:32px;opacity:.3;margin-bottom:12px">${SVG.phone}</div>
+      <div style="font-size:14px;font-weight:500;margin-bottom:7px">需要先登录极氪账号</div>
+      <div style="font-size:12px;color:var(--text-3);line-height:1.75;margin-bottom:18px">
+        服务端已连上（真实数据模式）。<br>
+        登录前不会请求任何车况 / 行程 / 充电接口。
+      </div>
+      <button class="auth-btn" onclick="goTab('settings')">去登录</button>
+    </div>`;
+}
+
 async function loadAll() {
   if (loading) return;
   loading = true;
@@ -2664,9 +3475,9 @@ async function loadAll() {
 
   try {
     // ① 地址未配置或指向 localhost：按约定直接展示内置模拟数据，不请求后端
-    if (PREFERS_MOCK) {
-      seedMock();
-      state.mode = 'mock';
+    // 未登录 / 无后端：不请求数据接口（登录态由 bootstrap 统一处理）
+    if (!isLoggedIn()) {
+      if (state.mode !== 'needLogin') { seedMock(); state.mode = 'mock'; }
       return;
     }
 
@@ -2674,7 +3485,7 @@ async function loadAll() {
     //    以「车辆状态 + 健康检查」是否都拿到作为后端可用的判据，
     //    任一失败即视为不可达，回落模拟数据
     const [statusOk, healthOk] = await Promise.all([loadStatus(), loadHealth()]);
-    await Promise.all([loadTrips(), loadCharges(), loadCapabilities()]);
+    await Promise.all([loadTrips(), loadCharges(), loadCapabilities(), loadAuth()]);
 
     if (statusOk && healthOk) {
       state.mode = 'live';
@@ -2698,13 +3509,43 @@ async function loadAll() {
 document.querySelector('.tabbar').addEventListener('click', (e) => {
   const btn = e.target.closest('.tab');
   if (!btn) return;
-  state.tab = btn.dataset.tab;
-  document.querySelectorAll('.tab').forEach((b) =>
-    b.classList.toggle('on', b === btn));
+  goTab(btn.dataset.tab);
+});
+
+/* 车控总开关：切换后立即持久化并重渲染 —— 车控页那 15 个按钮的可用态
+   跟着变（关 → 全部置灰 + 「已禁用」）。这是**界面意图**开关；
+   真正的闸门在服务端（ALLOW_COMMANDS），两把锁都要开。 */
+document.addEventListener('change', (e) => {
+  const sw = e.target.closest('#allowCmdsSw');
+  if (!sw) return;
+  state.allowCommands = sw.checked;
+  writeAllowCommands(sw.checked);
   render();
 });
 
 document.addEventListener('click', (e) => {
+  // 附近充电站：导航按钮在卡片行**内部**，必须先于整行展开判断，
+  // 否则点「导航」会连带把详情也收起来。
+  const navBtn = e.target.closest('[data-nav]');
+  if (navBtn) {
+    openStationNav(navBtn.dataset.nav);
+    return;
+  }
+  // 站点排序（限定 data-sort，与下面的时间区间切换互不干扰）
+  const sortBtn = e.target.closest('.seg button[data-sort]');
+  if (sortBtn) {
+    state.stationSort = sortBtn.dataset.sort;
+    render();
+    return;
+  }
+  // 站点卡片：展开 / 收起分时电价表
+  const stCard = e.target.closest('.st');
+  if (stCard) {
+    const sid = stCard.dataset.sid;
+    state.stationOpen = state.stationOpen === sid ? '' : sid;
+    render();
+    return;
+  }
   // 车控
   const ctrl = e.target.closest('.ctrl');
   if (ctrl && !ctrl.disabled) {
@@ -2712,8 +3553,8 @@ document.addEventListener('click', (e) => {
     sendCommand(ctrl);
     return;
   }
-  // 时间区间切换
-  const seg = e.target.closest('.seg button');
+  // 时间区间切换（限定 data-days：`.seg` 被附近充电站的排序复用了）
+  const seg = e.target.closest('.seg button[data-days]');
   if (seg) {
     state.days = parseInt(seg.dataset.days, 10);
     loadTrips().then(render);
@@ -2772,6 +3613,10 @@ async function sendCommand(btn) {
   const cmd = btn.dataset.cmd;
   const label = btn.dataset.label || '指令';
   const isToggle = btn.classList.contains('ctrl--toggle');
+
+  // 双保险：开关关闭时按钮已是 disabled（且 pointer-events:none），点击根本到不了这里；
+  // 但程序化调用仍必须被拦住 —— 安全开关不能只靠一个入口。
+  if (!state.allowCommands) { toast('控制指令已关闭：请在「设置」中开启'); return; }
 
   if (btn.classList.contains('busy') || btn.classList.contains('pending')) return;
   btn.classList.add('busy');
@@ -2902,7 +3747,8 @@ async function dbgConnect() {
   syncModeBadge();
   renderDebugPanel();
   renderDebugLog();
-  await loadAll();
+  // 未登录时不加载数据 —— 登录态由 bootstrap 统一把关
+  if (isLoggedIn()) await loadAll();
 }
 
 /* 单独调用某个接口 —— 结果直接写进请求日志 */
@@ -3053,6 +3899,7 @@ function initDebugUI() {
    启动
    ═══════════════════════════════════════════════ */
 initDebugUI();
+bootstrap();     // 先确认登录态，再决定要不要加载数据
 
 /* 滚动响应：下滑超过一屏的 6% 时，顶栏玻璃变实
    —— 对应 iOS 26 从 scrollEdge 到 inline 的过渡行为 */
@@ -3085,7 +3932,8 @@ setTimeout(schedulePoll, 5000);
 
 // 页面回到前台时刷新
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) loadAll();
+  // 未登录时不刷新 —— 没有可刷的数据，只会白打接口
+  if (!document.hidden && isLoggedIn()) loadAll();
 });
 </script>
 </body>
