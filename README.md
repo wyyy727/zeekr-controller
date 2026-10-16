@@ -83,45 +83,53 @@ iOS 端拿不到这些，所以把签名与加密逻辑放在 Python 侧，iOS A
 
 ### 第二步：启动服务
 
+先装依赖、配密钥：
+
 ```bash
 cd server
 pip install -r requirements.txt
 
 # 配置密钥
 cd .. && cp .env.example .env
-# 编辑 .env，填入手机号和 6 个密钥
-
-# 启动
-./scripts/server.sh start
+# 编辑 .env，填入 6 个密钥（手机号不用填，登录时在界面上输入）
 ```
 
-`scripts/server.sh` 支持 `start` / `stop` / `restart` / `status` / `logs`（无参数时打印用法）。
+然后启动。**两套脚本功能与命令完全对应**，按平台选一个：
 
-> **Windows 用户注意：脚本必须在 Git Bash 里执行。**
+| 平台 | 启动命令 |
+|---|---|
+| **Windows** | `scripts\server.cmd start` |
+| Linux / macOS / Git Bash | `./scripts/server.sh start` |
+
+两者都支持 `start` / `stop` / `restart` / `status` / `logs`，不带参数时打印用法与当前状态。
+
+`logs` 是**实时跟随**（类似 `tail -f`）：先回放末尾 25 行，之后有新的请求日志会立刻追加显示，
+按 `Ctrl+C` 退出。前端一发请求就能看到对应记录，不用反复重跑。
+
+> **Windows 用户**：直接**双击 `scripts\server.cmd`** 也行 —— 会显示状态与用法。
+> 它不依赖 Git Bash。服务跑在一个**最小化窗口**里，这是刻意的：
+> 只有让进程脱离调用它的那个窗口，关掉窗口时才不会把服务一起带走。
 >
-> 它是 bash 脚本，不是 Windows 可执行文件。在项目目录右键选「Git Bash Here」，
-> 或从开始菜单打开 Git Bash 后 `cd` 过来，然后敲上面的命令。
->
-> **不要双击 `server.sh`，也不要在 PowerShell / CMD 里执行它。** 那样 Windows 会用
+> **不要双击 `server.sh`，也不要在 CMD 里执行它。** 它是 bash 脚本，Windows 会用
 > `.sh` 的文件关联开一个**一次性**窗口：脚本跑完窗口立刻关闭，看起来像「闪退」，
-> 而且看不到任何输出 —— 成功了看不出来，失败了你也不知道为什么。
+> 输出也全丢了 —— 成功了看不出来，失败也不知道为什么。
 >
-> 另外注意脚本在 `scripts/` 下，**不在仓库根**：写成 `./server.sh` 会直接
-> `No such file or directory`。
+> 两个脚本都在 `scripts/` 下、**不在仓库根**：写成 `./server.sh`（在根目录）
+> 会直接 `No such file or directory`。
 
 服务起来后：
 
 - <http://localhost:8765/docs> —— FastAPI 自动生成的接口文档
-- <http://localhost:8765/preview> —— **设计预览页**（见下文「预览页」一节）
+- <http://localhost:8765/preview/index.html> —— **设计预览页**（见下文「预览页」一节）
+- <http://localhost:8765/preview/debug.html> —— **接口调试页**
 
 `.env` 的位置不敏感：`server/.env` 与**仓库根目录** `.env` 都会被加载（先命中的优先），
-所以按 README 的 `cd .. && cp .env.example .env`（落在根目录）也能生效。
+所以按上面的 `cd .. && cp .env.example .env`（落在根目录）也能生效。
 
 #### `.env` 的完整键位
 
 | 键 | 必填 | 说明 |
 |---|---|---|
-| `ZEEKR_PHONE` | ✅ | 极氪 App 注册手机号（+86） |
 | `ZEEKR_HMAC_ACCESS_KEY` | ✅ | 从 APK 提取的 6 个密钥之一 |
 | `ZEEKR_HMAC_SECRET_KEY` | ✅ | 同上 |
 | `ZEEKR_PASSWORD_PUBLIC_KEY` | ✅ | 同上（RSA 公钥，加密登录密码） |
@@ -137,6 +145,13 @@ cd .. && cp .env.example .env
 | `POLL_INTERVAL_IDLE` / `POLL_INTERVAL_CHARGING` | ⬜ | 默认 300 / 60 秒 |
 
 `DATA_SOURCE=auto` 时的行为：密钥配置齐全走真实网关，否则**回落到 mock 并在日志里告警**。
+
+> **登录手机号不需要写进 `.env`。** 它在客户端登录时输入
+> （预览页 → 设置 → 账号与凭据），服务端既不保存也不依赖它 ——
+> 换账号登录只需在界面上填另一个手机号，不必改配置、不必重启服务。
+>
+> 因此「密钥齐全」就等于「走真实网关」。想回到模拟数据（纯调 UI）时，
+> 显式设 `DATA_SOURCE=mock` 即可。
 
 ### 第三步：编译 iOS App
 
@@ -318,7 +333,7 @@ http://<服务地址>/preview
 
 1. 检查 `.env` 里的 `ALLOW_COMMANDS=true`（默认关闭）
 2. 确认 App 设置里的「允许下发控制指令」是开启的（**这是客户端的独立开关，两边都要开**）
-3. **重要**：HA/服务里配置的手机号，必须和手机上能正常控车的账号**是同一个**
+3. **重要**：登录时填的手机号，必须和手机上能正常控车的账号**是同一个**
 4. 若指令属于上表「未验证」的 10 条，live 模式下服务端会拒绝，这是**预期行为**
 
 ### 实时状态拿不到 / 077001 接口未被授权

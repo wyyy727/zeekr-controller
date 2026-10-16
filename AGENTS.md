@@ -10,7 +10,19 @@
 
 ---
 
-## ⚠️ 两条铁律
+## ⚠️ 三条铁律
+
+### 铁律零：真车数据 = 隐私，只留本地，禁止入库 / 禁止上网
+
+**VIN、车牌、GPS 坐标、里程、令牌等极氪接口返回的任何数据，都是用户隐私。**
+
+| 规则 | 说明 |
+|---|---|
+| 存放位置 | **只允许在本机**（`server/data/`、仓库外的临时脚本目录）。`server/data/` 已在 `.gitignore` 中 |
+| 禁止 | 写进任何**会被 git 跟踪**的文件（测试夹具、文档、示例、日志样本）；贴到对话/网页/任何联网处 |
+| 测试要用真车结构时 | **只复刻字段名与值类型，取值一律换成同形状的假值**（见 `tests/test_adapter_shape.py` 顶部注释） |
+| 临时探针脚本 | 写在**仓库外**（如 `D:\workspace\nanamikiki\_probe*.py`），**用完即删**，不要把响应 dump 到仓库内 |
+| 验证手法 | 令牌落盘后直接驱动 `LiveZeekrClient` 打真实网关即可，不需要 dump 报文到文件 |
 
 ### 铁律一：接口与字段，一律以官方 APK 为唯一权威
 
@@ -87,16 +99,33 @@ python scripts/apk_intel.py <新版.apk> --compare docs/zeekr-apk-intel.json
 | 用途 | 路径 / 命令 |
 |---|---|
 | **服务端 venv** | `server/.venv/Scripts/python.exe`（已装运行依赖 + pytest） |
-| 起后端 | `./scripts/server.sh start` / `logs` / `status` / `stop` |
+| 起后端（Windows） | `scripts\server.cmd start` / `logs` / `status` / `stop` —— 双击也行，不依赖 Git Bash |
+| 起后端（bash） | `./scripts/server.sh start` / `logs` / `status` / `stop` |
 | 跑测试 | `cd server && .venv/Scripts/python.exe -m pytest tests -q` |
 | APK 分析（有 capstone） | `C:\Users\Administrator\.workbuddy\binaries\python\envs\zeekr\Scripts\python.exe` |
 | 可用 JDK（21） | `D:\develop\jdk21\jdk-21.0.9`（**全局 `JAVA_HOME` 指向 Java 11，不够用，别改全局**） |
 
 **已知环境坑**：
 
+- **`server.cmd` 必须保持纯 ASCII，注释也一样。** `cmd.exe` 按控制台 ANSI 代码页
+  （中文 Windows 是 GBK）解析脚本字节，不是 UTF-8 —— 里面写中文会被误解码，
+  进而**破坏命令解析**（实测整个脚本乱套：`set` 被截成 `et`、注释行被当命令执行）。
+  想让提示显示中文，只能把文件本身存成 GBK。改这个文件时务必注意这一点。
+- **`server.cmd` 必须是 CRLF 换行**：`cmd.exe` 在 LF 换行下解析 `call` / `goto` 会出错，
+  表现很隐蔽 —— 子过程收不到参数，报「找不到操作数」，而不是报语法错误。
+  写文件的工具默认产出 LF，改完要转回 CRLF；`.gitattributes` 已声明 `*.cmd text eol=crlf`。
+- **`server.sh` 与 `server.cmd` 是同一功能的两平台实现，改一处要同步另一处** ——
+  尤其端口反查与停止逻辑。
+- **不要用 `find /c /v "" < file` 取行数、也不要用 `more +N` 显示增量**：
+  前者输出是 `---- 文件名: 123`（数字不在第一个 token，`set /a` 会拿到 `----`），
+  后者需要交互式控制台，stdout 一旦被重定向就报「管道不存在」。
+  日志跟随已交给 `scripts/logs_tail.py`（顺带把 UTF-8 日志转成控制台编码，中文才不乱码）。
 - `git clone` GitHub 会因证书吊销检查失败 → 用 `git -c http.schannelCheckRevoke=false clone ...`，或走镜像。
 - 下载大文件优先用 `gh-proxy.com`；`ghproxy.net` 会**静默截断**（HTTP 200 但文件不完整）。
-- 服务端默认**模拟数据模式**（`.env` 里 `ZEEKR_PHONE` 为空时）→ 前端调试不依赖真实网关。
+- 服务端在**密钥未配置**时自动回落**模拟数据模式** → 前端调试不依赖真实网关。
+- **登录手机号不要写进 `.env`**：它在客户端登录时输入（设置页 → 账号与凭据），
+  服务端既不保存也不依赖它。`is_configured` 只判断密钥是否齐全，
+  「换账号登录」是纯客户端行为，不需要改配置或重启服务。
 
 ---
 
@@ -109,7 +138,9 @@ python scripts/apk_intel.py <新版.apk> --compare docs/zeekr-apk-intel.json
 | `server/app/adapters/mock_client.py` | 模拟数据（字段形状必须与 live 保持一致 —— 有测试守着） |
 | `server/tests/test_adapter_shape.py` | 防漂移：两个适配器输出形状必须一致 |
 | `preview/index.html` | **单文件设计预览页**（功能改动的唯一落点） |
-| `preview/debug.html` | 预览页的调试副本，可连本机/远程后端看接口响应 |
+| `preview/debug.html` | 预览页的调试副本，可连本机/远程后端看接口响应（**与 index.html 必须同步改**） |
+| `scripts/server.cmd` / `server.sh` | 服务管理（Windows / bash 两版，功能对应，须同步改） |
+| `scripts/logs_tail.py` | 实时跟随服务日志（`server.cmd logs` 调用），并做 UTF-8 → 控制台编码转换 |
 | `docs/zeekr-apk-reference.md` | 官方接口情报（**先查这里**） |
 | `docs/真机验证清单.md` | 真车逐条核对清单 |
 
@@ -121,8 +152,10 @@ python scripts/apk_intel.py <新版.apk> --compare docs/zeekr-apk-intel.json
    要确认真执行，必须查 `queryProcessResult`，或以**车实际动作**为准。
 2. **后端不能去掉。** iOS 无法常驻后台轮询（BGTaskScheduler 不可靠、低电量模式直接禁用），
    而"打开就看见最新车况"依赖服务端轮询。密钥也不该落到客户端。
-3. **`preview/index.html` 与 `preview/debug.html` 是两份文件**，
-   后者是前者的副本 + 调试层，**改前者不会自动同步后者**。
+3. **`preview/index.html` 与 `preview/debug.html` 必须同步改** —— 后者是前者的副本 + 调试层。
+   两件事都要做到：① 应用功能与样式一律以 `index.html` 为准，**不要只在调试页里加**；
+   ② 改了 `index.html` 就**必须把同样的改动应用到 `debug.html`**，否则两边漂移，
+   调试页就失去了"参照 index.html 验证接口"的价值。
 
 ---
 

@@ -1,0 +1,17 @@
+# 换行符 —— 显式声明，不依赖各人的 core.autocrlf
+#
+# 两边的换行符都不能错：
+#   · Windows 批处理（.cmd/.bat）必须 CRLF —— cmd.exe 在 LF 换行下解析
+#     `call` / `goto` 会出错。实测表现很隐蔽：子过程收不到参数，
+#     报「找不到操作数」，而不是报语法错误。
+#   · shell / Python 脚本必须 LF —— CRLF 会让 bash 报 bad interpreter、
+#     让 shebang 失效。
+#
+# 注意：这些规则只在 checkout 时生效。已经躺在工作区里的文件不会自动改正，
+# 必要时删掉重新 checkout，或用编辑器手动改回来。
+
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+*.sh  text eol=lf
+*.py  text eol=lf

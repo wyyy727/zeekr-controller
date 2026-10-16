@@ -6,7 +6,7 @@ zeekr_secrets.json
 **/session.json
 
 # ─────────── docs/ 下的逆向取证产物（本机保留，不入库）───────────
-# 这些内容是从官方 App 反编译 / 反汇编得到的结论（接口路径、字段名、能力标志），
+# 这些内容是逆向 / 实测得到的结论（网关路径、报文字段名、签名算法、能力标志），
 # 只在本机留作开发参考，不随仓库分发 —— 规避二次分发的法律风险。
 #
 # 注意：docs/真机验证清单.md 是自研内容，**要入库**，所以不在此列。
@@ -14,6 +14,10 @@ zeekr_secrets.json
 docs/zeekr-apk-reference.md
 docs/zeekr-apk-intel.json
 docs/zeekr_secrets.json
+# 与参考实现的差异汇总（逐条列出网关路径、报文字段名与密钥判定过程）。
+# 代码里对它的引用（如 scripts/extract_keys.py 的注释）只是本地提示，
+# 不影响仓库可用性 —— 与 AGENTS.md 引用 zeekr-apk-reference.md 同理。
+docs/zeekr-implementation-diff.md
 
 # ─────────── 数据 ───────────
 data/
@@ -73,3 +77,11 @@ Thumbs.db
 # ─────────── 预览页副本（唯一来源是 preview/index.html）───────────
 # 历史上曾出现过同步副本，易与主文件不一致，不再保留
 zeekr-dashboard-设计预览.html
+
+# ─────────── 意外产物 ───────────
+# `nul` 是 Windows 保留设备名。在 Git Bash 里写 `>nul`（本意是丢弃输出）
+# 会真的创建出一个名为 nul 的文件，而它之后很难删掉 ——
+# 系统把它当设备解释，rm / del / git clean 都会失败。
+# 万一再出现，在 CMD 里手动删（需要 \\?\ 前缀绕过设备名）：
+#     del "\\?\<仓库根>\nul"
+nul

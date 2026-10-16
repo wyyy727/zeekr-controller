@@ -97,9 +97,11 @@ start() {
   echo "启动 ZeekrDash 服务 → http://$HOST:$PORT"
   echo "  解释器：$py"
   cd "$SERVER_DIR"
-  # PYTHONIOENCODING=utf-8 不能省：Windows 下 Python 默认按 locale（GBK）写
-  # stdout，日志里的中文会变成乱码 —— 用 UTF-8 的编辑器打开就是一片「锟斤拷」。
-  env PYTHONIOENCODING=utf-8 "${launcher[@]}" "$py" -m uvicorn app.main:app \
+  # 刻意**不设** PYTHONIOENCODING —— 让 Python 用它自己的默认值
+  # （Windows 下即 locale 编码，中文系统是 GBK）。这与 CMD 窗口一致，
+  # 日志用 `type`、编辑器或 logs_tail.py 看都正常。
+  # 此前强行设成 utf-8 是错的：为了迁就编辑器，反而让日志在 CMD 里变成乱码。
+  "${launcher[@]}" "$py" -m uvicorn app.main:app \
     --host "$HOST" --port "$PORT" \
     > "$LOG_FILE" 2>&1 < /dev/null &
   # 这只是 nohup 包装 shell 的 PID，仅供粗查；真正的进程 PID 在下面的就绪
