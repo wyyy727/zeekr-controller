@@ -55,6 +55,14 @@ final class ChargesViewModel {
             return
         }
 
+        // 后端可达但尚未登录：不请求充电账单接口（同上，登录态由 AppStore 判定）
+        guard !AppStore.shared.needsLogin else {
+            summary = nil
+            records = []
+            errorMessage = "请先在「设置」中登录极氪账号"
+            return
+        }
+
         do {
             // 并发拉取汇总与明细
             async let summaryTask: ChargeSummary = APIClient.shared.get(

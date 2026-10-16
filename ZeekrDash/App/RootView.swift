@@ -20,7 +20,8 @@ struct RootView: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(AppStore.self) private var store
 
-    @State private var selectedTab: AppTab = .dashboard
+    /// 当前 Tab 由 AppStore 持有 —— 车况页的登录引导要能把用户送到「设置」页
+    private var selectedTab: AppTab { store.selectedTab }
 
     /// 悬浮胶囊两侧的留白，让 tab bar 从内容上「浮」起来
     private static let tabBarSideInset: CGFloat = 14
@@ -193,7 +194,7 @@ struct RootView: View {
         return Button {
             guard !isOn else { return }
             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                selectedTab = tab
+                store.selectedTab = tab
             }
         } label: {
             VStack(spacing: 3) {

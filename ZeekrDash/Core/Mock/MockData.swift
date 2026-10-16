@@ -45,15 +45,17 @@ enum MockData {
 
         // 门锁与车身
         isLocked: true,
+        // 键名与服务端 live 侧一致（`frontLeft` 系列）。此前用 `driver`/`passenger`，
+        // 与后端真车报文对不上 —— 一旦有界面按键名取值就会取到 nil。
         doors: [
-            "driver": false,
-            "passenger": false,
+            "frontLeft": false,
+            "frontRight": false,
             "rearLeft": false,
             "rearRight": false,
         ],
         windows: [
-            "driver": false,
-            "passenger": false,
+            "frontLeft": false,
+            "frontRight": false,
             "rearLeft": false,
             "rearRight": false,
         ],
@@ -66,6 +68,11 @@ enum MockData {
         tyreRearLeft: 252,
         tyreRearRight: 249,
         tyreWarning: false,
+        // 胎温（℃），对应服务端 tyreTemp* 四个键
+        tyreTempFrontLeft: 24,
+        tyreTempFrontRight: 23,
+        tyreTempRearLeft: 23,
+        tyreTempRearRight: 22,
 
         // 空调
         climateOn: false,
@@ -265,4 +272,32 @@ enum MockData {
             ChargeProviderStat(provider: .other,      amount: 73.50,  energyKwh: 45.4,  count: 2),
         ]
     )
+
+    // MARK: - 车辆权限包
+    //
+    // 对应 preview/index.html → MOCK.permissions
+    // 键名与后端 `/api/vehicle/capability` 的 `permissions` 一模一样 ——
+    // 模拟数据只是"不上网时的演示"，字段契约不能自成一套。
+
+    static let permissions: [String] = [
+        "vehicle-share", "remote-control", "charge-manage",
+        "view-vehicle-location", "owner-vehicle-trail",
+    ]
+
+    /// 能力集（对应 preview/index.html → MOCK.capabilities）
+    ///
+    /// **只写「服务类」键** —— 真实侧（`/ms-app-bff/api/1.0/permissions`）只回答
+    /// 服务权限，不回答硬件问题。这里若补上 `tyrePressure` / `window` 这类硬件键，
+    /// 模拟模式下的裁剪行为就会与真车不一致，等于拿演示数据骗自己。
+    ///
+    /// `seatVent: false` 是刻意留的 —— 演示"这台车没开通后排座椅通风时，
+    /// 网页与 App 都会把那个按钮隐藏"。
+    static let capabilities: [String: Bool] = [
+        "sentinel": true,
+        "sentinelPhoto": false,
+        "chargingPlan": true,
+        "travelPlan": true,
+        "tripTrack": true,
+        "seatVent": false,
+    ]
 }

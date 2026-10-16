@@ -74,6 +74,15 @@ final class TripsViewModel {
             return
         }
 
+        // 后端可达但尚未登录：不请求行程 / 能耗接口（登录态由 AppStore 判定）。
+        // 未登录时调这些接口只会失败，还会把服务端日志刷满无意义的报错。
+        guard !AppStore.shared.needsLogin else {
+            trips = []
+            trend = []
+            errorMessage = "请先在「设置」中登录极氪账号"
+            return
+        }
+
         do {
             // 两个请求并发，缩短等待时间
             async let tripsTask: [Trip] = APIClient.shared.get(

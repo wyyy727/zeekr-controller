@@ -54,6 +54,31 @@ final class AppStore {
     /// 当前数据来源；真实地址连不上时会停留在 .offline
     var dataMode: DataMode = .mock
 
+    /// 车辆能力集。
+    ///
+    /// nil = 服务端没拿到（网关没回或解析失败）。此时 `isCapabilityAvailable`
+    /// 一律返回 true —— 宁可多显示，也不隐藏这台车其实支持的按钮。
+    var capabilities: [String: Bool]?
+
+    /// 权限包原始 ID 列表（与 `capabilities` 同一次请求返回）。
+    /// 设置页用它如实展示「这台车开通了什么」—— 没有它，
+    /// 「某个按钮为什么不见了」就没法解释。
+    var permissions: [String]?
+
+    /// 后端可达、但尚未登录 —— 此时**一个数据接口都不调**。
+    ///
+    /// 对齐 `preview/index.html` 的 `needLogin` 态：live 模式下服务端要求登录，
+    /// 未登录时调车况 / 行程 / 充电只会失败，还会把服务端日志刷满无意义的报错。
+    /// 更糟的是旧实现会把这种失败当成「后端不可达」从而**回落模拟数据** ——
+    /// 那等于把「没登录」伪装成「网络故障」，还给用户看了一份假车况。
+    var needsLogin = false
+
+    /// 当前选中的底部 Tab。
+    ///
+    /// 放在这里而不是 RootView 的 `@State`，是为了让车况页的登录引导能直接
+    /// 把用户送到「设置」页（登录入口在那里）。
+    var selectedTab: AppTab = .dashboard
+
     /// 需要在界面上弹框告知的数据源变化（由 RootView 消费后置回 nil）
     var pendingDataSourceNotice: String?
 
@@ -88,11 +113,35 @@ final class AppStore {
 
         // ① 地址未配置 / 指向 localhost：直接用模拟数据，不发起请求
         guard !settings.prefersMockData else {
+            needsLogin = false
             applyMockData()
             return
         }
 
-        // ② 配置了真实地址：正常请求，失败则回落模拟数据并提示
+        // ② 先确认登录态 —— 唯一无条件允许的请求就是 /api/auth/status，
+        //    不查它就无法判断该显示登录引导还是数据。
+        do {
+            let auth: AuthStatus = try await APIClient.shared.get(APIRoutes.authStatus)
+            // 服务端自己处于 mock 态时不做登录门禁（它没有真实账号可登）
+            if auth.authenticated != true && auth.mock != true {
+                needsLogin = true
+                vehicleStatus = nil
+                // 没登录就没有权限包可言 —— 留着上一轮的会让设置页显示别人的清单
+                capabilities = nil
+                permissions = nil
+                dataMode = .live
+                return
+            }
+            needsLogin = false
+        } catch let error as ApiError {
+            fallbackToMock(reason: error.errorDescription)
+            return
+        } catch {
+            fallbackToMock(reason: error.localizedDescription)
+            return
+        }
+
+        // ③ 已登录：正常取数，失败则回落模拟数据并提示
         do {
             let status: VehicleStatus = try await APIClient.shared.get(APIRoutes.vehicleStatus)
             vehicleStatus = status
@@ -101,8 +150,57 @@ final class AppStore {
             didNotifyFallback = false
         } catch let error as ApiError {
             fallbackToMock(reason: error.errorDescription)
+            return
         } catch {
             fallbackToMock(reason: error.localizedDescription)
+            return
+        }
+
+        await loadCapabilities()
+    }
+
+    /// 指令 → 能力键。
+    ///
+    /// 键名与 `preview/index.html` 的 `capBtn(key, …)` **必须同一套** ——
+    /// 否则同一台车在两个客户端上会出现「网页上按钮没了、App 上还在」这种
+    /// 没法解释的差异。典型坑：后端能力键是 `seatVent`，而指令 rawValue 是
+    /// `ventSeat`，按 rawValue 查表**永远查不到**，裁剪就静默失效了。
+    ///
+    /// 没列出的指令（闪灯 / 鸣笛 / 充电启停 / 寻车 / 刷新）本就不做能力门控 ——
+    /// 与网页端一致：它们没有对应的权限包，谁也答不了「这台车支不支持」。
+    private static let capabilityKey: [VehicleCommand: String] = [
+        .lock: "doorLock", .unlock: "doorLock",
+        .climateOn: "climate", .climateOff: "climate",
+        .defrost: "defrost",
+        .wheelHeat: "wheelHeat",
+        .seatHeat: "seatHeat",
+        .ventSeat: "seatVent",
+        .closeWindows: "window",
+        .sunshade: "sunshade",
+        .sentinel: "sentinel",
+        .tripPlan: "travelPlan",
+    ]
+
+    /// 某项车控能力是否可用。
+    ///
+    /// 只有服务端**明确**返回 false 才隐藏；取不到能力集、或该指令本就不受
+    /// 能力集管辖时一律 true。
+    func isCapabilityAvailable(_ command: VehicleCommand) -> Bool {
+        guard let caps = capabilities else { return true }
+        guard let key = Self.capabilityKey[command] else { return true }
+        return caps[key] != false
+    }
+
+    /// 拉取车辆权限包 / 能力集。失败不影响页面可用性 —— 能力集缺失只是「不知道」，
+    /// 不是「不支持」，据此隐藏按钮反而会砍掉本来能用的功能。
+    private func loadCapabilities() async {
+        do {
+            let caps: VehicleCapabilities = try await APIClient.shared.get(APIRoutes.vehicleCapability)
+            capabilities = caps.capabilities
+            permissions = caps.permissions
+        } catch {
+            capabilities = nil
+            permissions = nil
         }
     }
 
@@ -113,6 +211,10 @@ final class AppStore {
         vehicleStatus = MockData.vehicleStatus
         lastRefresh = Date()
         dataMode = .mock
+        // 权限包也一并给上 —— 否则模拟模式下设置页只能显示"尚未取到"，
+        // 而这恰恰是网页预览里能看到的东西（两边演示要对得上）
+        capabilities = MockData.capabilities
+        permissions = MockData.permissions
         // 数据已拿到，空态卡片的报错没有意义
         errorMessage = nil
     }
@@ -220,7 +322,8 @@ final class AppStore {
         case .climateOff:
             status.climateOn = false
         case .closeWindows:
-            status.windows = ["driver": false, "passenger": false,
+            // 键名与服务端 live 侧保持一致（`frontLeft` 系列）
+            status.windows = ["frontLeft": false, "frontRight": false,
                               "rearLeft": false, "rearRight": false]
         case .chargeStart:
             status.isCharging = true

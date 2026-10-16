@@ -18,6 +18,12 @@ final class SettingsViewModel {
     var isReachable = false
     var isLiveConfigured = false
     var missingKeys: [String] = []
+    /// 服务端是否允许下发车控指令（`.env` 的 `ALLOW_COMMANDS`）。
+    ///
+    /// 与「设置」里那个本地总开关是**两把锁**：本开关只管"这个界面允不允许发"，
+    /// 服务端那个管"收不收"。取不到时为 nil，界面显示 `--` ——
+    /// 不猜，免得把"没问到"说成"已开启"。
+    var serverAllowCommands: Bool?
     /// 地址形态（未配置 / 回环 / 真实）
     var endpointMode: EndpointMode = .unset
     /// 当前界面实际展示的数据来源
@@ -50,6 +56,7 @@ final class SettingsViewModel {
             isReachable = false
             isLiveConfigured = false
             missingKeys = []
+            serverAllowCommands = nil
             dataMode = .mock
             return
         }
@@ -61,12 +68,14 @@ final class SettingsViewModel {
             isReachable = true
             isLiveConfigured = health.configured
             missingKeys = health.missingKeys ?? []
+            serverAllowCommands = health.allowCommands
             // 服务端自己也处于 mock 态时，界面拿到的仍是模拟数据
             dataMode = (health.mode == "mock") ? .offline : .live
         } catch {
             isReachable = false
             isLiveConfigured = false
             missingKeys = []
+            serverAllowCommands = nil
             // 配置了真实地址却连不上 —— 与首页一致，已回落模拟数据
             dataMode = .offline
         }

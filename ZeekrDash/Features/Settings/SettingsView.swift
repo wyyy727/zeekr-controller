@@ -33,6 +33,7 @@ struct SettingsView: View {
                 }
                 pollingSection
                 commandSection
+                capabilitySection
                 diagnosticsSection
                 aboutSection
             }
@@ -326,9 +327,121 @@ struct SettingsView: View {
                     }
                     .foregroundStyle(ChineseColor.statusWarn)
                     .frame(maxWidth: .infinity, alignment: .leading)
+
+                    // 服务端没开时如实说明 —— 否则用户会以为「开关都开了怎么还是失败」
+                    if model.serverAllowCommands == false {
+                        Text("服务端也没有开启车控（.env 里 ALLOW_COMMANDS=true），即便本开关打开，指令仍会被拒绝")
+                            .font(.system(size: 11))
+                            .foregroundStyle(ChineseColor.statusBad)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
+
+                Text("总开关（默认关）与「诊断」里的「服务端车控」是两把锁，都要打开才能下发指令。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textTertiary(scheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+
+    // MARK: - 车辆权限
+
+    /// 权限包 ID → 中文名。
+    ///
+    /// **只翻译有把握的**：表里没有的一律原样显示 ID。编一个像模像样的中文名
+    /// 比显示原始 ID 更糟 —— 那是在编造事实。与 `preview/index.html` 的
+    /// `PERM_LABELS` 保持同一份清单，两边不许各译各的。
+    private static let permissionLabels: [String: String] = [
+        "vehicle-share": "车辆分享",
+        "vehicle-defence": "车辆守卫",
+        "digital-key": "数字钥匙",
+        "owner-digital-key": "车主数字钥匙",
+        "view-vehicle-location": "查看车辆位置",
+        "view-vehicle-album": "查看车辆相册",
+        "remote-control": "远程车控",
+        "traffic-card-owner": "车主流量卡",
+        "digital-key1.0": "数字钥匙 1.0",
+        "digital-key2.0": "数字钥匙 2.0",
+        "digital-key3.0": "数字钥匙 3.0",
+        "charge-manage": "充电管理",
+        "ETC-LU-function": "ETC",
+        "VIVO-watch": "vivo 手表",
+        "journey-h5-owner": "行程（H5）",
+        "owner-vehicle-trail": "行程轨迹",
+        "owner-ai-cloud": "AI 云",
+        "owner-ota-server": "OTA 升级",
+        "ZK_face_recognition": "人脸识别",
+        "Rear_seat_ventilation": "后排座椅通风",
+    ]
+
+    private var capabilitySection: some View {
+        SettingsCard(title: "车辆权限") {
+            VStack(alignment: .leading, spacing: 10) {
+                permissionChips
+
+                Text(capabilityHint)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textTertiary(scheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    /// 「这台车开通了什么」的原始清单。
+    ///
+    /// 取不到时如实说「没取到」，而不是显示一个空列表 —— 后者会被读成
+    /// 「什么权限都没有」，那是把「不知道」谎报成「确认没有」。
+    @ViewBuilder
+    private var permissionChips: some View {
+        if let permissions = store.permissions, !permissions.isEmpty {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 88), spacing: 6)],
+                alignment: .leading,
+                spacing: 6
+            ) {
+                ForEach(permissions, id: \.self) { permission in
+                    Text(Self.permissionLabels[permission] ?? permission)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(ChineseColor.qingBi)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .frame(maxWidth: .infinity)
+                        .background(ChineseColor.qingBi.opacity(0.10))
+                        .clipShape(Capsule())
+                }
+            }
+        } else {
+            Text(store.permissions == nil
+                 ? "尚未取到权限包，界面按「全部显示」处理。"
+                 : "服务端确认这台车没有任何权限包。")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textTertiary(scheme))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// 卡片脚注。
+    ///
+    /// 除来源之外，把**被隐藏的按钮名逐个列出来** —— 这张卡存在的意义就是让
+    /// 「某个按钮怎么不见了」变得可解释，只报个数字等于没说。
+    private var capabilityHint: String {
+        let source = "来源：ms-app-bff/api/1.0/permissions"
+        guard let permissions = store.permissions, !permissions.isEmpty else {
+            return source + " · 未取到时界面按「全部显示」处理"
+        }
+        let hidden = VehicleCommand.allCases
+            .filter { !store.isCapabilityAvailable($0) }
+            .map(\.displayName)
+        guard !hidden.isEmpty else {
+            return "\(source) · \(permissions.count) 项 · 界面已按此裁剪"
+        }
+        return "\(source) · \(permissions.count) 项 · 已隐藏：\(hidden.joined(separator: "、"))"
     }
 
     // MARK: - 诊断
@@ -339,6 +452,12 @@ struct SettingsView: View {
                 diagnosticRow("数据来源", value: diagnosticsSourceText)
                 Divider().overlay(Theme.separator(scheme))
                 diagnosticRow("配置完整", value: model.isLiveConfigured ? "是" : "否")
+                Divider().overlay(Theme.separator(scheme))
+                // 服务端那把锁（.env 的 ALLOW_COMMANDS）。与设置页的车控总开关
+                // 是两回事：一个管"发不发"，一个管"收不收"。取不到时显示 `--`。
+                diagnosticRow("服务端车控", value: model.serverAllowCommands.map {
+                    $0 ? "已开启" : "已禁用"
+                } ?? "--")
                 Divider().overlay(Theme.separator(scheme))
                 diagnosticRow("上次刷新", value: store.lastRefresh.map {
                     $0.formatted(date: .omitted, time: .shortened)
@@ -425,6 +544,7 @@ private struct SMSCodeSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
+    @Environment(AppStore.self) private var store
     @State private var code = ""
     @FocusState private var focused: Bool
 
@@ -436,7 +556,11 @@ private struct SMSCodeSheet: View {
                     .foregroundStyle(Theme.textSecondary(scheme))
                     .padding(.top, 20)
 
-                TextField("6 位验证码", text: $code)
+                // 极氪**国区的验证码是 4 位**（2026-10-16 实测）。此前写死 6 位，
+                // 用户收到 4 位码时永远凑不满，「确认登录」点不动 —— 登录链路直接死在这里。
+                // 长度上限放宽到 8 位（与后端 `4 <= len(code) <= 8` 的校验一致），
+                // 具体几位由网关判断，客户端只做基本格式校验。
+                TextField("4 位验证码", text: $code)
                     .font(.system(size: 26, weight: .medium, design: .rounded))
                     .multilineTextAlignment(.center)
                     .keyboardType(.numberPad)
@@ -447,8 +571,8 @@ private struct SMSCodeSheet: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .padding(.horizontal, 32)
                     .onChange(of: code) { _, value in
-                        // 只保留数字，最多 6 位
-                        let filtered = String(value.filter(\.isNumber).prefix(6))
+                        // 只保留数字，最多 8 位
+                        let filtered = String(value.filter(\.isNumber).prefix(8))
                         if filtered != value { code = filtered }
                     }
 
@@ -460,7 +584,12 @@ private struct SMSCodeSheet: View {
 
                 Button {
                     Task {
-                        if await model.verifyCode(code) { dismiss() }
+                        if await model.verifyCode(code) {
+                            // 登录成功立刻取一次车况，否则要等到下一个轮询周期
+                            // 首页才从「去登录」切回真实数据。
+                            await store.refresh()
+                            dismiss()
+                        }
                     }
                 } label: {
                     HStack {
@@ -493,7 +622,8 @@ private struct SMSCodeSheet: View {
         .onAppear { focused = true }
     }
 
+    /// 国区验证码 4 位；按后端校验放宽到 4–8 位，不再写死 6 位
     private var canSubmit: Bool {
-        code.count == 6 && !model.isVerifying
+        (4...8).contains(code.count) && !model.isVerifying
     }
 }

@@ -19,7 +19,10 @@ struct DashboardView: View {
         // （真实数据时不显示，模拟 / 后端不可达时显示）
         NavigationStack {
             ScreenContainer(modeText: store.modeBadgeText) {
-                if let status = store.vehicleStatus {
+                if store.needsLogin {
+                    // 已连上服务端但还没登录 —— 停在登录引导，不碰任何数据接口
+                    loginWall
+                } else if let status = store.vehicleStatus {
                     headerCard(status)
 
                     if status.isCharging == true {
@@ -208,12 +211,12 @@ struct DashboardView: View {
                 }
             }
 
-            // 一行四列：标签在上、数值在下
+            // 一行四列：标签在上、数值在下，胎温作为副行（与 index.html 一致）
             LazyVGrid(columns: tyreColumns, spacing: 8) {
-                tyreItem("左前", status.tyreFrontLeft)
-                tyreItem("右前", status.tyreFrontRight)
-                tyreItem("左后", status.tyreRearLeft)
-                tyreItem("右后", status.tyreRearRight)
+                tyreItem("左前", status.tyreFrontLeft, status.tyreTempFrontLeft)
+                tyreItem("右前", status.tyreFrontRight, status.tyreTempFrontRight)
+                tyreItem("左后", status.tyreRearLeft, status.tyreTempRearLeft)
+                tyreItem("右后", status.tyreRearRight, status.tyreTempRearRight)
             }
         }
         .padding(Metrics.cardPadding)
@@ -225,7 +228,7 @@ struct DashboardView: View {
         Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
     }
 
-    private func tyreItem(_ position: String, _ value: Double?) -> some View {
+    private func tyreItem(_ position: String, _ value: Double?, _ temp: Double? = nil) -> some View {
         // 正常胎压区间（kPa）—— 低于 220 或高于 280 视为异常
         let isAbnormal = value.map { $0 < 220 || $0 > 280 } ?? false
 
@@ -238,6 +241,14 @@ struct DashboardView: View {
                 .font(.system(size: 16, weight: .semibold, design: .rounded))
                 .foregroundStyle(isAbnormal ? ChineseColor.statusBad : Theme.textPrimary(scheme))
                 .monospacedDigit()
+
+            // 胎温副行：拿不到时不占位显示，避免出现无意义的 "----"
+            if let temp {
+                Text(String(format: "%.0f°", temp))
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.textTertiary(scheme))
+                    .monospacedDigit()
+            }
         }
         .padding(.vertical, 9)
         .frame(maxWidth: .infinity)
@@ -321,6 +332,45 @@ struct DashboardView: View {
         .padding(.top, 4)
     }
 
+    // MARK: - 未登录引导
+
+    /// 明确说明「不是页面坏了，是还没登录」，并给出去登录的入口
+    private var loginWall: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "person.crop.circle.badge.questionmark")
+                .font(.system(size: 40, weight: .light))
+                .foregroundStyle(Theme.textTertiary(scheme))
+
+            Text("需要先登录极氪账号")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Theme.textPrimary(scheme))
+
+            Text("服务端已连上（真实数据模式）。\n登录前不会请求任何车况 / 行程 / 充电接口。")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textTertiary(scheme))
+                .multilineTextAlignment(.center)
+                .lineSpacing(3)
+
+            Button {
+                store.selectedTab = .settings
+            } label: {
+                Text("去登录")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(ChineseColor.xiangYaBai)
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 10)
+                    .background(Theme.accent(scheme))
+                    .clipShape(Capsule())
+            }
+            .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 36)
+        .padding(.horizontal, 20)
+        .background(Theme.surface(scheme))
+        .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+    }
+
     // MARK: - 空态
 
     private var emptyState: some View {
@@ -363,10 +413,17 @@ struct DashboardView: View {
 
     // MARK: - 格式化
 
+    /// 里程一律显示原始公里数 —— 不做「万」换算：15545 被压成「1.6 万」后
+    /// 既有精度损失，也无法与官方 App 的读数直接比对。
     private func formatDistance(_ km: Double) -> String {
-        km >= 10000
-            ? String(format: "%.1f 万 km", km / 10000)
-            : String(format: "%.0f km", km)
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = true
+        formatter.groupingSeparator = ","
+        formatter.maximumFractionDigits = 0
+        formatter.roundingMode = .halfUp
+        let text = formatter.string(from: NSNumber(value: km)) ?? String(format: "%.0f", km)
+        return "\(text) km"
     }
 
     private func formatDuration(_ minutes: Double) -> String {

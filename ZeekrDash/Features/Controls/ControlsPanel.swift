@@ -210,17 +210,23 @@ struct ControlsPanel: View {
 
     // MARK: - Body
 
+    /// 这台车实际支持的按钮 —— 服务端明确返回 false 的能力才隐藏。
+    /// 取不到能力集时 `isCapabilityAvailable` 恒为 true，即保持全部显示。
+    private func supported(_ actions: [ControlAction]) -> [ControlAction] {
+        actions.filter { store.isCapabilityAvailable($0.command) }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
 
-            grid(vehicleControls)
+            grid(supported(vehicleControls))
 
             groupSeparator("远程操作")
-            grid(remoteActions)
+            grid(supported(remoteActions))
 
             groupSeparator("场景")
-            grid(sceneActions)
+            grid(supported(sceneActions))
 
             if !settings.commandsEnabled {
                 Text("在「设置」中开启控制指令开关后可用")

@@ -78,6 +78,16 @@ struct VehicleStatus: Codable, Identifiable {
     /// 胎压告警
     var tyreWarning: Bool?
 
+    // MARK: 胎温（单位 ℃）
+    //
+    // 真车实报字段为 `tyreTemp{Driver,Passenger,DriverRear,PassengerRear}`
+    // （2026-10-16 实测取证，见 docs/真机验证清单.md）。服务端已归一化输出，
+    // 此前 iOS 模型里根本没有这四个键 —— 真车胎温数据被静默丢弃。
+    var tyreTempFrontLeft: Double?
+    var tyreTempFrontRight: Double?
+    var tyreTempRearLeft: Double?
+    var tyreTempRearRight: Double?
+
     // MARK: 空调
     /// 空调是否开启
     var climateOn: Bool?
@@ -118,6 +128,7 @@ struct VehicleStatus: Codable, Identifiable {
         case minutesToFull, chargeLimit
         case isLocked, doors, windows, trunkOpen, frunkOpen
         case tyreFrontLeft, tyreFrontRight, tyreRearLeft, tyreRearRight, tyreWarning
+        case tyreTempFrontLeft, tyreTempFrontRight, tyreTempRearLeft, tyreTempRearRight
         case climateOn, climateTargetTemp, interiorTemp, exteriorTemp
         case latitude, longitude, positionTrusted
         case speedKmh, avgConsumption, serviceDistanceKm, serviceDays
@@ -398,6 +409,39 @@ struct CommandResult: Codable {
     var success: Bool
     var message: String?
     var command: String?
+}
+
+/// 车辆权限包 + 能力集（`GET /api/vehicle/capability`）。
+///
+/// 服务端的数据来自官方 `/ms-app-bff/api/1.0/permissions`（2026-10-16 真车实测），
+/// 它归约成两层：
+///   · `permissions` —— 原始权限包 ID（如 `charge-manage` / `vehicle-defence`），
+///     设置页据此如实展示「这台车开通了什么」；
+///   · `capabilities` —— 「功能 → 是否可用」的结论，供车控面板裁剪按钮。
+///
+/// `capabilities` 为 nil 表示**服务端没拿到**（网关没回或解析失败）——
+/// 此时界面按「全部支持」显示，绝不隐藏按钮；只有明确 `false` 的能力才隐藏。
+/// 这与 `preview/index.html` 的 `cap()` 规则一致。
+///
+/// 注意：服务端**只对「服务类」功能下判断**（充电管理 / 车辆守卫 / 行程…）。
+/// 硬件能力（胎压 / 空调 / 车窗 / 门锁）不会出现在 `capabilities` 里 ——
+/// 权限接口不回答硬件问题，拿它隐藏硬件按钮就是臆测。
+struct VehicleCapabilities: Codable {
+    /// 原始权限包 ID。为空数组 = 服务端确认该车无权限（与 nil「没取到」不同）。
+    var permissions: [String]?
+    var capabilities: [String: Bool]?
+    var verified: Bool?
+}
+
+/// 车控指令的**车端执行结果**（`GET /api/vehicle/command/result`）
+struct CommandExecutionResult: Codable {
+    /// `pending` / `done` / `failed`
+    var status: String?
+    var message: String?
+
+    var isPending: Bool { (status ?? "pending") == "pending" }
+    var isDone: Bool { status == "done" }
+    var isFailed: Bool { status == "failed" }
 }
 
 // MARK: - 通用响应包装
