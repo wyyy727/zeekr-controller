@@ -68,6 +68,30 @@ class ZeekrClient(ABC):
         """获取能耗趋势。"""
         raise NotImplementedError
 
+    # MARK: - 附近充电站
+
+    @abstractmethod
+    async def get_nearby_stations(
+        self,
+        lat: float,
+        lng: float,
+        zoom: int = 13,
+    ) -> list[dict[str, Any]]:
+        """获取附近充电站（POI 与枪数）。
+
+        真实实现**不返回站点名，也不返回价格** —— 上游气泡接口的 23 个字段里
+        两者都没有，得按 `stationId` 另问第三方网关（浩汉）才能补齐；
+        模拟实现则会一并给出，免得离线演示时整页空白。
+        统一对外契约由 `api/stations.py` 保证。
+
+        之所以分成两层：两侧网关认证体系与可用性完全独立，
+        第三方不可用时列表仍应可用（至少能看"哪近、几个空枪"）。
+
+        Returns:
+            [{"stationId", "lat", "lng", "availableCount", "totalCount", ...}]
+        """
+        raise NotImplementedError
+
     # MARK: - 车辆能力集
 
     @abstractmethod

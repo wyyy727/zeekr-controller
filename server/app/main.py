@@ -123,11 +123,14 @@ async def health() -> dict:
 
 def register_routers() -> None:
     """注册各业务路由。"""
-    from .api import auth, charges, trips, vehicle
+    from .api import auth, charges, stations, trips, vehicle
 
     app.include_router(vehicle.router, prefix="/api/vehicle", tags=["车辆"])
     app.include_router(trips.router, prefix="/api", tags=["行程"])
     app.include_router(charges.router, prefix="/api/charges", tags=["充电消费"])
+    # 注意：`charges` 是**消费账单**域（本地导入的支付宝/微信账单），
+    # 与「附近充电站」是两回事，故另开前缀而不是挂在 /api/charges 下。
+    app.include_router(stations.router, prefix="/api/stations", tags=["附近充电站"])
     app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
 
 
