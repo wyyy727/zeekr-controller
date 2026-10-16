@@ -97,6 +97,18 @@ cd .. && cp .env.example .env
 
 `scripts/server.sh` 支持 `start` / `stop` / `restart` / `status` / `logs`（无参数时打印用法）。
 
+> **Windows 用户注意：脚本必须在 Git Bash 里执行。**
+>
+> 它是 bash 脚本，不是 Windows 可执行文件。在项目目录右键选「Git Bash Here」，
+> 或从开始菜单打开 Git Bash 后 `cd` 过来，然后敲上面的命令。
+>
+> **不要双击 `server.sh`，也不要在 PowerShell / CMD 里执行它。** 那样 Windows 会用
+> `.sh` 的文件关联开一个**一次性**窗口：脚本跑完窗口立刻关闭，看起来像「闪退」，
+> 而且看不到任何输出 —— 成功了看不出来，失败了你也不知道为什么。
+>
+> 另外注意脚本在 `scripts/` 下，**不在仓库根**：写成 `./server.sh` 会直接
+> `No such file or directory`。
+
 服务起来后：
 
 - <http://localhost:8765/docs> —— FastAPI 自动生成的接口文档
