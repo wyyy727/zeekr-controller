@@ -59,7 +59,8 @@ struct StatusChip: View {
 #Preview {
     VStack(spacing: 10) {
         HStack(spacing: 10) {
-            StatusChip(title: "车门", isGood: true, goodText: "已锁", badText: "未锁", icon: "lock.fill")
+            StatusChip(title: "锁车", isGood: true, goodText: "已锁", badText: "未锁", icon: "lock.fill")
+            StatusChip(title: "车门", isGood: true, goodText: "全部关闭", badText: "有门未关", icon: "car.side")
             StatusChip(title: "车窗", isGood: false, goodText: "已关", badText: "未关", icon: "car.window.left")
         }
         HStack(spacing: 10) {

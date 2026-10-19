@@ -48,6 +48,23 @@ final class AppStore {
     var errorMessage: String?
     var lastRefresh: Date?
 
+    /// 车辆位置（坐标 + 地址 + 上报时间）。
+    ///
+    /// **它不是实时位置**：车静止时网关不更新坐标，`reportedAt` 可能滞后几十分钟，
+    /// 界面上必须显示上报时间。坐标已由服务端转成 GCJ-02，客户端不要再转。
+    var vehicleLocation: VehicleLocation?
+
+    /// 位置卡的地图缩略图字节（服务端代取腾讯，key 不落客户端）。
+    /// 取不到就是 nil —— 卡片退回纯文字，不显示破图。
+    var locationMapData: Data?
+
+    /// 位置接口本身失败时的提示。
+    ///
+    /// 为什么要单独一个字段：`vehicleLocation == nil` 既可能是「还没加载」，
+    /// 也可能是「加载失败」。两者在界面上必须区分 —— 否则请求一直失败时，
+    /// 卡片会永远停在「正在获取位置…」，看起来像卡死。
+    var locationError: String?
+
     /// 全局 Toast 文案（车控指令回执等），由 RootView 统一呈现
     var toast: String?
 
@@ -97,6 +114,11 @@ final class AppStore {
 
     private let settings: SettingsStore
     private var pollTask: Task<Void, Never>?
+    /// 上一次取地图图用的坐标键。
+    ///
+    /// 服务端已按坐标缓存，但客户端每轮轮询都重下 ~100KB 是白费流量 ——
+    /// 坐标没变就不重复下载。失败时清空，让下一轮能再试。
+    private var lastMapKey: String?
 
     init(settings: SettingsStore) {
         self.settings = settings
@@ -129,6 +151,10 @@ final class AppStore {
                 // 没登录就没有权限包可言 —— 留着上一轮的会让设置页显示别人的清单
                 capabilities = nil
                 permissions = nil
+                // 位置是更敏感的个人数据：上一会话的车停在哪，绝不能留给下一位
+                vehicleLocation = nil
+                locationMapData = nil
+                locationError = nil
                 dataMode = .live
                 return
             }
@@ -157,6 +183,50 @@ final class AppStore {
         }
 
         await loadCapabilities()
+        await loadLocation()
+    }
+
+    /// 拉车辆位置与地图缩略图。
+    ///
+    /// **失败只影响这张卡片**：位置是附加信息，不该因为它把整页打成模拟数据。
+    /// 位置接口在服务端按坐标缓存，坐标不变时不会重复向腾讯请求。
+    private func loadLocation() async {
+        do {
+            let location: VehicleLocation = try await APIClient.shared.get(APIRoutes.vehicleLocation)
+            vehicleLocation = location
+            locationError = nil
+
+            // 有坐标、且服务端确认配了地图 key，才去要图。
+            // 取不到就保持 nil，界面只显示地址与坐标。
+            guard location.hasCoordinate, location.mapAvailable == true else {
+                locationMapData = nil
+                lastMapKey = nil
+                return
+            }
+
+            let key = "\(location.lat ?? 0),\(location.lng ?? 0)"
+            if key == lastMapKey, locationMapData != nil {
+                return   // 车没挪窝，图也不会变
+            }
+
+            let data = await APIClient.shared.imageData(
+                APIRoutes.vehicleLocationMap,
+                query: ["width": "600", "height": "260", "zoom": "16"]
+            )
+            if let data {
+                locationMapData = data
+                lastMapKey = key
+            } else if locationMapData == nil {
+                // 这种情况（首次就失败）保留 nil，下一轮继续尝试
+                lastMapKey = nil
+            }
+        } catch {
+            vehicleLocation = nil
+            locationMapData = nil
+            lastMapKey = nil
+            // 明确标成"失败"，卡片才不会一直显示「正在获取位置…」
+            locationError = "车辆位置暂时取不到"
+        }
     }
 
     /// 指令 → 能力键。
@@ -215,6 +285,10 @@ final class AppStore {
         // 而这恰恰是网页预览里能看到的东西（两边演示要对得上）
         capabilities = MockData.capabilities
         permissions = MockData.permissions
+        vehicleLocation = MockData.vehicleLocation
+        // 演示模式不联网，也就不该去请求地图图片
+        locationMapData = nil
+        locationError = nil
         // 数据已拿到，空态卡片的报错没有意义
         errorMessage = nil
     }
@@ -225,6 +299,13 @@ final class AppStore {
         lastRefresh = Date()
         dataMode = .offline
         errorMessage = nil
+
+        // 车况已经回落成模拟数据，位置必须一起回落。
+        // 否则会出现"车况是假的、位置却是真的（而且是上一次的旧位置）"这种组合 ——
+        // 比两者都假更糟：用户会以为那个位置可信。
+        vehicleLocation = MockData.vehicleLocation
+        locationMapData = nil
+        locationError = nil
 
         guard !didNotifyFallback else { return }
         didNotifyFallback = true

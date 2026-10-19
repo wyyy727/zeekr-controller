@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 /// 车况主页：电量、续航、胎压、门窗、充电状态、快捷车控
 struct DashboardView: View {
@@ -33,6 +34,7 @@ struct DashboardView: View {
                     tyreCard(status)
                     // 「车身状态」保持 2×2，不随胎压一起改横排
                     statusCard(status)
+                    locationCard(store.vehicleLocation)
                     ControlsPanel()
                     footerNote
                 } else if store.isLoading {
@@ -269,12 +271,25 @@ struct DashboardView: View {
                           GridItem(.flexible(), spacing: Metrics.sectionSpacing)],
                 spacing: Metrics.sectionSpacing
             ) {
+                // 「锁车」与「车门」是两件事，此前 iOS 把锁车状态挂在「车门」标题下，
+                // 会让人以为"车门已关好"。网页一直是两个独立 chip，这里对齐。
                 StatusChip(
-                    title: "车门",
+                    title: "锁车",
                     isGood: status.isLocked == true,
                     goodText: "已锁",
-                    badText: "未锁",
-                    icon: status.isLocked == true ? "lock.fill" : "lock.open.fill"
+                    badText: status.isLocked == nil ? "未知" : "未锁",
+                    icon: status.isLocked == true ? "lock.fill" : "lock.open.fill",
+                    neutral: status.isLocked == nil
+                )
+                // 四门聚合口径（与网页 `doorOpen3` 一致）：任一扇开即「有门未关」。
+                // doors 为 nil 表示网关未提供 —— 显示「未知」，绝不默认成「全部关闭」。
+                StatusChip(
+                    title: "车门",
+                    isGood: status.doors == nil || !hasOpenDoor(status),
+                    goodText: status.doors == nil ? "未知" : "全部关闭",
+                    badText: "有门未关",
+                    icon: "car.side",
+                    neutral: status.doors == nil
                 )
                 StatusChip(
                     title: "空调",
@@ -299,9 +314,20 @@ struct DashboardView: View {
                 StatusChip(
                     title: "后备箱",
                     isGood: status.trunkOpen != true,
-                    goodText: "已关",
+                    goodText: status.trunkOpen == nil ? "未知" : "已关",
                     badText: "开启",
-                    icon: "car.side.rear.open"
+                    icon: "car.side.rear.open",
+                    neutral: status.trunkOpen == nil
+                )
+                // 前备箱：真车字段名是 engineHoodOpenStatus（不是 frunkOpenStatus），
+                // 后端已映射到 frunkOpen；网页早有这个 chip，iOS 这边此前漏了。
+                StatusChip(
+                    title: "前备箱",
+                    isGood: status.frunkOpen != true,
+                    goodText: status.frunkOpen == nil ? "未知" : "已关",
+                    badText: "开启",
+                    icon: "car.side.front.open",
+                    neutral: status.frunkOpen == nil
                 )
             }
         }
@@ -310,10 +336,141 @@ struct DashboardView: View {
         .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
     }
 
+    private func hasOpenDoor(_ status: VehicleStatus) -> Bool {
+        // 与 hasOpenWindow 同一写法：元素是 Bool?，nil（网关未给单个门）
+        // 不能算作"开着"，但整体 nil 已在调用处单独判为「未知」。
+        (status.doors ?? [:]).values.contains { $0 == true }
+    }
+
     private func hasOpenWindow(_ status: VehicleStatus) -> Bool {
         // 值本身是 Bool?（服务端可能返回 null 表示"未知"），
         // 用闭包判断而不是 contains(true)，避免依赖可选值提升。
         (status.windows ?? [:]).values.contains { $0 == true }
+    }
+
+    // MARK: - 车辆位置
+
+    /// 车辆位置卡。
+    ///
+    /// 三条底线（与网页 `vehicleLocationCard()` 一致）：
+    /// 1. **位置不是实时的** —— 标题右侧必须写「最后上报 X」，否则会被当成"车现在就在这"；
+    ///    车静止时网关不更新坐标（实测 15 条快照只有 3 个位置点）。
+    /// 2. **没配地图 key ≠ 没有位置** —— 照常显示坐标，只是没有地址与地图。
+    /// 3. 地图取不到就只不显示图，地址与坐标照常可读。
+    private func locationCard(_ location: VehicleLocation?) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("车辆位置")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary(scheme))
+
+                Spacer(minLength: 8)
+
+                if let raw = location?.reportedAt, !raw.isEmpty {
+                    Text("最后上报 \(formatReportedAt(raw))")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary(scheme))
+                }
+            }
+
+            if let location, location.hasCoordinate {
+                if let data = store.locationMapData,
+                   let image = UIImage(data: data) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 148)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+
+                Text(location.displayAddress ?? mapUnavailableText(location))
+                    .font(.system(size: 13.5, weight: .medium))
+                    .foregroundStyle(location.displayAddress == nil
+                                     ? Theme.textSecondary(scheme)
+                                     : Theme.textPrimary(scheme))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let coordinate = location.coordinateText {
+                    Text(coordinate)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Theme.textTertiary(scheme))
+                }
+
+                if let secondary = location.secondaryAddress {
+                    Text(secondary)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary(scheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if location.displayAddress == nil {
+                    Text(mapUnavailableHint(location))
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary(scheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Text("位置取自车辆最后一次上报，车辆移动后可能不会立即更新。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textTertiary(scheme).opacity(0.85))
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let location, location.available == false {
+                // 明确说"车没上报位置"，而不是显示两个 0
+                Text(location.reason ?? "车辆尚未上报位置")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textSecondary(scheme))
+            } else if let error = store.locationError {
+                // 与"还没加载"区分开：请求一直失败时不能永远显示「正在获取位置…」
+                Text(error)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textSecondary(scheme))
+            } else {
+                Text("正在获取位置…")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textTertiary(scheme))
+            }
+        }
+        .padding(Metrics.cardPadding)
+        .background(Theme.surface(scheme))
+        .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+    }
+
+    /// 没有地址时的标题文案。
+    ///
+    /// 必须区分两种情况 —— 它们的处理方式完全不同：
+    /// · 没配 key：去 `.env` 填 `TENCENT_MAP_KEY`
+    /// · 配了但取不到：多半是第三方额度用完 / 网络问题，改配置没用
+    /// 统一显示「未配置地图服务」会把人引到错误的方向上。
+    private func mapUnavailableText(_ location: VehicleLocation) -> String {
+        location.mapAvailable == true ? "地址暂时取不到" : "未配置地图服务"
+    }
+
+    private func mapUnavailableHint(_ location: VehicleLocation) -> String {
+        if location.mapAvailable == true {
+            return "地图服务已配置，但这次没取到地址（可能是第三方额度用完或网络问题）。稍后会自动重试。"
+        }
+        return "尚未配置腾讯地图 key，仅显示坐标。在服务端 .env 填入 TENCENT_MAP_KEY 并重启，即可显示地址与地图。"
+    }
+
+    /// 把服务端透传的 `yyyy-MM-dd HH:mm:ss` 变成「今天 10:48」/「10月19日 10:48」。
+    /// 解析失败就原样显示 —— 宁可难看，也不要把时间吞掉（时间本身是有意义的）。
+    private func formatReportedAt(_ raw: String) -> String {
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        parser.dateFormat = "yyyy-MM-dd HH:mm:ss"
+
+        guard let date = parser.date(from: raw) else { return raw }
+
+        let isToday = Calendar.current.isDateInToday(date)
+        let output = DateFormatter()
+        output.locale = Locale(identifier: "zh_CN")
+        output.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        output.dateFormat = isToday ? "HH:mm" : "M月d日 HH:mm"
+        let text = output.string(from: date)
+        return isToday ? "今天 \(text)" : text
     }
 
     // MARK: - 底部说明

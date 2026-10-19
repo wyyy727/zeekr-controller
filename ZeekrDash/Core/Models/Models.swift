@@ -314,6 +314,275 @@ struct ChargeProviderStat: Codable, Identifiable {
     var displayName: String { provider?.displayName ?? "其他" }
 }
 
+// MARK: - 附近充电站
+
+/// 附近充电站列表（`GET /api/stations/nearby` 的 `data`）
+///
+/// 数据由服务端**两跳合并**而来：极氪网关给坐标与枪数，第三方（浩汉）网关
+/// 给站名、地址与电价。iOS 侧既不接触签名也不接触渠道号 —— 那些都在服务端，
+/// 而且**用户坐标只发给极氪自己的网关**，服务端转给第三方的只有 `stationId`。
+///
+/// 除 `stationId` 外的字段一律可选：真实侧的站点**可能没有站名、没有价格**
+/// （第三方网关没补上），把它们做成非可选会让解码直接失败 —— 那不是"少一个
+/// 字段"，而是这一批站点整体消失。
+struct NearbyStations: Codable {
+    /// 视野内的站点总数（可能大于 `stations.count` —— 后者是取过价的前 N 个）
+    var total: Int? = nil
+    var count: Int? = nil
+    /// 第三方价格服务是否可用
+    var priceAvailable: Bool? = nil
+    var stations: [ChargingStation]? = nil
+
+    /// 显式判 `!= false`：后端不返回该字段时按"可用"处理。
+    ///
+    /// 这与「单个站点没有价格」是两件事，别混 —— 前者要提示"价格服务不可用"，
+    /// 后者只显示「价格 --」。
+    var isPriceAvailable: Bool { priceAvailable != false }
+}
+
+// MARK: - 车辆位置
+
+/// 车辆位置（`GET /api/vehicle/location`）。
+///
+/// **这不是实时位置**：车静止时网关不更新坐标，`reportedAt` 可能滞后几十分钟。
+/// 界面上必须把上报时间显示出来，否则会被当成"车现在就在这"。
+///
+/// 坐标已经是 **GCJ-02**（服务端按网关的 `marsCoordinates` 标志转好了），
+/// 可以直接给地图用 —— **客户端不要再做任何坐标转换**。
+struct VehicleLocation: Codable {
+    /// 网关有没有给出坐标。false 时看 `reason`
+    var available: Bool? = nil
+    var lat: Double? = nil
+    var lng: Double? = nil
+    /// 车上报时间（服务端原样透传的字符串，可能形如 `2026-10-19 10:48:21`）
+    var reportedAt: String? = nil
+    /// 没有坐标时的原因（如「车辆尚未上报位置」）
+    var reason: String? = nil
+    /// 服务端配了腾讯地图 key，前端才可以去请求缩略图
+    var mapAvailable: Bool? = nil
+    /// 地址是否来自本地缓存（true = 这次没有把坐标发给第三方）
+    var addressFromCache: Bool? = nil
+    var address: LocationAddress? = nil
+
+    var hasCoordinate: Bool { available == true && lat != nil && lng != nil }
+
+    /// 坐标文本，如 `30.123456, 120.123456`
+    var coordinateText: String? {
+        guard let lat, let lng else { return nil }
+        return String(format: "%.6f, %.6f", lat, lng)
+    }
+
+    /// 卡片主文案：优先「好认的地名」，再退回标准地址。
+    ///
+    /// 与网页一致（`address.recommend || address.address`）——
+    /// `recommend` 是「XX 广场」这种描述，比「省市区路门牌」更好读。
+    var displayAddress: String? {
+        guard let address else { return nil }
+        let recommend = address.recommend?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let recommend, !recommend.isEmpty { return recommend }
+        let standard = address.address?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (standard?.isEmpty == false) ? standard : nil
+    }
+
+    /// 补充用的标准地址（与主文案重复时不显示）
+    var secondaryAddress: String? {
+        guard let address, let title = displayAddress else { return nil }
+        let standard = address.address?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let standard, !standard.isEmpty, standard != title else { return nil }
+        return standard
+    }
+}
+
+/// 逆地理编码结果（服务端精简后的字段）
+struct LocationAddress: Codable {
+    var address: String? = nil
+    var recommend: String? = nil
+    var province: String? = nil
+    var city: String? = nil
+    var district: String? = nil
+    var street: String? = nil
+}
+
+/// 单个充电站
+struct ChargingStation: Codable, Identifiable {
+    var id: String { stationId }
+    var stationId: String
+    /// 站名由第三方网关补；取不到时为 nil（界面显示「未命名站点」）
+    var name: String? = nil
+    var address: String? = nil
+    var lat: Double? = nil
+    var lng: Double? = nil
+    /// 距当前位置 km（服务端算，气泡接口本身不给距离也不按距离排序）
+    var distanceKm: Double? = nil
+    var score: Double? = nil
+    var tags: [String]? = nil
+    /// 极氪自营
+    var selfOperate: Bool? = nil
+    var marketingPrice: Bool? = nil
+    /// 可用枪 / 总枪
+    var availableCount: Int? = nil
+    var totalCount: Int? = nil
+    /// 交流（慢充）/ 直流（快充）枪总数
+    var acCount: Int? = nil
+    var dcCount: Int? = nil
+    /// 分功率的可用数（上游拼法就是 `ableXxx`）
+    var ableAcCount: Int? = nil
+    var ableDcCount: Int? = nil
+    var stationStatus: Int? = nil
+    var price: StationPrice? = nil
+}
+
+/// 站点电价
+struct StationPrice: Codable {
+    /// 当前时段总价（元/度）—— 界面上那个大数字
+    var totalPrice: Double? = nil
+    var feeElectric: Double? = nil
+    var serviceFee: Double? = nil
+    /// 当前所处时段，如 "00:00-06:00"；分时电价靠它指认"现在"
+    var currentPeriod: String? = nil
+    /// 分时电价表（单一时段站点长度为 1，尖峰平谷站点会有多段）
+    var periods: [PricePeriod]? = nil
+    var parkingFee: String? = nil
+    var parkFree: Bool? = nil
+    var holdFee: Bool? = nil
+    var feeDesc: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case totalPrice, feeElectric, serviceFee, currentPeriod, periods
+        case parkingFee, parkFree, holdFee, feeDesc
+    }
+
+    /// 手写这个成员构造器是为了**让演示数据能只写关心的字段** ——
+    /// 一旦有了下面的 `init(from:)`，编译器就不再合成成员构造器了。
+    init(
+        totalPrice: Double? = nil,
+        feeElectric: Double? = nil,
+        serviceFee: Double? = nil,
+        currentPeriod: String? = nil,
+        periods: [PricePeriod]? = nil,
+        parkingFee: String? = nil,
+        parkFree: Bool? = nil,
+        holdFee: Bool? = nil,
+        feeDesc: String? = nil
+    ) {
+        self.totalPrice = totalPrice
+        self.feeElectric = feeElectric
+        self.serviceFee = serviceFee
+        self.currentPeriod = currentPeriod
+        self.periods = periods
+        self.parkingFee = parkingFee
+        self.parkFree = parkFree
+        self.holdFee = holdFee
+        self.feeDesc = feeDesc
+    }
+
+    /// 手写解码只有一处理由：`parkingFee` 是服务端**原样透传**的上游字段，
+    /// 类型是字符串还是数字并不固定。若按 `String` 硬解，上游给数字时会让
+    /// 整个 `StationPrice` 解码失败 —— 那不是"少一个字段"，而是**这个站连
+    /// 价格一起没了**，最后表现为整页都没有价格。
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        totalPrice = try c.decodeIfPresent(Double.self, forKey: .totalPrice)
+        feeElectric = try c.decodeIfPresent(Double.self, forKey: .feeElectric)
+        serviceFee = try c.decodeIfPresent(Double.self, forKey: .serviceFee)
+        currentPeriod = try c.decodeIfPresent(String.self, forKey: .currentPeriod)
+        periods = try c.decodeIfPresent([PricePeriod].self, forKey: .periods)
+        parkFree = try c.decodeIfPresent(Bool.self, forKey: .parkFree)
+        holdFee = try c.decodeIfPresent(Bool.self, forKey: .holdFee)
+        feeDesc = try c.decodeIfPresent(String.self, forKey: .feeDesc)
+
+        if let text = try? c.decodeIfPresent(String.self, forKey: .parkingFee) {
+            parkingFee = text
+        } else if let number = try? c.decodeIfPresent(Double.self, forKey: .parkingFee) {
+            // 数字型停车费不带单位 —— 上游没给单位，这里不替它编一个
+            parkingFee = String(format: "%g", number)
+        } else {
+            parkingFee = nil
+        }
+    }
+}
+
+/// 分时电价的一行
+struct PricePeriod: Codable {
+    var timeFrame: String? = nil
+    var electric: Double? = nil
+    var service: Double? = nil
+    var total: Double? = nil
+
+    /// 是否为"当前所处时段"。
+    ///
+    /// **必须指认出来** —— 用户看这张卡就是为了知道"现在充多少钱"，
+    /// 把多段电价平铺而不标出当前段，等于让他自己算。
+    func isCurrent(_ currentPeriod: String?) -> Bool {
+        guard let currentPeriod, !currentPeriod.isEmpty,
+              let timeFrame, !timeFrame.isEmpty else { return false }
+        return timeFrame == currentPeriod
+    }
+}
+
+// MARK: - 附近充电站的展示派生值
+
+extension ChargingStation {
+
+    var displayName: String {
+        if let name, !name.isEmpty { return name }
+        return "未命名站点"
+    }
+
+    /// 是否有可用的当前价格。
+    ///
+    /// 与「免费」无关：没有价格就是没有价格，界面显示「价格 --」，
+    /// **绝不显示 0** —— 把"查不到"画成"不要钱"是会被当成真事的。
+    var hasPrice: Bool { price?.totalPrice != nil }
+
+    var distanceText: String {
+        guard let distanceKm else { return "--" }
+        return String(format: "%.2f km", distanceKm)
+    }
+
+    /// 枪数摘要，按快充分开展示。
+    ///
+    /// 上游没给总枪数时**不显示 0/x** ——「0 个可用」和「不知道几个可用」
+    /// 是两回事，前者会让人白白放弃一个站。
+    var gunTexts: [String] {
+        var items: [String] = []
+        if let dc = dcCount, dc > 0 {
+            items.append("快充 \(text(ableDcCount))/\(dc)")
+        }
+        if let ac = acCount, ac > 0 {
+            items.append("慢充 \(text(ableAcCount))/\(ac)")
+        }
+        if items.isEmpty, let total = totalCount, total > 0 {
+            items.append("可用 \(text(availableCount))/\(total)")
+        }
+        return items
+    }
+
+    /// 有枪但全满（用于把枪数标成警示色）
+    var isFull: Bool {
+        guard let total = totalCount, total > 0 else { return false }
+        return (availableCount ?? 0) == 0
+    }
+
+    var scoreText: String? {
+        guard let score, score > 0 else { return nil }
+        return String(format: "%.1f", score)
+    }
+
+    private func text(_ value: Int?) -> String {
+        guard let value else { return "--" }
+        return String(value)
+    }
+}
+
+extension StationPrice {
+
+    var parkingText: String? {
+        guard let parkingFee, !parkingFee.isEmpty else { return nil }
+        return parkFree == true ? "\(parkingFee)（免费）" : parkingFee
+    }
+}
+
 // MARK: - 车控指令
 
 /// 车控指令类型

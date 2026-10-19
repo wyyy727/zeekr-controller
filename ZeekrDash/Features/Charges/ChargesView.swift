@@ -22,6 +22,17 @@ struct ChargesView: View {
         // 页面标题与底部导航重复，已移除；顶部右上角为数据来源徽标
         NavigationStack {
             ScreenContainer(modeText: store.modeBadgeText, trailingAccessory: { historyMenu }) {
+                // 附近充电站与消费账单是**两块独立的数据**（前者实时、后者是
+                // 导入的历史），所以它必须在空态判断**之外**渲染 ——
+                // 没导入过账单，不代表看不到"附近哪能充、现在多少钱"，
+                // 而那恰恰是这一页最有用的信息。
+                //
+                // 未登录时不显示：服务端会拒绝 /api/stations，放出卡片只会
+                // 诱导用户点一个必然失败的按钮，那比不显示更糟。
+                if !store.needsLogin {
+                    NearbyStationsCard()
+                }
+
                 if model.isLoading && model.summary == nil {
                     LoadingView(text: "正在加载消费数据")
                         .padding(.top, 60)

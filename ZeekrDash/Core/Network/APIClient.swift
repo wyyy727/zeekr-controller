@@ -151,6 +151,40 @@ final class APIClient {
         }
     }
 
+    // MARK: - 图片下载（地图缩略图）
+
+    /// 下载图片字节。**任何失败都返回 nil，不弹错误**。
+    ///
+    /// 地图只是位置卡的辅助：取不到就不显示图，地址和坐标仍然可读。
+    /// 为一张缩略图弹一次"网络请求失败"是噪音，尤其是它还会随轮询反复出现。
+    ///
+    /// 用这个而不是 `AsyncImage`：图片接口同样要带 `Authorization` 头，
+    /// 而 `AsyncImage` 无法自定义请求头。
+    func imageData(_ path: String, query: [String: String] = [:]) async -> Data? {
+        guard var components = URLComponents(string: normalizedBaseURL + path) else {
+            return nil
+        }
+        if !query.isEmpty {
+            components.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
+        }
+        guard let url = components.url else { return nil }
+
+        var request = URLRequest(url: url)
+        applyAuth(to: &request)
+
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode),
+                  !data.isEmpty else {
+                return nil
+            }
+            return data
+        } catch {
+            return nil
+        }
+    }
+
     // MARK: - 内部
 
     /// 规范化 BaseURL：去掉尾部斜杠

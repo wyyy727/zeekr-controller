@@ -22,7 +22,7 @@ enum MockData {
     // 对应 preview/index.html → MOCK.status
 
     static let vehicleStatus = VehicleStatus(
-        vin: "L6T7841Z0PN000001",
+        vin: "L6TDEMOCK00000001",
         nickname: "焕新 001",
         plateNo: "沪A·D8821",
         modelName: "ZEEKR 001",
@@ -89,6 +89,30 @@ enum MockData {
         speedKmh: 0,
         avgConsumption: 15.8,
         serviceDistanceKm: 4200
+    )
+
+    // MARK: - 车辆位置
+    //
+    // 对应 preview/index.html → MOCK.location，字段与 /api/vehicle/location 一致。
+    // 地址一律带「演示」字样：模拟数据不该长得像真实地点。
+    // `mapAvailable = false`：演示模式不联网，也就不该去请求地图图片。
+
+    static let vehicleLocation = VehicleLocation(
+        available: true,
+        lat: 31.2035,
+        lng: 121.5858,
+        reportedAt: "2026-10-19 10:48:21",
+        reason: nil,
+        mapAvailable: false,
+        addressFromCache: false,
+        address: LocationAddress(
+            address: "演示市演示区演示路 88 号",
+            recommend: "演示园区 · 地下车库 B2",
+            province: "演示省",
+            city: "演示市",
+            district: "演示区",
+            street: "演示路"
+        )
     )
 
     // MARK: - 行程记录
@@ -272,6 +296,99 @@ enum MockData {
             ChargeProviderStat(provider: .other,      amount: 73.50,  energyKwh: 45.4,  count: 2),
         ]
     )
+
+    // MARK: - 附近充电站
+    //
+    // 对应 preview/index.html → MOCK.stations
+    //
+    // 形状与服务端模拟侧（`mock_client.get_nearby_stations`）一致 ——
+    // 模拟数据只是"不上网时的演示"，字段契约不能自成一套。
+    //
+    // 站名一律带「演示」字样：模拟数据不该长得像真实场站。
+    // 最后一站 `price: nil` 是刻意留的 —— 用来验证「取不到价格」与「免费」
+    // 在界面上确实长得不一样（前者显示「价格 --」，绝不是 0）。
+
+    static let stations: [ChargingStation] = [
+        ChargingStation(
+            stationId: "mock-station-1",
+            name: "极氪超充·演示站 A",
+            address: "演示路 1 号",
+            lat: 31.2336, lng: 121.4772,
+            distanceKm: 0.35,
+            score: 4.6,
+            tags: ["演示数据"],
+            selfOperate: true,
+            availableCount: 6, totalCount: 8,
+            acCount: 0, dcCount: 8,
+            ableAcCount: 0, ableDcCount: 6,
+            price: StationPrice(
+                totalPrice: 1.90, feeElectric: 1.10, serviceFee: 0.80,
+                currentPeriod: "00:00-23:59",
+                periods: [PricePeriod(timeFrame: "00:00-23:59", electric: 1.10, service: 0.80, total: 1.90)],
+                parkingFee: "充电期间免费", parkFree: true, holdFee: false,
+                feeDesc: "演示数据：全天一口价"
+            )
+        ),
+        ChargingStation(
+            stationId: "mock-station-2",
+            name: "演示站 B · 商场地下层",
+            address: "演示路 2 号",
+            lat: 31.2376, lng: 121.4737,
+            distanceKm: 0.80,
+            score: 4.1,
+            tags: ["演示数据"],
+            selfOperate: false,
+            availableCount: 2, totalCount: 12,
+            acCount: 12, dcCount: 0,
+            ableAcCount: 2, ableDcCount: 0,
+            price: StationPrice(
+                totalPrice: 1.65, feeElectric: 1.10, serviceFee: 0.55,
+                currentPeriod: "11:00-22:00",
+                periods: [
+                    PricePeriod(timeFrame: "00:00-06:00", electric: 0.37, service: 0.98, total: 1.35),
+                    PricePeriod(timeFrame: "06:00-11:00", electric: 0.72, service: 0.98, total: 1.70),
+                    PricePeriod(timeFrame: "11:00-22:00", electric: 1.10, service: 0.55, total: 1.65),
+                    PricePeriod(timeFrame: "22:00-23:59", electric: 0.83, service: 0.72, total: 1.55),
+                ],
+                parkingFee: "按停车场标准收费", parkFree: false, holdFee: false,
+                feeDesc: "演示数据：尖峰平谷分时计价，谷段最划算"
+            )
+        ),
+        ChargingStation(
+            stationId: "mock-station-3",
+            name: "演示站 C · 高架旁",
+            address: "演示路 3 号",
+            lat: 31.2430, lng: 121.4737,
+            distanceKm: 1.40,
+            score: 3.8,
+            tags: ["演示数据"],
+            selfOperate: false,
+            availableCount: 0, totalCount: 16,
+            acCount: 4, dcCount: 12,
+            ableAcCount: 0, ableDcCount: 0,
+            price: StationPrice(
+                totalPrice: 1.55, feeElectric: 0.95, serviceFee: 0.60,
+                currentPeriod: "00:00-23:59",
+                periods: [PricePeriod(timeFrame: "00:00-23:59", electric: 0.95, service: 0.60, total: 1.55)],
+                parkingFee: "按停车场标准收费", parkFree: false, holdFee: true,
+                feeDesc: "演示数据：满位状态，超时占位另收费"
+            )
+        ),
+        ChargingStation(
+            stationId: "mock-station-4",
+            name: "演示站 D · 客运站",
+            address: "演示路 4 号",
+            lat: 31.2592, lng: 121.4737,
+            distanceKm: 3.20,
+            score: 4.9,
+            tags: ["演示数据"],
+            selfOperate: false,
+            availableCount: 9, totalCount: 10,
+            acCount: 0, dcCount: 10,
+            ableAcCount: 0, ableDcCount: 9
+            // price 留空：这一站就是「取不到价格」的样本
+        ),
+    ]
 
     // MARK: - 车辆权限包
     //
