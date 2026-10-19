@@ -34,13 +34,18 @@
 │   SwiftUI           │ ──────> │   FastAPI                    │
 │                     │         │                              │
 │  · 车况卡片          │         │  · 极氪国区网关对接            │
-│  · 行程能耗图        │         │    GW1 短信登录                │
-│  · 充电消费报表      │         │    GW2 数据/指令               │
-│  · 车控面板          │         │    GW3 最新状态/远程控制        │
-│  · 设置              │         │  · 账单解析与归集              │
-└─────────────────────┘         │  · SQLite 存储                │
-                                └──────────────────────────────┘
+│  · 行程能耗图        │         │    GW1 短信验证码登录           │
+│  · 充电消费报表      │         │    GW3 车数据 / 车控           │
+│  · 附近充电站        │         │  · 充电站：极氪 + 第三方两跳    │
+│  · 车控面板          │         │  · 账单解析与归集              │
+│  · 设置              │         │  · SQLite 存储                │
+└─────────────────────┘         └──────────────────────────────┘
 ```
+
+> **关于 GW2**：早期资料里的「GW2 换 token」这一级**已经停用** ——
+> `/app/login/v1/getTokenByCode` 在两个 host 上都返回 404（2026-10-16 真机实测）。
+> 现在的链路是 **GW1 → GW3 两级**。`live_client.py` 里仍然保留着「GW3 被拒则回退
+> GW2」的分支，那是历史遗留；它没有触发过，不要拿它解释失败原因。
 
 **为什么需要 Python 服务？**
 
@@ -75,8 +80,18 @@ iOS 端拿不到这些，所以把签名与加密逻辑放在 Python 侧，iOS A
      算法未改，只加了脱敏回显与写 `.env`。
    - 官方 App 加了壳也不影响 —— 脚本不依赖类级反编译，只扫 DEX 明文字符串表与反汇编 `libenv.so`。
 
-   > ⚠️ `ZEEKR_PROD_SECRET` 可能提取出多个候选。若真机上报 `079025`（签名失败），
-   > 按脚本列出的候选逐个替换再试。
+   > ⚠️ **两条已被实测否证的结论，别再走老路（2026-10-16）：**
+   >
+   > - `ZEEKR_PROD_SECRET`：网关实际使用的值**不在**提取器输出的 119 个候选里。
+   >   「逐个换候选再试」这条路走不通，改用参考实现里已验证的常量。
+   > - `ZEEKR_VIN_KEY` / `ZEEKR_VIN_IV`：提取器给的常量恒报
+   >   `079025 Decrypt X-VIN failed`。算法（AES-128-CBC + PKCS7 + Base64）没错，
+   >   错的只是常量。
+   >
+   > 判错技巧：网关**验签在 token 校验之前**，补齐必需头之后用**假 JWT** 就能判定
+   > 密钥对不对，不需要真车、也不需要重新登录。
+   > 另：`079025` 是**复用码**（签名失败 / X-VIN 解密失败都用它），
+   > 日志里必须同时打 msg，只看码会把排查方向带偏。
 
 3. **重要**：新建一个**极氪子账号**并把车辆共享给它。
    极氪每个账号只保留一个会话，用主账号会导致手机 App 被踢下线。
@@ -121,7 +136,8 @@ cd .. && cp .env.example .env
 
 - <http://localhost:8765/docs> —— FastAPI 自动生成的接口文档
 - <http://localhost:8765/preview/index.html> —— **设计预览页**（见下文「预览页」一节）
-- <http://localhost:8765/preview/debug.html> —— **接口调试页**
+- <http://localhost:8765/preview/index.html?debug=1> —— **带调试台**：浮层里可配后端地址、逐个打接口、看请求日志。
+  调试台里的「连接后端」开关关着时**不发任何请求**（默认就是关的）
 
 `.env` 的位置不敏感：`server/.env` 与**仓库根目录** `.env` 都会被加载（先命中的优先），
 所以按上面的 `cd .. && cp .env.example .env`（落在根目录）也能生效。
@@ -137,6 +153,11 @@ cd .. && cp .env.example .env
 | `ZEEKR_VIN_KEY` | ✅ | 同上（AES-128，加密 VIN） |
 | `ZEEKR_VIN_IV` | ✅ | 同上 |
 | `ZEEKR_VEHICLE_TOKEN` | ⬜ | **可选的「第 7 项」**。从 App 抓包得到的 `X-VIN` 头值；填了就用它，否则服务端自行 AES 加密 VIN |
+| `ZEEKR_CA_SECRET` | ⬜ | GW1（`x_ca_*` 签名）的 App 内置常量，已有默认值；App 改版导致 `4010001` 时可覆盖 |
+| `ZEEKR_TSP_PLATFORM` | ⬜ | 权限包接口的平台枚举，**默认 `5`**。非数字报 `000002`，`1/2/3` 报 `037021`，`4` 返回空数组 |
+| `ZEEKR_HAOHAN_HOST` | ⬜ | 第三方充电网关地址，默认 `https://gateway-prod.haohanpower.tech` |
+| `ZEEKR_HAOHAN_CHANNEL_ID` | ⬜ | 第三方充电网关渠道号，默认 `1`（逆向得到的常量，故配置化） |
+| `TENCENT_MAP_KEY` | ⬜ | **车辆位置卡用**。腾讯位置服务 key（需开「逆地理编码」+「静态图」）。留空则只显示经纬度，不显示地址与地图。⚠️ 填了就意味着车坐标会发给腾讯 |
 | `ALLOW_COMMANDS` | ⬜ | 车控总开关，**默认 `false`** |
 | `API_TOKEN` | ⬜ | 服务端鉴权令牌；留空则不鉴权（见「常见问题」） |
 | `DATA_SOURCE` | ⬜ | `auto`（默认）/ `mock` / `live` |
@@ -217,8 +238,18 @@ AltStore / SideStore / Sideloadly 自签安装。详见「构建与 CI」一节�
 | **车控** | 见下方「车控指令可信度」——**只有 8 条可下发真车** | ⚠️ 部分 |
 | **行程** | 行程列表（时间/距离/能耗/起终点）、能耗趋势图（7/30/90 天） | ✅ |
 | **充电** | 跨服务商消费汇总、服务商分布、月度趋势、明细、账单导入 | ✅ |
-| **设置** | 服务地址、极氪账号、轮询间隔、车控总开关、连接诊断 | ✅ |
+| **附近充电站** | 按手机定位查附近站点：距离 / 空枪 / **当前电价** / 分时电价 / 一键导航 | ✅ |
+| **设置** | 服务地址、API 令牌、轮询间隔、车控总开关、权限包清单、连接诊断 | ✅ |
 | **电费测算** | 充电量统计、动态电价、智能充电 | ⏸️ 仅前台占位 |
+
+> **附近充电站**的数据要**两跳、两套认证体系**才能凑齐：
+> 极氪网关给坐标与枪数，**站名与价格却不在那里**（气泡接口 23 个字段里没有任何
+> 价格数值）—— 它们来自极氪 App 内嵌的第三方（浩汉能源）SDK，由服务端按
+> `stationId` 逐个预取后合并下发。
+>
+> 三条设计边界：① **取不到价格显示「--」，绝不显示 0**（把"没查到"画成"不要钱"
+> 会被当真）；② 第三方挂了列表照常返回，只是没有价格；③ **坐标只发给极氪自己的
+> 网关**，转给第三方的只有 `stationId` —— 第三方拿不到"你在哪"。
 
 ### ⚠️ 车控指令可信度
 
@@ -298,7 +329,7 @@ MANUAL_OVERRIDES = {
 
 ## 预览页
 
-服务端挂载了一个**单文件设计预览页** `preview/index.html`（约 102 KB），
+服务端挂载了一个**单文件设计预览页** `preview/index.html`（约 155 KB），
 用 Safari/浏览器打开即可，无需 Mac 也能先看界面与配色：
 
 ```
@@ -338,13 +369,13 @@ http://<服务地址>/preview
 
 ### 实时状态拿不到 / 077001 接口未被授权
 
-国区网关有两代登录接口，发的令牌权限范围不同：
+GW3 登录用的是 `identityType=5` + GW1 的 JWT —— 这是**实测可用**的那一条
+（车辆列表、车况、权限包都通）。另外务必检查 `X-VIN` 有没有带上：
+`active_vin` 若没落盘，所有需要它的请求都会「裸奔」，表现为 404 / `079001`，
+真实原因却是没告诉服务端是哪台车（现已修：车辆列表成功后即写入并持久化）。
 
-- 旧令牌（`identityType: 5`）只能读车辆列表
-- 新令牌（`identityType: 10` + `tspCode`）才能读状态和下发指令
-
-服务端会在遇到 `079001` 时**回退 GW2 通道**（注意：**不会**重新登录 ——
-误重登会作废自己正在用的令牌）。如果持续失败，多半是**账号与该车没有绑定控制权限**。
+服务端遇到 `079001` 时**不会重新登录** —— 误重登会作废自己正在用的令牌。
+如果持续失败，多半是**账号与该车没有绑定控制权限**。
 
 返回 `079025 Signature authentication failed` 则是签名串构造问题，服务端会打一条
 指向具体排查点的 ERROR 日志。
@@ -386,12 +417,15 @@ API_TOKEN=<上面生成的值>
 
 ## 构建与 CI
 
-仓库有**两条互不依赖**的流水线：
+仓库只有**一条**流水线 —— GitHub Actions：
 
 | 流水线 | 位置 | 运行环境 | 做什么 |
 |---|---|---|---|
-| CNB | `.cnb.yml` | Linux `swift:6.1-noble` 容器 | 跑 `ci/typecheck.sh`：用真实 `swiftc` 做 `-parse` + `-typecheck`，SwiftUI/Charts 由 `ci/SwiftUIShim.swift` 桩替代 |
 | GitHub Actions | `.github/workflows/build-ios.yml` | `macos-26` + Xcode 26 | `xcodegen generate` → `xcodebuild` 不签名编译 → 打包**未签名 IPA** 作为 artifact |
+
+> 曾经还有一条 CNB 流水线（`.cnb.yml` + `ci/` 下的 Linux Swift 类型检查桩），
+> 已在 2026-10 移除 —— 它只能做类型检查，而 GitHub 这条能真编出 IPA，
+> 两条并存的维护成本不值得。
 
 **借 GitHub 出未签名 IPA（没有 Mac 时的路径）：**
 
@@ -404,29 +438,38 @@ API_TOKEN=<上面生成的值>
 
 **CI 的已知盲区**（改代码前请了解）：
 
-- **服务端 191 个测试不在任何 CI 里**。CNB 只做 Swift 类型检查，GitHub Actions 只编 iOS。
-- `ci/SwiftUIShim.swift` 是手写桩，**`@available` / 部署目标检查完全失效**
-  （`swiftc` 未传 `-target`），且桩的签名可能与真实 SDK 漂移。
-  它能抓语法/类型/参数/访问控制/MainActor 隔离错误，抓不到 iOS SDK 独有的 API 语义。
-- 仓库内**没有 XCTest target**，iOS 端零自动化测试。
+- **服务端 215 个测试不在 CI 里** —— GitHub 这条只编 iOS，不跑 pytest。
+  改了 `server/**` 请本地跑一遍 `python -m pytest tests -q`。
+- **CI 只保证"能编译"**，不保证"跑起来对"：仓库内**没有 XCTest target**，
+  iOS 端零自动化测试；真机行为只能人工验证。
+- iOS 改动若在 Windows / Linux 上写，**本地无法验证编译** ——
+  要么 push 后看 Actions，要么在有 Xcode 的机器上过一遍。
 
 ---
 
 ## 测试
 
-服务端有一批**逐条对应历史缺陷**的回归测试，共 **191 个用例**：
+服务端有一批**逐条对应历史缺陷**的回归测试，共 **215 个用例**：
 
 ```bash
 cd server
 pip install -r requirements.txt
 pip install pytest          # ← requirements.txt 里没有声明 pytest，需单独装
-python -m pytest tests -q
+python -m pytest -q
 ```
 
-`server/tests/` 四个文件：`test_core.py`（核心逻辑与签名）、`test_hardening.py`（审计缺陷回归）、
-`test_bills.py`（账单全链路）、`test_adapter_shape.py`（mock 与 live 适配器的输出形状必须一致 —— 防字段漂移）。
+`server/tests/` 六个文件：
 
-> 注意：其中 19 个用例使用 `tempfile.mkdtemp()` 建临时 SQLite 库；
+| 文件 | 覆盖什么 |
+|---|---|
+| `test_core.py` | 核心逻辑与签名 |
+| `test_hardening.py` | 审计缺陷回归 |
+| `test_bills.py` | 账单全链路 |
+| `test_adapter_shape.py` | mock 与 live 适配器的**输出字段集合必须一致**（防字段漂移） |
+| `test_stations.py` | 附近充电站：字段裁剪、降级语义、缓存网格 |
+| `conftest.py` | 统一 `sys.path` 与测试客户端；**强制与本机 `.env` 隔离** |
+
+> 注意：其中 8 个用例使用 `tempfile.mkdtemp()` 建临时 SQLite 库；
 > 若运行环境限制新建子目录写入，它们会以
 > `sqlite3.OperationalError: unable to open database file` 失败 —— 是环境问题，不是代码缺陷。
 
@@ -434,11 +477,14 @@ python -m pytest tests -q
 
 ## 真机验证清单
 
-**本项目的真实数据链路（极氪国区三网关）尚未在实车上完整验证过。**
-服务端跑通的是**模拟数据**与**协议实现**。
+**已验证的部分（2026-10-16 首次真车实测）**：GW3 签名、GW1 发码 / 登录、
+GW3 登录与会话持久化、X-VIN、车辆列表、**车况字段映射**、权限包接口。
+也就是说「读到真实车况」这条链路是通的。
 
-所有必须在真车上逐条核对的项目（GW3 签名、三级登录、字段映射、6 条车控指令的实际动作）
-都列在：
+**仍未验证的部分**：**车控指令一条都没在真车上试过**（8 条已验证 serviceId 的
+也只是"有逆向依据"，不等于"车会动"）；车窗语义、充电功率量纲等少数字段待确认。
+
+所有必须在真车上逐条核对的项目都列在：
 
 ```
 docs/真机验证清单.md
@@ -527,27 +573,27 @@ zeekr-controller/
 ├── server/                     # 服务端（FastAPI）
 │   ├── app/
 │   │   ├── adapters/           # 极氪网关适配层 + 签名（zeekr_signing.py）
-│   │   ├── api/                # 接口路由
+│   │   │                       #   haohan.py = 第三方充电网关（价格来源）
+│   │   ├── api/                # 接口路由（stations.py = 附近充电站）
 │   │   ├── bills/              # 账单解析与归集
 │   │   └── core/               # 配置与 SQLite 存储
-│   ├── tests/                  # 191 个回归测试
+│   ├── tests/                  # 215 个回归测试
 │   └── requirements.txt
 │
 ├── preview/
-│   ├── index.html              # 单文件设计预览页（**功能改动的唯一落点**）
-│   └── debug.html              # 预览页的调试副本（可连本机/远程后端看接口响应）
+│   └── index.html              # 单文件设计预览页 + 调试台（**功能改动的唯一落点**）
 ├── docs/
 │   ├── zeekr-apk-reference.md  # 官方接口情报（人读；**先查这里，别重新逆向**）
 │   ├── zeekr-apk-intel.json    # 官方接口情报（机器可读）
 │   └── 真机验证清单.md          # 真机逐条核对清单
 ├── scripts/
-│   ├── server.sh               # 服务管理脚本
+│   ├── server.sh               # 服务管理脚本（Linux / macOS / Git Bash）
+│   ├── server.cmd              # 同上，Windows 版（**纯 ASCII + CRLF**）
+│   ├── logs_tail.py            # 日志实时跟随（Windows 下给 server.cmd 用）
 │   ├── apk_intel.py            # APK 接口情报提取 / 渲染 / 版本对比
 │   └── extract_keys.py         # 从 APK 提取 6 个网关密钥
 │
-├── ci/                         # Linux Swift 类型检查（typecheck.sh + 桩文件）
 ├── .github/workflows/build-ios.yml
-├── .cnb.yml
 ├── project.yml                 # XcodeGen 工程描述
 └── .env.example                # 环境变量模板
 ```

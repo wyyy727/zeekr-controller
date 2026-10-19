@@ -35,9 +35,14 @@
 
 | 改动类型 | 怎么改 |
 |---|---|
-| **功能 / UI 类** | **先只改 `preview/index.html`**（用户在 Windows 上没 Mac，靠预览页看效果）。**iOS 与后端代码必须等用户明确确认后再动。** |
+| **新功能** | **先只改 `preview/index.html`**（用户在 Windows 上没 Mac，靠预览页看效果）。预览页在浏览器里被看过、确认过之后，才允许改 iOS 与后端 |
+| **把预览页已有的功能对齐到 iOS** | 可以直接改 —— 用户已明确放行（2026-10-19：「去改 iOS 代码吧」） |
 | **接口路径 / 字段名纠错** | 属于修复而非新功能，**可直接改后端**（`server/app/adapters/live_client.py`） |
 | iOS 小组件（Widget） | **一律不做** —— 用户明确表示不需要臃肿功能 |
+
+> iOS 改动**无法在本机验证编译**：这台机器是 Windows，没有 Xcode / Swift 工具链。
+> 所以写 Swift 时一律用**最保守的语法**，并且要在提交信息里写明"未编译"。
+> 验证只能靠 push 后看 GitHub Actions，或由用户在有 Xcode 的机器上过一遍。
 
 ---
 
@@ -133,29 +138,96 @@ python scripts/apk_intel.py <新版.apk> --compare docs/zeekr-apk-intel.json
 
 | 路径 | 作用 |
 |---|---|
-| `server/app/adapters/live_client.py` | 极氪网关对接**全部实现**（路径、字段解析、车控、能力集） |
-| `server/app/adapters/zeekr_signing.py` | 三网关签名（SHA1 / HMAC-SHA1 / HMAC-SHA256+AES-128-CBC） |
+| `server/app/adapters/live_client.py` | 极氪网关对接**全部实现**（路径、字段解析、车控、能力集、附近站点） |
+| `server/app/adapters/zeekr_signing.py` | 三网关签名（GW1 SHA1 / GW2 HMAC-SHA1 / GW3 HMAC-SHA256 + AES-128-CBC）。**GW2 已停用**，回退分支是历史遗留 |
+| `server/app/adapters/haohan.py` | 第三方充电网关（站名 + 电价来源），与极氪侧零耦合 |
+| `server/app/api/stations.py` | `GET /api/stations/nearby` —— 两跳合并、并发取价、降级与缓存 |
+| `server/app/adapters/tencent_map.py` | 腾讯位置服务（逆地理编码 + 静态图）。**key 只在服务端** |
+| `server/app/core/coords.py` | WGS-84 ↔ GCJ-02。车坐标 `marsCoordinates="0"` 时必须转，否则地图偏约 500 米 |
+| `server/app/api/location.py` | `GET /api/vehicle/location` 与 `.../map.png` —— **全项目唯一把车坐标发给第三方的出口** |
 | `server/app/adapters/mock_client.py` | 模拟数据（字段形状必须与 live 保持一致 —— 有测试守着） |
 | `server/tests/test_adapter_shape.py` | 防漂移：两个适配器输出形状必须一致 |
-| `preview/index.html` | **单文件设计预览页**（功能改动的唯一落点） |
-| `preview/debug.html` | 预览页的调试副本，可连本机/远程后端看接口响应（**与 index.html 必须同步改**） |
+| `server/tests/test_stations.py` | 附近充电站：字段裁剪、降级语义、缓存网格 |
+| `preview/index.html` | **单文件设计预览页 + 调试台**（功能改动的唯一落点）。`?debug=1` 调出调试浮层 |
 | `scripts/server.cmd` / `server.sh` | 服务管理（Windows / bash 两版，功能对应，须同步改） |
 | `scripts/logs_tail.py` | 实时跟随服务日志（`server.cmd logs` 调用），并做 UTF-8 → 控制台编码转换 |
+| `ZeekrDash/Features/Charges/NearbyStationsViewModel.swift` | 附近充电站：定位（一次性）→ 取站点 → 排序 |
+| `ZeekrDash/Features/Charges/NearbyStationsView.swift` | 附近充电站卡片 UI |
+| `ZeekrDash/Features/Dashboard/DashboardView.swift` | 车况主页：电量 / 胎压 / 车身状态 / **车辆位置** / 车控面板 |
 | `docs/zeekr-apk-reference.md` | 官方接口情报（**先查这里**） |
 | `docs/真机验证清单.md` | 真车逐条核对清单 |
 
 ---
 
-## ❗ 三个容易搞错的认知
+## ⛽ 附近充电站：改这块之前先读
+
+数据要**两跳、两套完全独立的认证体系**才凑得齐，拆成两个适配器是有原因的：
+
+1. 极氪 GW1 `…/bubble/charge/getListV2` —— 坐标、枪数、运营商 logo（要 JWT + `x_ca_*` 签名）
+2. 第三方浩汉网关 `find/station/detail` —— 站名、地址、评分、**电价**（只要一个 `channelId` 请求头）
+
+| 边界 | 说明 |
+|---|---|
+| **价格缺失 ≠ 免费** | 取不到就给 `null`，界面显示「价格 --」，**绝不落成 0**。把"没查到"画成"不要钱"是安全事故级的误导 |
+| **坐标绝不发给第三方** | 只把 `stationId` 转给浩汉；坐标只发给极氪自己的网关。前端同理：不落盘、不进日志、登出即清 |
+| **第三方挂了要降级** | 列表照常返回，只丢站名与价格，并置 `priceAvailable=false` 让界面明确提示 |
+| **缓存是唯一的风控手段** | 两侧限流阈值未知：站点按坐标 3 位小数网格缓存 300s，价格按 `stationId` 缓存，**只缓存成功结果** |
+
+三个反直觉点（别再试错一遍）：
+
+- 极氪侧**必须 POST** —— GET 一律 `200 + 999999 服务异常`，极易误读成"服务挂了"；
+  路径里**没有** `/toc/` 段。
+- 浩汉缺 `channelId` 头时报的是 `52003 渠道信息缺失` 或 `1027 当前站点暂未开放`
+  —— **两个错都在骗人**，与站点是否开放无关。
+- 成功码位数不同：浩汉是四位 `0000`，极氪是六位 `000000`。
+
+浩汉**没有**"一次返回多站价格的列表接口"。它自己的前端是**逐站预取 detail 再合并**，
+`server/app/api/stations.py` 照这个做（并发上限 6）。
+
+---
+
+## 📍 车辆位置：改这块之前先读
+
+- **坐标已由服务端转成 GCJ-02**（依据网关的 `marsCoordinates` 标志）。
+  客户端**不要再转第二次**，否则会反向偏回去 500 米。
+- **位置不是实时的**：车静止时网关不更新坐标（实测 15 条快照只有 3 个位置点），
+  `reportedAt` 可能滞后几十分钟。界面**必须**显示上报时间。
+- **key 只在服务端**：客户端请求 `/api/vehicle/location/map.png` 拿图，
+  不要在客户端拼腾讯 URL。iOS 用 `APIClient.imageData`（要带 Authorization 头），
+  **不能用 `AsyncImage`** —— 它不能自定义请求头。
+- **缓存是隐私手段**：地址落 `geocode_cache`、图落 `data/mapcache/`，
+  坐标不变就完全不请求第三方。改缓存逻辑前想清楚"会不会让外发变多"。
+- **降级要分清两种**：`mapAvailable=false` 是没配 key（去填 `.env`）；
+  `mapAvailable=true` 但 `address=null` 是第三方取不到（额度/网络），改配置没用。
+
+---
+
+## ❗ 五个容易搞错的认知
 
 1. **车控返回「已提交」≠ 车端已执行。** 网关收下只代表请求被受理。
    要确认真执行，必须查 `queryProcessResult`，或以**车实际动作**为准。
 2. **后端不能去掉。** iOS 无法常驻后台轮询（BGTaskScheduler 不可靠、低电量模式直接禁用），
    而"打开就看见最新车况"依赖服务端轮询。密钥也不该落到客户端。
-3. **`preview/index.html` 与 `preview/debug.html` 必须同步改** —— 后者是前者的副本 + 调试层。
-   两件事都要做到：① 应用功能与样式一律以 `index.html` 为准，**不要只在调试页里加**；
-   ② 改了 `index.html` 就**必须把同样的改动应用到 `debug.html`**，否则两边漂移，
-   调试页就失去了"参照 index.html 验证接口"的价值。
+3. **预览页只剩 `preview/index.html` 一个文件**（2026-10-19 合并，原 `debug.html` 已删除）。
+   调试台是同一页面里的浮层，由 URL 参数控制：
+   · 默认打开 —— 纯设计预览，**调试台不显示、一个网络请求都不发**
+   · `?debug=1` —— 显示调试台浮按钮
+   · `?debug=0` —— 关掉并记住
+   · 调试台里的 **「连接后端」开关** 才决定是否真的发请求（关着时地址输入框是禁用的）
+
+   这样做的原因：以前 `index.html` + `debug.html` 两份文件，改动必须手动同步，
+   靠 `diff` 全量差异恒为 554 行来核对 —— 一旦插入新代码这个数字就会变，
+   **核对手段本身成了负担**。合并后只有一份源码，同步问题永久消失。
+4. **`MockData.swift` 与 `preview/index.html` 的 `MOCK` 常量同源** ——
+   改一处要同步另一处（两边文件头都写了这条约定）。模拟数据是"不上网时的演示"，
+   但**字段契约不能自成一套**。演示用的站名一律带「演示」字样，别长得像真实场站。
+5. **模拟数据绝不能进持久化库。** 假数据长得像真的（日期连续、距离合理、字段齐全），
+   读路径分不清来源，排查时还会被当成"接口曾经成功过"的证据 —— 2026-10-19 就
+   这样误判过一次，把 `mock_client` 生成的 60 条假行程当成了真车数据。
+   两条防线，改动相关代码时别拆：
+   - `api/trips.py` / `api/vehicle.py` 在 `is_mock()` 为真时**不落库**；
+   - `tests/conftest.py` 把 `config.database` 指向临时库，**并重建 `app.main.store`**
+     （store 是导入时创建的，只改 config 不够）。
 
 ---
 
