@@ -354,6 +354,27 @@ body.is-scrolled .topbar::before {
   display: flex; align-items: center; justify-content: space-between;
 }
 
+/* ─────────── 车辆位置卡 ─────────── */
+/* 地图缩略图由后端代取（/api/vehicle/location/map.png），key 不在前端。
+   取图失败时 onerror 直接隐藏，下方的地址与坐标仍然可读 ——
+   位置卡的价值主要在「车最后停在哪」，图只是辅助。 */
+.loc-map {
+  width: 100%; height: 148px; object-fit: cover;
+  border-radius: 10px; display: block; margin-bottom: 10px;
+  background: var(--surface-alt);
+}
+.loc-addr {
+  font-size: 13.5px; font-weight: 500; line-height: 1.45;
+  margin-bottom: 4px; word-break: break-word;
+}
+.loc-sub {
+  font-size: 11px; color: var(--text-3); line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
+.loc-note {
+  font-size: 11px; color: var(--text-3); margin-top: 7px; line-height: 1.55;
+}
+
 /* ─────────── 主卡：电量环形 ─────────── */
 .hero { display: flex; gap: 20px; align-items: center; }
 .ring-wrap { position: relative; flex-shrink: 0; }
@@ -1067,13 +1088,158 @@ canvas { display: block; width: 100%; }
 }
 
 .hidden { display: none !important; }
+
+/* ═══════════════════════════════════════════════
+   调试台专用（与业务样式隔离；默认不渲染，?debug=1 才出现）
+   ═══════════════════════════════════════════════ */
+
+/* ── 面板内的分组与表单 ── */
+.dbg-sec { display: block; }
+.dbg-field { margin-bottom: 12px; }
+  .dbg-field label {
+    display: block; font-size: 11.5px; color: var(--text-3); margin-bottom: 5px;
+  }
+  .dbg-field input {
+    width: 100%; box-sizing: border-box;
+    font: inherit; font-size: 12.5px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    padding: 9px 11px; border-radius: 10px;
+    border: 1px solid var(--separator);
+    background: var(--surface-alt); color: var(--text-1);
+  }
+  .dbg-field input:focus {
+    outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    outline-offset: -1px;
+  }
+.dbg-note {
+  font-size: 11.5px; line-height: 1.65; color: var(--text-3);
+  margin: 16px 0 0; padding: 10px 12px; border-radius: 10px;
+  background: var(--surface-alt);
+}
+  .dbg-note code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; }
+  .dbgbtn {
+    font: inherit; font-size: 12.5px; font-weight: 500;
+    padding: 8px 14px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--separator);
+    background: var(--surface); color: var(--text-1);
+    white-space: nowrap;
+  }
+  .dbgbtn:hover { background: var(--surface-alt); }
+  .dbgbtn.primary { background: var(--accent); color: #fff; border-color: transparent; }
+  .dbgbtn.sm { padding: 5px 10px; font-size: 11.5px; }
+  .dbgbtn:disabled { opacity: .5; cursor: default; }
+
+  .dbg-presets { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .dbg-chip {
+    font-size: 11.5px; padding: 4px 10px; border-radius: 999px; cursor: pointer;
+    background: var(--surface-alt); color: var(--text-2); border: none;
+  }
+  .dbg-chip.on { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); font-weight: 500; }
+
+  /* 连接状态 */
+  .dbg-stat { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-3); }
+  .dbg-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); flex: 0 0 auto; }
+  .dbg-dot.ok { background: var(--qing-bi); }
+  .dbg-dot.bad { background: var(--zhu-sha); }
+  .dbg-dot.wait { background: var(--teng-huang); }
+
+/* ── 浮动入口按钮 ── */
+.dbg-fab {
+  position: fixed; right: 16px; bottom: 92px; z-index: 45;
+  height: 40px; padding: 0 16px; border-radius: 999px; border: none; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 600;
+  background: var(--accent); color: #fff;
+  box-shadow: 0 6px 20px -6px rgba(28,111,168,.55);
+  display: flex; align-items: center; gap: 6px;
+}
+  .dbg-fab .n {
+    background: rgba(255,255,255,.28); border-radius: 999px;
+    min-width: 18px; padding: 0 5px; font-size: 11px; line-height: 17px;
+  }
+  .dbg-fab.err { background: var(--zhu-sha); box-shadow: 0 6px 20px -6px rgba(229,72,59,.55); }
+
+/* ── 底部面板 ── */
+.dbg-sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+  height: 68vh; max-height: 620px;
+  display: flex; flex-direction: column;
+  background: var(--surface);
+  border-top-left-radius: 18px; border-top-right-radius: 18px;
+  box-shadow: 0 -12px 40px -12px rgba(0,0,0,.28);
+  transform: translateY(105%);
+  transition: transform .3s cubic-bezier(.32,.72,0,1);
+}
+  .dbg-sheet.open { transform: translateY(0); }
+  .dbg-sheet-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px var(--screen-padding) 8px;
+    border-bottom: 1px solid var(--separator);
+  }
+  .dbg-sheet-title { font-size: 14px; font-weight: 600; }
+  .dbg-tabs { display: flex; gap: 4px; padding: 8px var(--screen-padding) 0; }
+  .dbg-tab {
+    font: inherit; font-size: 12.5px; padding: 6px 12px;
+    border: none; background: none; cursor: pointer; border-radius: 8px;
+    color: var(--text-3);
+  }
+  .dbg-tab.on { background: var(--surface-alt); color: var(--text-1); font-weight: 500; }
+  .dbg-tab .n { font-size: 10.5px; opacity: .75; margin-left: 3px; }
+  .dbg-body { flex: 1; overflow-y: auto; padding: 10px var(--screen-padding) 20px; }
+
+  /* 接口清单 */
+  .dbg-api {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 10px; border-radius: 10px; background: var(--surface-alt);
+    margin-bottom: 6px;
+  }
+  .dbg-api .m {
+    font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 5px;
+    background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent);
+    flex: 0 0 auto;
+  }
+  .dbg-api .m.post { background: rgba(229,72,59,.13); color: var(--zhu-sha); }
+  .dbg-api .m.del  { background: rgba(91,100,114,.14); color: var(--text-2); }
+  .dbg-api .p { flex: 1; min-width: 0; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; word-break: break-all; }
+  .dbg-api .d { font-size: 11px; color: var(--text-3); }
+
+  /* 日志条目 */
+  .dbg-log {
+    border-radius: 10px; background: var(--surface-alt);
+    padding: 8px 10px; margin-bottom: 6px;
+  }
+  .dbg-log.err { background: rgba(229,72,59,.08); }
+  .dbg-log-top { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
+  .dbg-log-top .code { font-weight: 700; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .dbg-log-top .code.ok { color: var(--qing-bi); }
+  .dbg-log-top .code.bad { color: var(--zhu-sha); }
+  .dbg-log-top .p { flex: 1; min-width: 0; font-family: ui-monospace, Menlo, Consolas, monospace; word-break: break-all; }
+  .dbg-log-top .ms { color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .dbg-log .why { font-size: 11.5px; color: var(--zhu-sha); margin-top: 4px; word-break: break-word; }
+  .dbg-log details { margin-top: 6px; }
+  .dbg-log summary { font-size: 11px; color: var(--text-3); cursor: pointer; }
+  .dbg-pre {
+    margin: 6px 0 0; padding: 8px 10px; border-radius: 8px;
+    background: #1B2631; color: #D8E2EC;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11px; line-height: 1.5; overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+    max-height: 260px;
+  }
+  .dbg-empty { text-align: center; color: var(--text-3); font-size: 12.5px; padding: 28px 0; }
 </style>
 </head>
 <body>
 
+<!-- ⚠️ 页面主体结构与样式与 preview/index.html **完全一致**。
+     调试台的全部界面都在右下角悬浮面板里 —— 不占页面布局、
+     不改变任何应用内元素的观感。调试只做加法，不改应用本身。 -->
 <header class="topbar">
   <!-- 数据来源徽标：加载完成后由 syncModeBadge() 决定文案与显隐 -->
   <span class="badge-mode hidden" id="modeBadge"></span>
+  <!-- 调试连接状态：挂在既有 topbar 尾部，不新增布局 -->
+  <span class="dbg-stat" id="dbgStat">
+    <span class="dbg-dot" id="dbgDot"></span>
+    <span id="dbgStatText">未连接</span>
+  </span>
 </header>
 
 <main class="wrap" id="view"></main>
@@ -1107,6 +1273,75 @@ canvas { display: block; width: 100%; }
 
 <div class="toast" id="toast"></div>
 
+<!-- ═══════════ 调试台：浮动入口 + 底部面板 ═══════════ -->
+<button class="dbg-fab" id="dbgFab">
+  <span>调试</span><span class="n" id="dbgErrCount">0</span>
+</button>
+
+<div class="dbg-sheet" id="dbgSheet">
+  <div class="dbg-sheet-head">
+    <span class="dbg-sheet-title">调试台</span>
+    <span class="dbg-stat">
+      <span class="dbg-dot" id="dbgDot2"></span><span id="dbgStatText2"></span>
+    </span>
+    <span style="margin-left:auto"></span>
+    <button class="dbgbtn sm" id="dbgClear">清空日志</button>
+    <button class="dbgbtn sm" id="dbgClose">收起</button>
+  </div>
+  <div class="dbg-tabs">
+    <button class="dbg-tab" data-dbg="conn">连接</button>
+    <button class="dbg-tab on" data-dbg="api">接口<span class="n" id="dbgApiCount"></span></button>
+    <button class="dbg-tab" data-dbg="log">请求日志<span class="n" id="dbgLogCount"></span></button>
+  </div>
+  <div class="dbg-body">
+    <!-- 连接设置：静态标记，不参与重绘（否则输入框会被清空） -->
+    <div class="dbg-sec hidden" id="dbgSecConn">
+      <!-- 总开关：是否真正连后端。关着的时候一个请求都不发，
+           地址与令牌输入框也随之禁用 —— 免得填了以为会生效。 -->
+      <div class="dbg-field">
+        <label class="dbg-chip" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="dbgLinkSwitch">
+          连接后端
+        </label>
+        <p class="dbg-note" style="margin-top:6px">
+          关闭时只用本地演示数据，**不发任何网络请求**；打开后按下面的地址真实请求。
+        </p>
+      </div>
+      <div class="dbg-field">
+        <label for="dbgApi">后端地址</label>
+        <input id="dbgApi" type="text" spellcheck="false" autocapitalize="off"
+               placeholder="http://127.0.0.1:8765">
+      </div>
+      <div class="dbg-field">
+        <label for="dbgTok">API 令牌（后端设了 API_TOKEN 时填）</label>
+        <input id="dbgTok" type="text" spellcheck="false" placeholder="留空表示后端未启用鉴权">
+      </div>
+      <div class="dbg-presets">
+        <button class="dbg-chip" data-api="http://127.0.0.1:8765">本机 8765</button>
+        <button class="dbg-chip" data-api="http://127.0.0.1:9000">本机 9000</button>
+        <button class="dbg-chip" data-api="http://47.100.196.120:8765">远程 ECS</button>
+      </div>
+      <div class="dbg-presets" style="margin-top:10px">
+        <label class="dbg-chip" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="dbgDemo"> 演示模式（本地模拟车控，不发真实请求）
+        </label>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="dbgbtn primary" id="dbgConnect" style="flex:1">连接并刷新</button>
+      </div>
+      <p class="dbg-note">
+        调试台与 index.html 的唯一行为差异：这里**不做模拟数据兜底** ——
+        地址指向本机时也会真实发请求，连不上就如实报错，否则分不清
+        "看着有数据"和"其实没连上"。车控指令默认真实下发（后端
+        <code>ALLOW_COMMANDS=false</code> 时会被拒绝，这正是要看的结果）。
+      </p>
+    </div>
+
+    <div class="dbg-sec" id="dbgSecApi"></div>
+    <div class="dbg-sec hidden" id="dbgSecLog"></div>
+  </div>
+</div>
+
 <script>
 'use strict';
 
@@ -1122,11 +1357,33 @@ const QUERY_API = new URLSearchParams(location.search).get('api');
 /* 服务端设了 API_TOKEN 时，用 ?token=xxx 打开本页即可免改代码带令牌。
    服务端同时接受 Authorization 头与 ?token= 查询参数（见 main.py 中间件）。 */
 const QUERY_TOKEN = new URLSearchParams(location.search).get('token') || '';
-const API_SOURCE = QUERY_API
-  ? QUERY_API.trim()
-  : ((location.origin.startsWith('http') && location.port !== '5500')
-      ? location.origin
-      : 'http://localhost:8765');
+/* ── 调试台的地址来源（与 index.html 的关键差异）──
+   index.html 把「地址指向本机回环」判定为"不联网、直接用内置模拟数据"；
+   而调试台存在的意义恰恰是连本机后端，故**不沿用**该规则：
+   只要给了地址就发真实请求，连不上就如实报错。
+
+   优先级：URL ?api= > localStorage（调试台里手填过）> 自动推断 */
+const DBG_LS_API = 'zeekrdash.debug.api';
+const DBG_LS_TOKEN = 'zeekrdash.debug.token';
+
+function defaultApiSource() {
+  if (QUERY_API) return QUERY_API.trim();
+  // 用户上次在「连接」区填过的地址优先 —— 换过一次就记住
+  const saved = localStorage.getItem(DBG_LS_API);
+  if (saved) return saved;
+  /*
+    默认就是本机后端。
+    刻意**不**做"同源推断"：调试页可能被 file:// 打开、也可能由静态预览
+    服务器托管（如内置预览的 64686 端口），那些 origin 都不是 API 地址，
+    推错了会让人以为是后端没起。宁可给一个确定的默认值，
+    远程后端用「连接」区的一键预设切换。
+  */
+  return 'http://127.0.0.1:8765';
+}
+
+/* 用 let：调试台要支持运行时切换后端地址 */
+let API_SOURCE = defaultApiSource();
+let API_TOKEN = QUERY_TOKEN || localStorage.getItem(DBG_LS_TOKEN) || '';
 
 /* 判定地址形态 —— 必须与 iOS 端 EndpointResolver 给出完全一致的结论：
    地址为空或指向本机回环地址 → 使用内置模拟数据，不请求后端；
@@ -1165,12 +1422,53 @@ function resolveEndpointMode(raw) {
   return loopback.includes(host.toLowerCase()) ? 'loopback' : 'remote';
 }
 
-const ENDPOINT_MODE = resolveEndpointMode(API_SOURCE);
-/* 根本不需要联网：未配置或指向本机时，直接用内置模拟数据 */
-const PREFERS_MOCK = (ENDPOINT_MODE === 'unset' || ENDPOINT_MODE === 'loopback');
+let ENDPOINT_MODE = resolveEndpointMode(API_SOURCE);
 
-/* 演示模式：车控指令不发真实请求，本地模拟下发，保证动效链路可视 */
-const DEMO = true;
+/* ═══════════════════════════════════════════════
+   调试台 & 「连接后端」开关（两个页面已合并，只剩这一份）
+   ═══════════════════════════════════════════════
+
+   三种状态：
+   · 默认（不带参数）        —— 纯设计预览：调试台不显示，一个网络请求都不发
+   · `?debug=1`              —— 显示调试台；连不连后端由面板里的开关决定
+   · 调试台里打开「连接后端」—— 真正向 API_SOURCE 发请求
+
+   为什么拆成两个开关：「显示调试台」和「连后端」不是一回事。
+   有时只想离线调样式（有调试台方便看状态），有时想连后端但不想要浮层。
+   分开之后两种组合都成立，也不会出现「打开页面就偷偷发请求」。
+*/
+const DBG_LS_ENABLED = 'zeekrdash.debug.enabled';
+const DBG_LS_CONNECT = 'zeekrdash.debug.connect';
+
+function readFlag(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? fallback : raw === '1';
+  } catch { return fallback; }
+}
+function writeFlag(key, on) {
+  try {
+    if (on) localStorage.setItem(key, '1'); else localStorage.removeItem(key);
+  } catch { /* 隐私模式 / 沙箱下 localStorage 会抛异常，忽略即可 */ }
+}
+
+const QUERY_DEBUG = new URLSearchParams(location.search).get('debug');
+if (QUERY_DEBUG === '1') writeFlag(DBG_LS_ENABLED, true);
+if (QUERY_DEBUG === '0') writeFlag(DBG_LS_ENABLED, false);
+
+/* 调试台是否显示（?debug=1 优先，其次记住上次的选择） */
+const DEBUG_UI = QUERY_DEBUG === '1'
+  || (QUERY_DEBUG !== '0' && readFlag(DBG_LS_ENABLED, false));
+
+/* 是否连后端：**必须同时**打开调试台和连接开关。
+   两个条件都满足才发请求，避免「URL 里带个 ?debug=1 就悄悄联网」。 */
+let CONNECT_BACKEND = DEBUG_UI && readFlag(DBG_LS_CONNECT, false);
+
+/* 不连后端 ⇒ 数据走内置模拟、车控也走本地模拟。
+   连后端 ⇒ 如实发请求、失败就报错（**不做 mock 兜底**），
+   否则「看着有数据」和「其实没连上」分不清，调试就失去意义。 */
+let PREFERS_MOCK = !CONNECT_BACKEND;
+let DEMO = !CONNECT_BACKEND;
 
 /* 车控总开关的持久化。localStorage 在隐私模式 / 沙箱下可能直接抛异常，
    失败时静默回落为「关」—— 这是安全方向上的默认值。 */
@@ -1206,6 +1504,11 @@ const state = {
   permissions: null,
   /* 预约充电 / 出行计划（/ms-charge-manage/api/v1.0/charge/getChargingPlanNew） */
   chargePlan: null,
+  /* ── 车辆位置（GET /api/vehicle/location）──
+     这是**最后一次上报的位置**，不是实时位置：车静止时网关不更新坐标，
+     `reportedAt` 可能滞后几十分钟（实测抓到过滞后 39 分钟的）。
+     未登录 / 未加载时为 null，卡片显示"定位中"，不要显示假坐标。 */
+  location: null,
   /* 车控指令总开关（**客户端**，默认关，存 localStorage）。
      与 iOS `SettingsStore.commandsEnabled` 同语义：关闭时车控面板只可查看、
      点击不下发。刻意与 `health.allowCommands`（**服务端**是否允许下发）分开 ——
@@ -1303,6 +1606,24 @@ const MOCK = {
     targetSoc: 90,
     mode: '谷电优先',
   },
+  /* 车辆位置样例：结构**与 /api/vehicle/location 的返回逐字段一致**。
+     地址一律带「演示」字样 —— 模拟数据不该长得像真实地点。
+     `mapAvailable` 刻意是 false：演示模式不联网，也就不该去请求地图图片。 */
+  location: {
+    available: true,
+    lat: 31.2035,
+    lng: 121.5858,
+    reportedAt: '2026-10-19 10:48:21',
+    address: {
+      address: '演示市演示区演示路 88 号',
+      recommend: '演示园区 · 地下车库 B2',
+      province: '演示省',
+      city: '演示市',
+      district: '演示区',
+      street: '演示路',
+    },
+    mapAvailable: false,
+  },
   /* 附近充电站样例。
      结构**与 /api/stations/nearby 的返回逐字段一致** —— 预览页在没有后端时
      也要能呈现完整设计，否则这套 UI 只有连着车的人看得见。
@@ -1311,6 +1632,7 @@ const MOCK = {
   stations: [
     {
       stationId: 'mock-station-1', name: '极氪超充·演示站 A', address: '演示路 1 号',
+      lat: 31.2336, lng: 121.4772,
       distanceKm: 0.35, availableCount: 6, totalCount: 8,
       ableDcCount: 6, dcCount: 8, ableAcCount: 0, acCount: 0,
       selfOperate: true, score: 4.6, tags: ['演示数据'],
@@ -1323,6 +1645,7 @@ const MOCK = {
     },
     {
       stationId: 'mock-station-2', name: '演示站 B · 商场地下层', address: '演示路 2 号',
+      lat: 31.2376, lng: 121.4737,
       distanceKm: 0.80, availableCount: 2, totalCount: 12,
       ableDcCount: 0, dcCount: 0, ableAcCount: 2, acCount: 12,
       selfOperate: false, score: 4.1, tags: ['演示数据'],
@@ -1340,6 +1663,7 @@ const MOCK = {
     },
     {
       stationId: 'mock-station-3', name: '演示站 C · 高架旁', address: '演示路 3 号',
+      lat: 31.243, lng: 121.4737,
       distanceKm: 1.40, availableCount: 0, totalCount: 16,
       ableDcCount: 0, dcCount: 12, ableAcCount: 0, acCount: 4,
       selfOperate: false, score: 3.8, tags: ['演示数据'],
@@ -1353,6 +1677,7 @@ const MOCK = {
     {
       /* 价格缺失的一例：用来验证"取不到价格"与"免费"在界面上确实长得不一样 */
       stationId: 'mock-station-4', name: '演示站 D · 客运站', address: '演示路 4 号',
+      lat: 31.2592, lng: 121.4737,
       distanceKm: 3.20, availableCount: 9, totalCount: 10,
       ableDcCount: 9, dcCount: 10, ableAcCount: 0, acCount: 0,
       selfOperate: false, score: 4.9, tags: ['演示数据'],
@@ -1511,19 +1836,42 @@ const CTRL_LABELS = {
   tripPlan: '出行规划已下发', carFinder: '车辆位置已推送', refresh: '车况已刷新',
 };
 
-/* 给请求补上 API 令牌。服务端没设 API_TOKEN 时 QUERY_TOKEN 为空，
-   行为与以前完全一致（不额外加头）。 */
+/* 给请求补上 API 令牌。调试台里令牌可在「连接」区填写，
+   也可用 ?token=xxx 打开本页带入；留空则不额外加头。 */
 function withAuth(opts) {
-  if (!QUERY_TOKEN) return opts;
+  if (!API_TOKEN) return opts;
   const merged = Object.assign({}, opts || {});
   merged.headers = Object.assign({}, (opts && opts.headers) || {}, {
-    Authorization: 'Bearer ' + QUERY_TOKEN,
+    Authorization: 'Bearer ' + API_TOKEN,
   });
   return merged;
 }
 
+/* ── 请求记录 ──
+   调试台的核心诉求之一是"看有没有报错"，所以每一次请求都要留痕：
+   方法、路径、状态码、耗时、以及**服务端返回的原始 detail**。
+   旧实现只抛「HTTP 400」，把服务端给的原因丢掉了，等于把最有用的信息扔了。 */
+const dbgLog = [];
+let dbgSeq = 0;
+
+function dbgRecord(entry) {
+  entry.id = ++dbgSeq;
+  entry.at = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  dbgLog.push(entry);
+  if (dbgLog.length > 300) dbgLog.shift();
+  if (typeof renderDebugPanel === 'function') renderDebugPanel();
+}
+
+/* 给 <img> 这类无法携带请求头的标签用：服务端同时接受 ?token= 查询参数。
+   地图缩略图走这条路 —— 图片由后端代取，腾讯的 key 不会出现在前端。 */
+function authedUrl(path) {
+  const url = API_SOURCE + path;
+  if (!QUERY_TOKEN) return url;
+  return url + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(QUERY_TOKEN);
+}
+
 async function api(path, opts) {
-  // 模拟数据模式：不发起任何网络请求，交由调用方直接使用内置数据
+  // 模拟数据模式：不发起任何网络请求（调试台默认为 false）
   // 未登录前不调任何数据接口。live 模式下服务端要求登录态，调了只会失败，
   // 还会把服务端日志刷满无意义的报错 —— 登录相关的几个接口走 apiNoMock()，
   // 不受这里限制（否则连"查登录状态"都发不出去）。
@@ -1534,14 +1882,47 @@ async function api(path, opts) {
     const cmd = JSON.parse((opts && opts.body) || '{}').command;
     await new Promise((r) => setTimeout(r, 620));   // 模拟下发耗时
     applyDemoCommand(cmd);
+    dbgRecord({ method: 'POST', path, status: 'DEMO', ms: 620, ok: true, detail: '本地模拟，未发请求' });
     return { success: true, message: CTRL_LABELS[cmd] || '指令已下发' };
   }
-  const res = await fetch(API_SOURCE + path, withAuth(opts));
-  if (res.status === 401) {
-    throw new Error('服务端要求 API 令牌：请改用 /preview?token=xxx 打开本页');
+
+  const method = (opts && opts.method) || 'GET';
+  const t0 = performance.now();
+  let res;
+
+  try {
+    res = await fetch(API_SOURCE + path, withAuth(opts));
+  } catch (err) {
+    // 网络层失败（后端没起、地址写错、被 CORS 拦下）—— 这类原因最值得留全
+    const msg = String((err && err.message) || err);
+    dbgRecord({ method, path, status: '网络失败', ms: Math.round(performance.now() - t0), ok: false, detail: msg });
+    throw new Error('连不上后端 ' + API_SOURCE + '：' + msg);
   }
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  const json = await res.json();
+
+  const ms = Math.round(performance.now() - t0);
+  const text = await res.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch { /* 非 JSON 响应（如 404 的 HTML） */ }
+
+  const serverMsg = json
+    ? (json.error || (typeof json.detail === 'string' ? json.detail : (json.detail ? JSON.stringify(json.detail) : ''))
+       || (json.success === false ? '服务端返回 success=false' : ''))
+    : text.slice(0, 300);
+
+  dbgRecord({
+    method, path, status: res.status, ms,
+    ok: res.ok && (!json || json.success !== false),
+    detail: serverMsg || '',
+    body: text.slice(0, 4000),
+  });
+
+  if (res.status === 401) {
+    throw new Error('服务端要求 API 令牌：请在调试栏「令牌」输入框填写后重新连接');
+  }
+  if (!res.ok) {
+    throw new Error('HTTP ' + res.status + (serverMsg ? '：' + serverMsg : ''));
+  }
+  if (!json) throw new Error('响应不是 JSON：' + text.slice(0, 120));
   if (!json.success) throw new Error(json.error || '服务端返回失败');
   return json.data;
 }
@@ -1765,6 +2146,65 @@ const PROVIDER_COLORS = {
 /* ═══════════════════════════════════════════════
    视图：车况
    ═══════════════════════════════════════════════ */
+/* ── 车辆位置卡 ────────────────────────────────────────────
+   三条底线：
+   1. **位置不是实时的**：车静止时网关不更新坐标（实测 15 条快照只有 3 个位置点），
+      标题右侧必须写出上报时间，否则会被当成"车现在就在这"。
+   2. **没配地图 key ≠ 没有位置**：照常显示坐标，只是没有地址与地图，
+      不要整块消失，也不要拿一句"服务异常"糊过去。
+   3. 地图图片取不到就隐藏（onerror），地址与坐标仍然可读 —— 位置卡的价值在文字。 */
+function vehicleLocationCard() {
+  const loc = state.location;
+
+  if (!loc) {
+    return `<div class="card">
+      <div class="card-title"><span>车辆位置</span></div>
+      <div class="loc-note">正在获取位置…</div>
+    </div>`;
+  }
+
+  if (!loc.available) {
+    return `<div class="card">
+      <div class="card-title"><span>车辆位置</span></div>
+      <div class="loc-note">${esc(loc.reason || '车辆尚未上报位置')}</div>
+    </div>`;
+  }
+
+  const addr = loc.address || null;
+  /* 优先用 recommend：它是「中钢国际广场」这种好认的描述，
+     标准地址（省市区路门牌）放在下面一行补充。 */
+  const title = addr ? (addr.recommend || addr.address) : null;
+  const coord = Number(loc.lat).toFixed(6) + ', ' + Number(loc.lng).toFixed(6);
+
+  /* 只有服务端确认"有 key"且当前是真实数据模式才请求图片：
+     演示模式不联网，也不该白蹭一次配额。 */
+  const showMap = loc.mapAvailable === true && state.mode === 'live';
+
+  return `<div class="card">
+    <div class="card-title">
+      <span>车辆位置</span>
+      <span style="font-size:11px;font-weight:400;color:var(--text-3)">
+        ${loc.reportedAt ? '最后上报 ' + esc(fmtTime(loc.reportedAt)) : ''}
+      </span>
+    </div>
+    ${showMap
+      ? `<img class="loc-map" alt="车辆位置地图"
+             src="${authedUrl('/api/vehicle/location/map.png?width=600&height=260&zoom=16')}"
+             onerror="this.style.display='none'">`
+      : ''}
+    <div class="loc-addr">${title ? esc(title) : (loc.mapAvailable === true ? '地址暂时取不到' : '未配置地图服务')}</div>
+    <div class="loc-sub">${esc(coord)}</div>
+    ${addr && addr.address && addr.recommend && addr.recommend !== addr.address
+      ? `<div class="loc-note">${esc(addr.address)}</div>` : ''}
+    ${!addr
+      ? `<div class="loc-note">${loc.mapAvailable === true
+            ? '地图服务已配置，但这次没取到地址（可能是第三方额度用完或网络问题）。稍后会自动重试。'
+            : '尚未配置腾讯地图 key，仅显示坐标。在服务端 <code>.env</code> 填入 <code>TENCENT_MAP_KEY</code> 并重启，即可显示地址与地图图。'}</div>`
+      : ''}
+    <div class="loc-note">位置取自车辆最后一次上报，车辆移动后可能不会立即更新。</div>
+  </div>`;
+}
+
 function renderDashboard() {
   const s = state.status;
   if (!s) {
@@ -1962,6 +2402,8 @@ function renderDashboard() {
       ${!state.capabilities
         ? `<div class="cap-hint">未取到车辆能力集，已按「全部显示」处理</div>` : ''}
     </div>
+
+    ${vehicleLocationCard()}
 
     <div class="card">
       <div class="card-title">
@@ -2757,6 +3199,8 @@ async function authLogout() {
     state.status = null; state.trips = []; state.trend = [];
     state.summary = null; state.records = []; state.health = null;
     state.capabilities = null; state.permissions = null; state.chargePlan = null;
+    /* 车辆位置同样是个人数据，退出即清 —— 不能让下一位登录者看到上一位的车停在哪 */
+    state.location = null;
     /* 充电站与**坐标**一并清掉：坐标属于个人位置数据，不该跨会话留存，
        而且它只对"这一次查询"有意义。 */
     state.stations = null; state.stationsTotal = 0; state.stationsPriceOk = true;
@@ -3041,6 +3485,19 @@ async function loadStatus() {
   }
 }
 
+/* 车辆位置：地址与静态图都由服务端转第三方，前端只吃结构化结果。
+   **独立于车况加载成败** —— 位置取不到不该让整页掉进模拟数据。 */
+async function loadLocation() {
+  try {
+    state.location = await api('/api/vehicle/location');
+    return true;
+  } catch (e) {
+    console.warn('位置加载失败', e);
+    state.location = null;
+    return false;
+  }
+}
+
 async function loadTrips() {
   try {
     const [trips, trend] = await Promise.all([
@@ -3081,6 +3538,7 @@ function seedMock() {
   state.capabilities = MOCK.capabilities;
   state.permissions = MOCK.permissions;
   state.chargePlan = MOCK.chargePlan;
+  state.location = MOCK.location;
   state.stations = MOCK.stations;
   state.stationsTotal = MOCK.stations.length;
   state.stationsPriceOk = true;
@@ -3094,8 +3552,9 @@ function seedMock() {
                      String(d.getMinutes()).padStart(2, '0');
 }
 
-/* 权限包与预约计划：真实模式下尝试拉取（后端 GET /api/vehicle/capability）。
-   拿不到时静默退化为 capabilities = null —— cap() 会按「全部显示」处理，
+/* 能力集与预约计划：真实模式下尝试拉取。
+   后端接口尚未实现（属待确认的新功能），拿不到时静默退化为
+   capabilities = null —— cap() 会按「全部显示」处理，
    数据缺失由 chip 的 unknown 态表达。不阻断主流程。 */
 async function loadCapabilities() {
   try {
@@ -3138,6 +3597,15 @@ function isLoggedIn() {
    唯一允许的请求是 /api/auth/status：不查它就无法判断
    该显示登录表单还是数据。 */
 async function bootstrap() {
+  // 「连接后端」没打开：纯本地演示，**一个网络请求都不发**。
+  // 这是默认状态 —— 预览页的本职是看设计，不该因为后端没起就报错。
+  if (!CONNECT_BACKEND) {
+    seedMock();
+    state.mode = 'mock';
+    render();
+    return;
+  }
+
   await loadAuth();
   const a = state.auth || {};
 
@@ -3160,6 +3628,7 @@ async function bootstrap() {
   state.summary = null; state.records = []; state.health = null;
   /* 未登录时不定位、也不保留上一会话的站点与坐标 */
   state.stations = null; state.loc = null; state.locStatus = 'idle';
+  state.location = null;
   state.mode = 'needLogin';
   render();
 }
@@ -3208,7 +3677,7 @@ async function loadAll() {
     //    以「车辆状态 + 健康检查」是否都拿到作为后端可用的判据，
     //    任一失败即视为不可达，回落模拟数据
     const [statusOk, healthOk] = await Promise.all([loadStatus(), loadHealth()]);
-    await Promise.all([loadTrips(), loadCharges(), loadCapabilities(), loadAuth()]);
+    await Promise.all([loadTrips(), loadCharges(), loadCapabilities(), loadAuth(), loadLocation()]);
 
     if (statusOk && healthOk) {
       state.mode = 'live';
@@ -3391,9 +3860,270 @@ async function sendCommand(btn) {
 }
 
 /* ═══════════════════════════════════════════════
+   调试台：连接管理 / 接口探针 / 请求日志
+   ═══════════════════════════════════════════════ */
+
+/* 后端真实存在的接口 —— 取自 server/app/api/*.py 与 main.py 的 include_router 前缀。
+   调试台的"事实清单"，不要往里加没确认过的路径。 */
+const DBG_ENDPOINTS = [
+  { m: 'GET',  p: '/api/health',            d: '健康检查' },
+  { m: 'GET',  p: '/api/vehicle/status',    d: '车况快照' },
+  { m: 'GET',  p: '/api/vehicle/list',      d: '车辆列表' },
+  { m: 'POST', p: '/api/vehicle/command',   d: '下发车控指令', body: { command: 'lock' } },
+  { m: 'GET',  p: '/api/vehicle/snapshots', d: '历史快照' },
+  { m: 'GET',  p: '/api/trips',             d: '行程列表' },
+  { m: 'GET',  p: '/api/energy/trend',      d: '能耗趋势' },
+  { m: 'GET',  p: '/api/charges/summary',   d: '充电消费汇总' },
+  { m: 'GET',  p: '/api/charges/records',   d: '充电消费明细' },
+  { m: 'GET',  p: '/api/auth/status',       d: '登录状态' },
+  { m: 'POST', p: '/api/auth/sendCode',     d: '请求验证码', body: { phone: '' } },
+  { m: 'POST', p: '/api/auth/verifyCode',   d: '校验验证码', body: { phone: '', code: '' } },
+  { m: 'POST', p: '/api/auth/logout',       d: '退出登录' },
+];
+
+let dbgTab = 'api';
+let dbgLastProbe = {};   // "METHOD path" -> 最近一次结果
+
+function dbgSetStatus(state, text) {
+  const cls = state === 'ok' ? 'ok' : state === 'bad' ? 'bad' : state === 'wait' ? 'wait' : '';
+  for (const id of ['dbgDot', 'dbgDot2']) {
+    const el = document.getElementById(id);
+    if (el) el.className = 'dbg-dot ' + cls;
+  }
+  for (const id of ['dbgStatText', 'dbgStatText2']) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  }
+}
+
+/* 连接：写回地址与令牌 → 落盘 → 探一次健康检查 → 重拉数据 */
+async function dbgConnect() {
+  const apiEl = document.getElementById('dbgApi');
+  const tokEl = document.getElementById('dbgTok');
+  const raw = (apiEl.value || '').trim().replace(/\/+$/, '');
+  if (!raw) { toast('请先填写后端地址'); return; }
+
+  API_SOURCE = raw;
+  API_TOKEN = (tokEl.value || '').trim();
+  ENDPOINT_MODE = resolveEndpointMode(API_SOURCE);
+
+  localStorage.setItem(DBG_LS_API, API_SOURCE);
+  if (API_TOKEN) localStorage.setItem(DBG_LS_TOKEN, API_TOKEN);
+  else localStorage.removeItem(DBG_LS_TOKEN);
+
+  dbgSetStatus('wait', '连接中…');
+  dbgLog.length = 0;
+  dbgLastProbe = {};
+
+  /*
+    就绪判据 = 能否拿到 /api/health。
+    这里刻意直接用 api()，让「连不上」的原因（地址错 / 后端没起 /
+    CORS）也进入请求日志 —— 这正是要看的东西。
+  */
+  let health = null;
+  const t0 = performance.now();
+  try {
+    health = await api('/api/health');
+    dbgSetStatus('ok', '已连接 · ' + Math.round(performance.now() - t0) + 'ms');
+    toast('已连接 ' + API_SOURCE);
+  } catch (err) {
+    // 不额外弹 toast：状态灯变红 + 请求日志里已写明原因，
+    // 后面 loadAll() 还会再弹一次"已切换为模拟数据"，避免重复打扰
+    dbgSetStatus('bad', '连不上');
+  }
+
+  // 数据源取自 health；连不上时保持未知，不假装是 mock
+  if (health) {
+    state.mode = health.mode === 'live' ? 'live' : (health.mode === 'mock' ? 'mock' : state.mode);
+  }
+  syncModeBadge();
+  renderDebugPanel();
+  renderDebugLog();
+  // 未登录时不加载数据 —— 登录态由 bootstrap 统一把关
+  if (isLoggedIn()) await loadAll();
+}
+
+/* 单独调用某个接口 —— 结果直接写进请求日志 */
+async function dbgProbe(ep) {
+  const opts = { method: ep.m };
+  if (ep.body) {
+    opts.headers = { 'Content-Type': 'application/json' };
+    opts.body = JSON.stringify(ep.body);
+  }
+  try {
+    await api(ep.p, opts);
+  } catch { /* 失败已记入日志，不再重复弹提示 */ }
+  const last = dbgLog[dbgLog.length - 1];
+  if (last) dbgLastProbe[ep.m + ' ' + ep.p] = last;
+  renderDebugPanel();
+}
+
+function renderDebugLog() {
+  const errs = dbgLog.filter((l) => !l.ok).length;
+  const badge = document.getElementById('dbgErrCount');
+  if (badge) badge.textContent = String(errs);
+  const fab = document.getElementById('dbgFab');
+  if (fab) fab.classList.toggle('err', errs > 0);
+  const n = document.getElementById('dbgLogCount');
+  if (n) n.textContent = String(dbgLog.length);
+}
+
+/* 按当前 tab 切换分区显隐 */
+function dbgShowTab() {
+  const map = { conn: 'dbgSecConn', api: 'dbgSecApi', log: 'dbgSecLog' };
+  for (const key of Object.keys(map)) {
+    const el = document.getElementById(map[key]);
+    if (el) el.classList.toggle('hidden', key !== dbgTab);
+  }
+}
+
+function renderDebugPanel() {
+  dbgShowTab();
+  const apiN = document.getElementById('dbgApiCount');
+  if (apiN) apiN.textContent = String(DBG_ENDPOINTS.length);
+  const logN = document.getElementById('dbgLogCount');
+  if (logN) logN.textContent = String(dbgLog.length);
+
+  // 连接区是静态标记，**不参与重绘** —— 重绘会把用户正在输入的内容清掉
+  if (dbgTab === 'conn') return;
+
+  const body = dbgTab === 'api'
+    ? document.getElementById('dbgSecApi')
+    : document.getElementById('dbgSecLog');
+  if (!body) return;
+
+  if (dbgTab === 'api') {
+    body.innerHTML = DBG_ENDPOINTS.map((ep, i) => {
+      const last = dbgLastProbe[ep.m + ' ' + ep.p];
+      const lastTxt = last
+        ? `<span class="code ${last.ok ? 'ok' : 'bad'}">${last.status}</span>`
+        : '';
+      const cls = ep.m === 'POST' ? 'post' : (ep.m === 'DELETE' ? 'del' : '');
+      return `
+        <div class="dbg-api">
+          <span class="m ${cls}">${ep.m}</span>
+          <span class="p">${ep.p}</span>
+          <span class="d">${ep.d}</span>
+          ${lastTxt}
+          <button class="dbgbtn sm" data-probe="${i}">发送</button>
+        </div>`;
+    }).join('');
+
+    body.querySelectorAll('[data-probe]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const ep = DBG_ENDPOINTS[Number(btn.dataset.probe)];
+        btn.disabled = true;
+        dbgProbe(ep).finally(() => { btn.disabled = false; });
+      });
+    });
+    return;
+  }
+
+  if (!dbgLog.length) {
+    body.innerHTML = '<div class="dbg-empty">还没有请求记录</div>';
+    return;
+  }
+  body.innerHTML = dbgLog.slice().reverse().map((l) => `
+    <div class="dbg-log ${l.ok ? '' : 'err'}">
+      <div class="dbg-log-top">
+        <span class="code ${l.ok ? 'ok' : 'bad'}">${l.status}</span>
+        <span class="p">${l.method} ${l.path}</span>
+        <span class="ms">${l.ms}ms</span>
+        <span style="color:var(--text-3)">${l.at}</span>
+      </div>
+      ${l.detail ? `<div class="why">${esc(l.detail)}</div>` : ''}
+      ${l.body ? `<details><summary>响应原文</summary><pre class="dbg-pre">${esc(l.body)}</pre></details>` : ''}
+    </div>`).join('');
+}
+
+function initDebugUI() {
+  // 调试台没开：只把浮层藏掉，**不绑定任何监听**。
+  // 尤其不能走到函数末尾那个自动 `dbgConnect()` —— 那会让「默认不发请求」
+  // 变成一句空话（页面一打开就去连本机后端）。
+  if (!DEBUG_UI) {
+    const fab = document.getElementById('dbgFab');
+    const sheet = document.getElementById('dbgSheet');
+    if (fab) fab.style.display = 'none';
+    if (sheet) sheet.style.display = 'none';
+    return;
+  }
+
+  const apiEl = document.getElementById('dbgApi');
+  const tokEl = document.getElementById('dbgTok');
+  if (apiEl) apiEl.value = API_SOURCE;
+  if (tokEl) tokEl.value = API_TOKEN;
+
+  document.getElementById('dbgConnect')?.addEventListener('click', dbgConnect);
+  apiEl?.addEventListener('keydown', (e) => { if (e.key === 'Enter') dbgConnect(); });
+  tokEl?.addEventListener('keydown', (e) => { if (e.key === 'Enter') dbgConnect(); });
+
+  document.querySelectorAll('.dbg-chip[data-api]').forEach((chip) => {
+    chip.classList.toggle('on', chip.dataset.api === API_SOURCE);
+    chip.addEventListener('click', () => {
+      if (apiEl) apiEl.value = chip.dataset.api;
+      dbgConnect();
+    });
+  });
+
+  const demo = document.getElementById('dbgDemo');
+  if (demo) {
+    demo.checked = DEMO;
+    demo.addEventListener('change', () => { DEMO = demo.checked; });
+  }
+
+  const sheet = document.getElementById('dbgSheet');
+  document.getElementById('dbgFab')?.addEventListener('click', () => {
+    sheet?.classList.toggle('open');
+    renderDebugPanel();
+    renderDebugLog();
+  });
+  document.getElementById('dbgClose')?.addEventListener('click', () => sheet?.classList.remove('open'));
+  document.getElementById('dbgClear')?.addEventListener('click', () => {
+    dbgLog.length = 0;
+    dbgLastProbe = {};
+    renderDebugPanel();
+    renderDebugLog();
+  });
+
+  document.querySelectorAll('.dbg-tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      dbgTab = tab.dataset.dbg;
+      document.querySelectorAll('.dbg-tab').forEach((t) => t.classList.toggle('on', t === tab));
+      renderDebugPanel();
+    });
+  });
+
+  renderDebugPanel();
+  renderDebugLog();
+
+  // 「连接后端」总开关。
+  // 切换后**重载页面**而不是原地改状态：`PREFERS_MOCK` / `API_SOURCE` 在启动时
+  // 就已算好并被各处读取，原地只改开关会得到"开关变了、行为没变"的假象。
+  const link = document.getElementById('dbgLinkSwitch');
+  if (link) {
+    link.checked = CONNECT_BACKEND;
+    link.addEventListener('change', () => {
+      writeFlag(DBG_LS_CONNECT, link.checked);
+      location.reload();
+    });
+  }
+
+  // 没连后端时把地址/令牌/连接按钮都禁用 —— 免得填了以为会生效
+  const offline = !CONNECT_BACKEND;
+  [apiEl, tokEl].forEach((el) => { if (el) el.disabled = offline; });
+  document.querySelectorAll('.dbg-chip[data-api]').forEach((el) => { el.disabled = offline; });
+  const connectBtn = document.getElementById('dbgConnect');
+  if (connectBtn) connectBtn.disabled = offline;
+
+  // 只有开关打开才自动连一次
+  if (CONNECT_BACKEND) dbgConnect();
+}
+
+/* ═══════════════════════════════════════════════
    启动
    ═══════════════════════════════════════════════ */
-bootstrap();
+initDebugUI();
+bootstrap();     // 先确认登录态，再决定要不要加载数据
 
 /* 滚动响应：下滑超过一屏的 6% 时，顶栏玻璃变实
    —— 对应 iOS 26 从 scrollEdge 到 inline 的过渡行为 */
