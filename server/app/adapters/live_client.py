@@ -30,6 +30,7 @@ from typing import Any
 import httpx
 
 from ..core.config import ZeekrConfig
+from ..core.coords import wgs84_to_gcj02
 from .base import ZeekrClient
 from .zeekr_signing import (
     COMMAND_MAP,
@@ -1282,6 +1283,18 @@ class LiveZeekrClient(ZeekrClient):
                     lon = round(lon_raw / divisor, 6)
                     break
 
+        # 坐标系：**必须看网关自报的 `marsCoordinates`**，不要凭车型硬编码。
+        #   "1" → 已是 GCJ-02（火星坐标），直接给地图用就对了
+        #   "0" → 原始 WGS-84，必须转换，否则在地图上偏 400~600 米
+        #        （实测该停车点：WGS-84 直连腾讯会偏 485 米 —— 南 202m / 东 441m，
+        #         用户反馈"位置偏移有点多"就是它）
+        #   缺失 → 保持原样：没有证据就不动，宁可维持旧行为也不要过转。
+        # 输出统一为 GCJ-02，前端（网页 / iOS）拿到的坐标可直接喂地图。
+        if lat is not None and lon is not None:
+            mars_flag = as_bool(pick("marscoordinates"))
+            if mars_flag is False:
+                lat, lon = wgs84_to_gcj02(lat, lon)
+
         # 锁车状态：0 = 未锁，非 0 = 已锁
         lock_raw = pick("lockstatus", "centrallockingstatus")
         is_locked = None
@@ -1465,8 +1478,13 @@ class LiveZeekrClient(ZeekrClient):
             # 内温：v1.0 实报 `climateStatus.interiorTemp`（实测 25.5）。
             # 注意别写成 `interiorTemperature` —— 那是自造名，实报里没有。
             "interiorTemp": as_float(pick("climatestatusinteriortemp", "interiortemp", "teminterior")),
-            # 外温真名未确认（exteriorTemperature / temExterior / temOutdoor 均 0 命中）。
-            "exteriorTemp": as_float(pick("exteriortemperature", "temexterior", "temoutdoor")),
+            # 外温：真名是 `climateStatus.exteriorTemp`（与 `interiorTemp` 同一层），
+            # 实测字段存在但**当前上报为空字符串**。
+            # 此前别名写成 `exteriorTemperature`（多了一截，0 命中）——
+            # 即使哪天车开始给值也永远取不到，属于必须修的真缺陷。
+            "exteriorTemp": as_float(
+                pick("climatestatusexteriortemp", "exteriortemp", "temexterior")
+            ),
             "latitude": lat,
             "longitude": lon,
             "positionTrusted": as_bool(pick("poscanbetrusted")),
@@ -1516,6 +1534,19 @@ class LiveZeekrClient(ZeekrClient):
         # 实测：传 `"2026-10-09 14:00:00"` 这类字符串一律被拒
         # `000002 The request parameter startTime type is incorrect` —— 此前正是
         # 这么发的，于是行程永远为空（且被 try/except 吞成静默失败）。
+        # 请求体保持 `pageNum`、**不带 `lastId`**。
+        #
+        # 2026-10-19 拿真实会话把社区实现的写法（`currentPage` + `lastId: -1`）
+        # 和自己这套都试了一遍，**全部 `total=0, data=null`**：
+        #   · `currentPage` + `lastId`（-1 / 0 / 10^13 / 2^63-1 / 不传）
+        #   · 原来这套 `pageNum` + 无 `lastId`
+        #   · 连 10-16 当天窗口单独查，也是 0
+        # ⇒ **参数不是原因**：网关接受请求，业务层就是没有数据。
+        #
+        # ⚠️ 别被 `trips` 表里那 60 条历史记录骗了 —— 那是 `mock_client` 生成的
+        # 假数据（trip_id 形如 `20261016-0`、起点只有"家/公司"、终点固定 8 个地名），
+        # 因为落库路径曾经没有拦 mock。**这个接口至今没有成功返回过真实行程。**
+        # 官方 App 同样不展示按次行程（只给每月/每天电耗），所以这里返回空是常态。
         try:
             payload = await self._request_gw3(
                 "POST",
@@ -1546,6 +1577,15 @@ class LiveZeekrClient(ZeekrClient):
         elif isinstance(data, list):
             items = data
         if not isinstance(items, list):
+            # 「查不到」与「请求失败」必须能区分开：两者都返回空列表，
+            # 但前者是数据侧的问题（行车日志没开 / 车没跑过），后者是我们的 bug。
+            # 只打一行计数，不含任何车辆数据。
+            if isinstance(data, dict):
+                logger.info(
+                    "行程列表为空（网关 total=%s, pages=%s）—— 接口正常，是业务层没有数据",
+                    data.get("total"),
+                    data.get("pages"),
+                )
             return []
 
         trips: list[dict[str, Any]] = []

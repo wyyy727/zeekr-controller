@@ -123,9 +123,12 @@ async def health() -> dict:
 
 def register_routers() -> None:
     """注册各业务路由。"""
-    from .api import auth, charges, stations, trips, vehicle
+    from .api import auth, charges, location, stations, trips, vehicle
 
     app.include_router(vehicle.router, prefix="/api/vehicle", tags=["车辆"])
+    # 位置单独挂一行：它是全项目唯一把车辆坐标发给第三方（腾讯地图）的出口，
+    # 与车况接口的隐私性质不同，便于审计
+    app.include_router(location.router, prefix="/api/vehicle", tags=["车辆位置"])
     app.include_router(trips.router, prefix="/api", tags=["行程"])
     app.include_router(charges.router, prefix="/api/charges", tags=["充电消费"])
     # 注意：`charges` 是**消费账单**域（本地导入的支付宝/微信账单），

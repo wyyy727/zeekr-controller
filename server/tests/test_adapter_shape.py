@@ -2,7 +2,7 @@
 
 为什么需要这个文件：
 `MockZeekrClient` 与 `LiveZeekrClient._normalize_status` 的输出会被**同一套
-前端**消费（iOS App 与 preview/debug.html）。两者形状一旦漂移，症状是
+前端**消费（iOS App 与 preview/index.html 的内置模拟数据）。两者形状一旦漂移，症状是
 "模拟数据下一切正常、接上真车就缺字段"—— 属于最难排查的一类问题。
 
 已实际发生过两次（均在本次审计中发现并修复）：
@@ -357,6 +357,9 @@ REAL_STATUS_PAYLOAD = {
             "position": {
                 "latitude": "30.1234567", "longitude": "120.1234567",
                 "posCanBeTrusted": "0",
+                # 网关自报坐标系：0 = 原始 WGS-84（实测真车就是这个值），
+                # 解析层必须转成 GCJ-02，否则地图上偏 400~600 米
+                "marsCoordinates": "0",
             },
         },
         "additionalVehicleStatus": {
@@ -421,6 +424,9 @@ def test_real_status_payload_field_names_parse():
     assert status["rangeKm"] == 321.0
     assert status["odometerKm"] == 12345.0
     assert status["battery12vVoltage"] == 12.68   # as_float 统一保留 2 位
+    # 12V 电瓶电量：真车报的是**空字符串**，必须落成 None ——
+    # 绝不能变成 0（会被读成"电瓶已经没电"，性质和"价格缺失≠免费"一样）。
+    assert status["battery12vLevel"] is None
     assert status["isLocked"] is True
     assert status["isPlugged"] is False
     assert status["doors"] == {
@@ -440,8 +446,15 @@ def test_real_status_payload_field_names_parse():
     assert status["climateOn"] is False          # preClimateActive
     assert status["avgConsumption"] == 18.7
     # 坐标不走 as_float（会舍到 2 位 ≈ 1.1km 误差），必须保留 6 位
-    assert status["latitude"] == 30.123457
-    assert status["longitude"] == 120.123457
+    # 坐标：网关自报 marsCoordinates="0" ⇒ 给的是原始 WGS-84，输出必须是转好的
+    # GCJ-02。这里断言"偏移几百米"，而不是硬编码结果 —— 硬编码会随算法微调失效，
+    # 而这个区间恰好能区分"忘了转"（偏移为 0）和"转错了"（偏移大得离谱）。
+    import math
+
+    dy = (status["latitude"] - 30.123457) * 111320
+    dx = (status["longitude"] - 120.123457) * 111320 * math.cos(math.radians(30.123457))
+    shift = math.hypot(dx, dy)
+    assert 200 < shift < 800, f"WGS-84 未转成 GCJ-02（或转错），偏移 {shift:.0f} 米"
     # updateTime（毫秒）应被用为上报时间，而不是服务端的当前时间
     assert status["lastUpdateTs"] == "2025-10-09 16:53:20"
 

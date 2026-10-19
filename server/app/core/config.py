@@ -186,6 +186,25 @@ class AppConfig:
         default_factory=lambda: _env("ZEEKR_HAOHAN_CHANNEL_ID") or "1"
     )
 
+    # ── 腾讯位置服务（车辆位置卡：地址 + 静态地图）──────────────
+    #
+    # 为什么必须有 key：车坐标是 **GCJ-02**，而合规上只能用腾讯/高德/百度/天地图
+    # （Apple Maps 属禁止清单，iOS 端也用不了 MapKit）。腾讯的免 key 代理模式
+    # 只对 WorkBuddy 生成的页面有效，本项目是本地 FastAPI 托管，用不了。
+    #
+    # **key 只放在服务端**：前端通过 `/api/vehicle/location/map.png` 拿图片，
+    # 请求由后端代发。这样 HTML 里不会出现 key（一旦出现在前端 JS/URL 里，
+    # 就等于公开），iOS 端也不用各自拼地图 URL。
+    #
+    # 未配置时一律降级：不请求第三方、地址为 None、地图不可用，
+    # 界面只显示坐标 + 上报时间 —— 不用一句"服务异常"糊过去。
+    #
+    # ⚠️ 隐私边界：这是**唯一**会把车坐标发给第三方的路径，用户已知情同意。
+    # 注释与日志里都不要打印坐标。
+    tencent_map_key: str = field(
+        default_factory=lambda: _env("TENCENT_MAP_KEY")
+    )
+
     zeekr: ZeekrConfig = field(default_factory=ZeekrConfig)
 
     @property

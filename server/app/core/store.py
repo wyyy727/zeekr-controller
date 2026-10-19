@@ -63,6 +63,17 @@ CREATE TABLE IF NOT EXISTS snapshots (
 );
 
 CREATE INDEX IF NOT EXISTS idx_snapshot_vin_time ON snapshots(vin, created_at DESC);
+
+-- 逆地理编码结果缓存。坐标不变就不该重复向腾讯请求 ——
+-- 既省免费额度，也减少"车的位置被发给第三方"的次数（这是实打实的隐私收益）。
+-- 键是 5 位小数网格（≈1 米）：车静止时坐标连 6 位都完全一致，5 位足够命中，
+-- 还能容忍轻微的定位抖动。value 存的是精简后的 JSON（不含原始响应）。
+-- ⚠️ 这张表属于个人位置数据，随 zeekr.db 一起被 .gitignore 覆盖，不要导出。
+CREATE TABLE IF NOT EXISTS geocode_cache (
+    coord_key   TEXT PRIMARY KEY,
+    address     TEXT NOT NULL,
+    created_at  TEXT DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -395,3 +406,40 @@ class Store:
             }
             for row in rows
         ]
+
+    # MARK: - 逆地理编码缓存
+
+    def get_geocode(self, coord_key: str) -> dict[str, Any] | None:
+        """按坐标网格取缓存的地址。没有就返回 None（由调用方去请求腾讯）。
+
+        为什么缓存要落库而不是只放内存：车静止时坐标可以几天不变，
+        内存缓存一重启就没了，等于每次开服务都重新把位置发给腾讯一次。
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT address FROM geocode_cache WHERE coord_key = ?",
+                (coord_key,),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            data = json.loads(row["address"])
+        except (TypeError, ValueError):
+            # 旧数据损坏就当作没有，让调用方重新解析 —— 不要因为一条脏记录报错
+            return None
+        return data if isinstance(data, dict) else None
+
+    def save_geocode(self, coord_key: str, address: dict[str, Any]) -> None:
+        """写入/覆盖一条地址缓存。"""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO geocode_cache (coord_key, address, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(coord_key) DO UPDATE SET
+                    address = excluded.address,
+                    created_at = excluded.created_at
+                """,
+                (coord_key, json.dumps(address, ensure_ascii=False),
+                 datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            )
