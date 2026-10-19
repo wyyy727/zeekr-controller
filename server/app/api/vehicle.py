@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
-from ..adapters import get_client
+from ..adapters import get_client, is_mock
 from ..core.config import config
 from . import fail
 
@@ -46,12 +46,17 @@ async def get_status(vin: str | None = None) -> dict:
     except Exception as exc:  # noqa: BLE001
         logger.debug("补齐车辆信息失败（不影响状态）：%s", exc)
 
-    # 落库一条快照，便于回溯电量曲线
-    try:
-        from ..main import store
-        store.save_snapshot(status)
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("保存快照失败：%s", exc)
+    # 落库一条快照，便于回溯电量曲线。
+    #
+    # ⚠️ 模拟数据**不落库**：mock 的 VIN 是编的，攒进 `snapshots` 之后会和真车
+    # 快照混在一张表里 —— 按 vin 筛虽然能分开，但"这个库里有没有真数据"就再也
+    # 说不清了。电量曲线只能由真实上报构成，混不得。
+    if not is_mock():
+        try:
+            from ..main import store
+            store.save_snapshot(status)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("保存快照失败：%s", exc)
 
     return {"success": True, "data": status}
 

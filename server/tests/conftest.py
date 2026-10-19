@@ -23,13 +23,30 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _isolate_from_local_env(monkeypatch: pytest.MonkeyPatch):
+def _isolate_from_local_env(monkeypatch: pytest.MonkeyPatch, tmp_path):
     """把配置固定成与 `.env` 无关的确定状态。"""
     from app.adapters import reset_client
     from app.core.config import config
+    from app.core.store import Store
+    import app.main as main_module
 
     monkeypatch.setattr(config, "data_source", "mock", raising=False)
     monkeypatch.setattr(config, "api_token", "", raising=False)
+
+    # 数据库也必须隔离。
+    #
+    # `app.main.store` 在**导入时**就按 `config.database` 建好了，而它的默认值
+    # 指向 `server/data/zeekr.db`（开发者的真实库）。于是任何打到 `/api/trips`
+    # 或 `/api/vehicle/status` 的用例，都会把 mock 生成的假行程 / 假快照写进
+    # 真实库 —— 2026-10-19 就是这么攒出 60 条"看起来像真的"假行程的，
+    # 排查时差点被当成真实数据。
+    #
+    # 只改 config 不够：store 是导入时创建的对象，必须一并重建。
+    # 路由里用的是 `from ..main import store`（函数内导入），取的是模块属性，
+    # 所以重建后立即生效。
+    monkeypatch.setattr(config, "database", tmp_path / "test.db", raising=False)
+    main_module.store = Store(config.database)
+
     reset_client()
     try:
         yield

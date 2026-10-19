@@ -7,7 +7,7 @@ import time
 
 from fastapi import APIRouter, HTTPException
 
-from ..adapters import get_client
+from ..adapters import get_client, is_mock
 from . import fail
 
 logger = logging.getLogger(__name__)
@@ -72,7 +72,14 @@ async def get_trips(
         # 不回显原始异常：网关报文可能含令牌片段
         fail("获取行程失败，请检查服务端日志与登录状态", exc)
 
-    if trips:
+    # ⚠️ 模拟数据**绝不落库**。
+    #
+    # 历史事故（2026-10-19 发现）：mock 客户端会返回一整套生成的行程，这里曾经
+    # 无条件 `save_trips`，于是「跑一次模拟模式 / 跑一次测试」就把假行程写进了
+    # 生产库。更糟的是它**长得像真的**（日期连续、距离合理），而读路径又分不清
+    # 来源 —— 结果整页行程都是编的，还会一直"新鲜"（mock 以当天为基准生成）。
+    # 判据只能是数据源本身：mock 就不写。
+    if trips and not is_mock():
         try:
             store.save_trips(trips)
         except Exception as exc:  # noqa: BLE001
