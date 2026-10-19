@@ -192,7 +192,7 @@ class TestQuerySignableGuard:
 
     def test_plain_values_pass(self) -> None:
         LiveZeekrClient._assert_query_signable(
-            {"latest": "false", "target": "new", "vin": "L6T7841Z0PN000001"}
+            {"latest": "false", "target": "new", "vin": "L6TDEMOCK00000001"}
         )
 
     def test_empty_and_none_pass(self) -> None:
