@@ -504,9 +504,12 @@ body.is-scrolled .topbar::before {
 .tyre .v {
   font-size: 16px; font-weight: 600; line-height: 1.15;
   font-variant-numeric: tabular-nums;
+  color: var(--dian-lan);   /* 靛蓝：读数感、不是纯黑也不像告警 */
 }
 .tyre .k { font-size: 10px; color: var(--text-3); margin-bottom: 3px; }
-.tyre.warn .v { color: var(--zhu-sha); }
+/* 越界用琥珀而不是朱砂：胎压偏高/偏低是"该看一眼"，不是"车坏了"，
+   朱砂留给车门未关、车窗未关这类真正需要立刻处理的状态 */
+.tyre.warn .v { color: var(--teng-huang); }
 
 /* ─────────── 车身状态 chip ─────────── */
 .chip {
@@ -621,6 +624,14 @@ body.is-scrolled .topbar::before {
 /* 当前时段高亮 —— 这张卡最该被一眼看到的信息 */
 .st-period.now { color: var(--dian-qing); font-weight: 600; }
 .st-note { font-size: 10.5px; color: var(--text-3); margin-top: 7px; line-height: 1.6; }
+/* 列表底部的分页提示 / 加载更多哨兵 */
+.st-more {
+  padding: 14px 0 4px;
+  text-align: center;
+  font-size: 10.5px;
+  color: var(--text-3);
+  letter-spacing: .02em;
+}
 .st-actions { display: flex; gap: 8px; margin-top: 9px; }
 .st-btn {
   flex: 1; border: none; font: inherit; font-size: 12px; cursor: pointer;
@@ -931,6 +942,106 @@ body.is-scrolled .topbar::before {
   transition: background .15s, color .15s;
 }
 .seg button.on { background: var(--glass-inner); color: var(--text-1); font-weight: 600; }
+
+/* 行程/能耗：区间条（左：日期与统计范围，右：时间区间切换） */
+.en-range {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  font-size: 11px; color: var(--text-3); line-height: 1.5;
+}
+.en-range .seg button { font-size: 11px; padding: 3px 9px; }
+.en-unit { font-size: 11px; font-weight: 400; color: var(--text-3); }
+/* 图表横向滚动容器：点位多时横向滑动，不压缩间距 */
+.chart-scroll {
+  overflow-x: auto; overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+.chart-scroll::-webkit-scrollbar { height: 3px; }
+.chart-scroll::-webkit-scrollbar-thumb {
+  background: rgba(128,128,128,.28); border-radius: 3px;
+}
+/* 图表图例圆点：与折线同色 */
+.en-dot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  margin-right: 6px; vertical-align: middle;
+}
+/* 月份筛选行：左侧标签 + 原生 select（样式贴近玻璃卡片） */
+.en-month-row { gap: 8px; }
+.en-month-label { display: inline-flex; align-items: center; gap: 5px; }
+.en-month-btn {
+  display: inline-flex; align-items: center; gap: 3px;
+  border: none; background: var(--glass-inner-2);
+  color: var(--text-1); font-family: inherit; font-size: 12.5px; font-weight: 500;
+  padding: 5px 8px 5px 10px; border-radius: 8px; cursor: pointer;
+}
+.en-month-btn svg { width: 12px; height: 12px; opacity: .55; }
+
+/* ── iOS 风格底部弹层（月份选择）──
+   参照 iOS ActionSheet：遮罩 + 圆角面板 + 居中列表 + 独立「取消」 */
+.sheet-root {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(0, 0, 0, .28);
+  opacity: 0; transition: opacity .18s ease;
+  -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+}
+.sheet-root.hidden { display: none; }
+.sheet-root.show { opacity: 1; }
+.sheet {
+  width: 100%; max-width: 460px;
+  background: var(--surface);
+  border-radius: 18px 18px 0 0;
+  padding: 4px 10px calc(10px + env(safe-area-inset-bottom, 0px));
+  transform: translateY(14px); transition: transform .18s ease;
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, .18);
+}
+.sheet-root.show .sheet { transform: translateY(0); }
+@media (min-width: 520px) {
+  .sheet-root { align-items: center; }
+  .sheet { border-radius: 18px; max-width: 360px; padding-bottom: 10px; }
+}
+.sheet-title {
+  font-size: 12px; color: var(--text-3); text-align: center; padding: 12px 0 6px;
+}
+.sheet-sec { font-size: 11px; color: var(--text-3); padding: 8px 6px 6px; }
+/* 左右两栏，各自可上下滚动（左选年、右选月），滚动带吸附 */
+.sheet-cols { display: grid; grid-template-columns: 92px 1fr; gap: 10px; }
+.sheet-col { min-width: 0; display: flex; flex-direction: column; }
+.sheet-years,
+.sheet-months {
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 236px; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  scroll-snap-type: y proximity;
+  /* 上下淡出，暗示可以滚 */
+  mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
+  padding: 2px;
+}
+.sheet-years::-webkit-scrollbar,
+.sheet-months::-webkit-scrollbar { width: 0; }
+.sheet-year,
+.sheet-mon {
+  flex: 0 0 auto; width: 100%; min-height: 40px;
+  border: none; border-radius: 10px; cursor: pointer;
+  background: var(--glass-inner-2); color: var(--text-1);
+  font-family: inherit; font-size: 15px;
+  scroll-snap-align: center;
+}
+.sheet-year.on,
+.sheet-mon.on { background: var(--accent); color: #fff; font-weight: 600; }
+.sheet-mon.on { background: var(--accent); color: #fff; font-weight: 600; }
+.sheet-mon[disabled] { opacity: .3; cursor: not-allowed; }
+.sheet-cancel {
+  width: 100%; min-height: 48px; margin-top: 8px;
+  border: none; border-radius: 12px; cursor: pointer;
+  background: var(--glass-inner-2); color: var(--text-1);
+  font-family: inherit; font-size: 15px; font-weight: 600;
+}
+/* 未连后端时的「演示数据」标记：数字是编的，不能让人当成自己的车 */
+.en-demo {
+  font-style: normal; margin-left: 6px; padding: 1px 6px; border-radius: 6px;
+  background: var(--glass-inner-2); color: var(--text-3); font-size: 10px;
+}
 canvas { display: block; width: 100%; }
 
 /* ─────────── 行程 / 消费列表 ─────────── */
@@ -1484,9 +1595,18 @@ const state = {
   status: null,
   trips: [],
   trend: [],
+  /* 官方「行程与能耗」日统计（GET /api/trips/energy）。
+     - energy       : scope=month → 汇总卡（与官方 App 同区间）
+     - energyWindow : 近 N 天     → 下方两张每日图表（默认 7 天，可切 30 天） */
+  energy: null,
+  energyWindow: null,
+  /* 可选月份（官方 mileageBaseInfo.existingMonth）与当前选中项
+     'currentMonth' = 本月；其余形如 '2026-09' */
+  months: [],
+  yearMonth: 'currentMonth',
   summary: null,
   records: [],
-  days: 30,
+  days: 7,
   health: null,
   /* 登录状态（GET /api/auth/status）。
      独立于数据来源：即使预览页数据走内置模拟，登录也真的落到服务端 ——
@@ -1520,6 +1640,13 @@ const state = {
      前端只吃结构化结果 —— 既不接触签名，也不接触渠道号，更不会把
      用户坐标发给第三方（服务端只把 stationId 转出去）。 */
   stations: null,
+  /* 滑动分页状态。
+     `stationsOffset` 是已加载条数，`stationsHasMore` 由
+     `已加载 < total` 推导；`stationsLoadingMore` 只防重复触发。
+     分页在服务端做切片（极氪气泡接口本身不分页，一次给全视野）。 */
+  stationsOffset: 0,
+  stationsHasMore: false,
+  stationsLoadingMore: false,
   /* `priceAvailable=false` 表示**价格服务整体不可用**，不是"这些站都免费"。
      两者在界面上必须能区分 —— 把缺价格显示成 0 元是安全事故级误导。 */
   stationsPriceOk: true,
@@ -1541,6 +1668,42 @@ const state = {
    预览兜底数据：2026 款焕新极氪 001（真实感演示）
    仅当后端未连接时启用，不影响接真实数据后的逻辑
    ═══════════════════════════════════════════════ */
+/* 演示用的「行程与能耗」统计：按「今天往前 n 天」现算日期，且数值自洽
+   —— 总电耗 = 动态 + 静态，且 总÷里程 / 动态÷里程 都等于卡片上显示的均耗。 */
+function mockEnergy(n) {
+  const base = [24.8, 41.2, 18.6, 33.5, 12.4, 56.0, 27.3];
+  const now = new Date();
+  const pad = (v) => String(v).padStart(2, '0');
+  const series = [];
+  for (let i = n - 1; i >= 0; i -= 1) {
+    const day = new Date(now.getTime() - i * 86400000);
+    const dist = base[(n - 1 - i) % base.length];
+    series.push({
+      date: `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`,
+      distanceKm: dist,
+      energyKwh: +(dist * 0.2).toFixed(2),
+      minutes: Math.round(dist * 1.35),
+      consumption: 20.0,
+    });
+  }
+  const totalKm = series.reduce((a, x) => a + x.distanceKm, 0);
+  const totalKwh = series.reduce((a, x) => a + x.energyKwh, 0);
+  const dynamicKwh = +(totalKwh * 0.9).toFixed(2);
+  return {
+    days: series.length,
+    startDate: series[0].date.replace(/-/g, '/'),
+    endDate: series[series.length - 1].date.replace(/-/g, '/'),
+    distanceKm: +totalKm.toFixed(1),
+    energyKwh: +totalKwh.toFixed(2),
+    dynamicEnergyKwh: dynamicKwh,
+    avgConsumption: +((totalKwh / totalKm) * 100).toFixed(1),
+    avgDynamicConsumption: +((dynamicKwh / totalKm) * 100).toFixed(1),
+    fastChargeCount: Math.max(1, Math.round(n / 5)),
+    slowChargeCount: 0,
+    series,
+  };
+}
+
 const MOCK = {
   status: {
     nickname: '焕新 001',
@@ -1598,6 +1761,34 @@ const MOCK = {
     tripTrack: true,
     geofence: true,
   },
+  /* 官方「行程与能耗」日统计样例（GET /api/trips/energy）
+     演示值：按「今天往前 7 天」现算日期，免得写死日期越看越旧 */
+  months: (() => {
+    const out = [{ yearMonth: 'currentMonth', label: '本月' }];
+    const now = new Date();
+    for (let i = 1; i <= 5; i += 1) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      out.push({
+        yearMonth: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+        label: `${d.getFullYear()}年${d.getMonth() + 1}月`,
+      });
+    }
+    return out;
+  })(),
+  months: (() => {
+    const out = [{ yearMonth: 'currentMonth', label: '本月' }];
+    const now = new Date();
+    for (let i = 1; i <= 5; i += 1) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      out.push({
+        yearMonth: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+        label: `${d.getFullYear()}年${d.getMonth() + 1}月`,
+      });
+    }
+    return out;
+  })(),
+  energy: mockEnergy(new Date().getDate()),   // 汇总卡：本月 1 日至今
+  energyWindow: mockEnergy(7),                // 每日图表：默认近 7 天
   /* 预约充电计划样例 */
   chargePlan: {
     enabled: true,
@@ -1995,9 +2186,28 @@ function socRing(soc, charging, size = 132, lw = 11) {
    折线图（Canvas 手绘，零依赖）
    ═══════════════════════════════════════════════ */
 function drawLineChart(canvas, points, opts = {}) {
+  /* opts:
+       height      画布高度
+       color       折线/数据点颜色
+       fillTop     面积渐变起始色
+       decimals    数值保留位数
+       showValue   是否在点上标数值（默认关，开了会给顶部留出空间）
+       xLabelStep  每隔几个点标一个日期（不传则自动，最多约 7 个） */
   const dpr = window.devicePixelRatio || 1;
-  const cssW = canvas.clientWidth || 320;
+  const showValue = opts.showValue === true;
   const cssH = opts.height || 160;
+
+  /* 可横向滚动：每个数据点固定占 minPointWidth，画布比容器宽时由外层 .chart-scroll 滚动。
+     这样 30 个点也各有自己的位置，日期与数值不会挤在一起。 */
+  const scrollable = opts.scrollable === true;
+  const parentW = canvas.parentElement ? canvas.parentElement.clientWidth : 0;
+  const availW = parentW || canvas.clientWidth || 320;
+  const perPoint = opts.minPointWidth || 56;
+  const cssW = scrollable
+    ? Math.max(availW, points.length * perPoint + 46)
+    : (canvas.clientWidth || 320);
+  if (scrollable) canvas.style.width = cssW + 'px';
+
   canvas.width = cssW * dpr;
   canvas.height = cssH * dpr;
   canvas.style.height = cssH + 'px';
@@ -2005,7 +2215,9 @@ function drawLineChart(canvas, points, opts = {}) {
   const ctx = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
 
-  const padL = 34, padR = 10, padT = 14, padB = 24;
+  const padL = 34, padR = 12;
+  const padT = showValue ? 26 : 14;
+  const padB = 26;
   const w = cssW - padL - padR;
   const h = cssH - padT - padB;
 
@@ -2014,17 +2226,36 @@ function drawLineChart(canvas, points, opts = {}) {
 
   let min = Math.min(...vals), max = Math.max(...vals);
   if (max === min) { max += 1; min -= 1; }
-  const span = max - min;
-  min -= span * 0.12;
-  max += span * 0.12;
 
-  const stroke = opts.color || getComputedStyle(document.documentElement)
-    .getPropertyValue('--tian-qing-deep').trim() || '#1C6FA8';
+  if (opts.niceMax) {
+    /* 顶部刻度取「好看的整数」再加 10% 余量：峰值 45 → 纵轴到 55，
+       否则柱子几乎顶到框顶，两张图形状看着一模一样、也读不出差距。 */
+    const exp = Math.floor(Math.log10(Math.max(max, 1)));
+    const base = Math.pow(10, exp);
+    const ratio = max / base;
+    const step = ratio <= 1 ? 1 : ratio <= 2 ? 2 : ratio <= 5 ? 5 : 10;
+    max = step * base * 1.1;
+    // 里程不会为负：底部直接压到 0，别出现 -5 这种刻度
+    min = min >= 0 ? 0 : min - (max - min) * 0.08;
+  } else {
+    const span = max - min;
+    min -= span * 0.12;
+    max += span * 0.12;
+  }
+
+  const stroke = opts.color || '#1C6FA8';
   const gridColor = 'rgba(128,128,128,.16)';
   const textColor = opts.textColor || 'rgba(128,128,128,.9)';
+  const decimals = opts.decimals ?? 0;
 
   const x = (i) => padL + (points.length === 1 ? w / 2 : (i / (points.length - 1)) * w);
   const y = (v) => padT + h - ((v - min) / (max - min)) * h;
+
+  /* 标注抽稀：30 天时 30 个数值会糊成一片，让数值与日期共用同一组抽稀下标 */
+  const step = opts.xLabelStep || Math.max(1, Math.ceil(points.length / 7));
+  const marks = [];
+  for (let i = 0; i < points.length; i += step) marks.push(i);
+  if (marks[marks.length - 1] !== points.length - 1) marks.push(points.length - 1);
 
   // 横向网格 + Y 轴刻度
   ctx.font = '10px -apple-system, sans-serif';
@@ -2041,55 +2272,104 @@ function drawLineChart(canvas, points, opts = {}) {
     ctx.stroke();
 
     const gv = max - ((max - min) / 3) * i;
-    ctx.fillText(gv.toFixed(opts.decimals ?? 0), padL - 6, gy);
+    ctx.fillText(gv.toFixed(decimals), padL - 6, gy);
   }
 
-  // 面积渐变
-  const grad = ctx.createLinearGradient(0, padT, 0, padT + h);
-  grad.addColorStop(0, opts.fillTop || 'rgba(46,139,192,.30)');
-  grad.addColorStop(1, 'rgba(46,139,192,0)');
+  if (opts.bar) {
+    /* 柱状：柱宽随可用宽度自适应，顶部 4px 圆角，颜色由深到浅过渡 */
+    const barW = Math.max(6, Math.min(26, (w / Math.max(points.length, 1)) * 0.5));
+    const radius = Math.min(4, barW / 2);
+    const baseline = padT + h;
 
-  ctx.beginPath();
-  points.forEach((p, i) => {
-    const py = y(p.v ?? min);
-    i === 0 ? ctx.moveTo(x(i), py) : ctx.lineTo(x(i), py);
-  });
-  ctx.lineTo(x(points.length - 1), padT + h);
-  ctx.lineTo(x(0), padT + h);
-  ctx.closePath();
-  ctx.fillStyle = grad;
-  ctx.fill();
+    points.forEach((p, i) => {
+      if (p.v === null || Number.isNaN(p.v)) return;
+      const top = y(p.v);
+      const px = x(i) - barW / 2;
 
-  // 折线
-  ctx.beginPath();
-  points.forEach((p, i) => {
-    const py = y(p.v ?? min);
-    i === 0 ? ctx.moveTo(x(i), py) : ctx.lineTo(x(i), py);
-  });
-  ctx.strokeStyle = stroke;
-  ctx.lineWidth = 2;
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-  ctx.stroke();
+      const barGrad = ctx.createLinearGradient(0, top, 0, baseline);
+      barGrad.addColorStop(0, stroke);
+      barGrad.addColorStop(1, opts.fillTop || 'rgba(124,92,252,.28)');
 
-  // 末点标记
-  const last = points[points.length - 1];
-  if (last && last.v !== null) {
+      ctx.beginPath();
+      ctx.moveTo(px, baseline);
+      ctx.lineTo(px, top + radius);
+      ctx.quadraticCurveTo(px, top, px + radius, top);
+      ctx.lineTo(px + barW - radius, top);
+      ctx.quadraticCurveTo(px + barW, top, px + barW, top + radius);
+      ctx.lineTo(px + barW, baseline);
+      ctx.closePath();
+      ctx.fillStyle = barGrad;
+      ctx.fill();
+    });
+  } else {
+    // 面积渐变（颜色跟随折线，两张图各自成一套色）
+    const grad = ctx.createLinearGradient(0, padT, 0, padT + h);
+    grad.addColorStop(0, opts.fillTop || 'rgba(28,111,168,.28)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+
     ctx.beginPath();
-    ctx.arc(x(points.length - 1), y(last.v), 3.5, 0, Math.PI * 2);
-    ctx.fillStyle = stroke;
+    points.forEach((p, i) => {
+      const py = y(p.v ?? min);
+      i === 0 ? ctx.moveTo(x(i), py) : ctx.lineTo(x(i), py);
+    });
+    ctx.lineTo(x(points.length - 1), padT + h);
+    ctx.lineTo(x(0), padT + h);
+    ctx.closePath();
+    ctx.fillStyle = grad;
     ctx.fill();
+
+    // 折线
+    ctx.beginPath();
+    points.forEach((p, i) => {
+      const py = y(p.v ?? min);
+      i === 0 ? ctx.moveTo(x(i), py) : ctx.lineTo(x(i), py);
+    });
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.stroke();
   }
 
-  // 首尾日期
+  // 数值标注（柱顶 / 点上方共用）
+  ctx.font = '9.5px -apple-system, sans-serif';
+  points.forEach((p, i) => {
+    if (p.v === null || Number.isNaN(p.v)) return;
+    const px = x(i);
+    const py = y(p.v);
+
+    // 折线模式才画数据点；柱状模式本身就有形状，再加圆点会脏
+    if (!opts.bar) {
+      ctx.beginPath();
+      ctx.arc(px, py, 2.4, 0, Math.PI * 2);
+      ctx.fillStyle = stroke;
+      ctx.fill();
+    }
+
+    if (showValue && (points.length <= 12 || marks.indexOf(i) !== -1)) {
+      ctx.fillStyle = stroke;
+      ctx.textBaseline = 'bottom';
+      ctx.textAlign = i === 0 ? 'left' : (i === points.length - 1 ? 'right' : 'center');
+      ctx.fillText(Number(p.v).toFixed(decimals), px, py - 6);
+    }
+  });
+
+  // X 轴日期（抽稀下标已在上面算好，首尾必标）
   ctx.fillStyle = textColor;
   ctx.textBaseline = 'top';
-  ctx.font = '10px -apple-system, sans-serif';
-  if (points.length > 1) {
-    ctx.textAlign = 'left';
-    ctx.fillText(points[0].label, padL, padT + h + 7);
-    ctx.textAlign = 'right';
-    ctx.fillText(last.label, padL + w, padT + h + 7);
+  ctx.font = '9.5px -apple-system, sans-serif';
+  marks.forEach((i) => {
+    const label = points[i].label;
+    if (!label) return;
+    ctx.textAlign = i === 0 ? 'left' : (i === points.length - 1 ? 'right' : 'center');
+    ctx.fillText(label, x(i), padT + h + 8);
+  });
+
+  /* 可滚动时默认定位到最右：最新一天（今天）始终在视野里，
+     不用手动滑到底才看得到当前数据。 */
+  if (scrollable && canvas.parentElement) {
+    const box = canvas.parentElement;
+    box.scrollLeft = box.scrollWidth;
   }
 }
 
@@ -2133,6 +2413,7 @@ const SVG = {
   heat:   '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0z"/><path d="M12 9v7"/></svg>',
   pin:    '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-5.6 7-11a7 7 0 1 0-14 0c0 5.4 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg>',
   check:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  chevron:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 10l4 4 4-4"/></svg>',
 };
 const PROVIDER_COLORS = {
   zeekr: '#1E7FC2',
@@ -2246,7 +2527,9 @@ function renderDashboard() {
   /* 胎压格：胎温作为副行显示（官方有 leftFrontTyreTemp 等独立字段，
      原实现只显示胎压，浪费了数据）。 */
   const tyre = (label, v, temp) => {
-    const bad = v !== null && v !== undefined && (v < 220 || v > 280);
+    /* 门限按本车实际读数（290–305 kPa ≈ 2.9–3.05 bar）留余量。
+       原来写的 220–280 会把正常值全判成异常 —— 四轮全是红的，反而看不出真问题。 */
+    const bad = v !== null && v !== undefined && (v < 240 || v > 320);
     const t = (cap('tyreTemp') && temp != null) ? `<div class="t">${fmt(temp, 0)} °C</div>` : '';
     return `<div class="tyre${bad ? ' warn' : ''}">
       <div class="k">${label}</div>
@@ -2542,53 +2825,195 @@ function trackSvg(points) {
 /* ═══════════════════════════════════════════════
    视图：行程
    ═══════════════════════════════════════════════ */
-function renderTrips() {
-  const trend = state.trend;
-  const trips = state.trips;
+function tripStat(icon, title, value, unit) {
+  return `<div class="stat">
+      <div class="head">${icon} ${title}</div>
+      <div class="val">${value}<span class="u">${unit}</span></div>
+    </div>`;
+}
 
-  if (!trend.length && !trips.length) {
-    return `<div class="empty"><div class="ico">${SVG.chart}</div><div>暂无行程数据</div></div>`;
+function renderTrips() {
+  const month = state.energy;                       // 汇总卡数据
+  const windowStats = state.energyWindow || month;  // 图表数据
+  const isCurrent = !state.yearMonth || state.yearMonth === 'currentMonth';
+
+  if (!month || !windowStats) {
+    return `<div class="empty">
+      <div class="ico">${SVG.chart}</div>
+      <div>暂无能耗数据</div>
+      <div style="margin-top:8px;font-size:11.5px">连接后端后显示官方「行程与能耗」统计</div>
+    </div>`;
   }
 
-  const totalDist = trend.reduce((a, p) => a + (p.distanceKm || 0), 0);
-  const totalEnergy = trend.reduce((a, p) => a + (p.energyKwh || 0), 0);
-  const avgCons = totalDist > 0 ? (totalEnergy / totalDist) * 100 : null;
+  const charges = (month.fastChargeCount || 0) + (month.slowChargeCount || 0);
+  /* 未连后端时整页是模拟数据，必须在卡片里明说 ——
+     否则这些数字会被当成"我的车"，而它们和真车毫无关系。 */
+  const demo = state.mode !== 'live';
 
-  return `
-    <div class="grid2">
-      <div class="stat">
-        <div class="head">${SVG.ruler} 累计里程</div>
-        <div class="val">${Math.round(totalDist)}<span class="u">km</span></div>
-      </div>
-      <div class="stat">
-        <div class="head">${SVG.bolt} 累计能耗</div>
-        <div class="val">${totalEnergy.toFixed(1)}<span class="u">kWh</span></div>
-      </div>
-      <div class="stat">
-        <div class="head">${SVG.chart} 平均能耗</div>
-        <div class="val">${fmt(avgCons, 1)}<span class="u">kWh/100km</span></div>
-      </div>
-      <div class="stat">
-        <div class="head">${SVG.route} 行程次数</div>
-        <div class="val">${trips.length}<span class="u">次</span></div>
-      </div>
+  const months = state.months.length ? state.months : [{ yearMonth: 'currentMonth', label: '本月' }];
+  const selected = months.find((m) => m.yearMonth === state.yearMonth) || months[0];
+  const monthLabel = isCurrent ? '本月' : (selected.label || state.yearMonth);
+  /* 四个数字与官方「能量统计」卡一一对应，**不能少「动态电耗」**：
+     总电耗 = 动态 + 静态（空调/待机等）；只有动态 ÷ 里程才等于「平均动态电耗」。 */
+  return `<div class="en-range en-month-row">
+      <span class="en-month-label">${SVG.clock} 统计月份</span>
+      <button class="en-month-btn" id="monthBtn">
+        ${esc(monthLabel)}
+        ${SVG.chevron}
+      </button>
     </div>
-
+    <div class="grid2">
+      ${tripStat(SVG.ruler, '累计里程', fmt(month.distanceKm, 0), 'km')}
+      ${tripStat(SVG.bolt, '总电耗', fmt(month.energyKwh, 1), 'kWh')}
+      ${tripStat(SVG.plug, '动态电耗', fmt(month.dynamicEnergyKwh, 1), 'kWh')}
+      ${tripStat(SVG.chart, '平均动态电耗', fmt(month.avgDynamicConsumption, 1), 'kWh/100km')}
+    </div>
+    <div class="en-range">
+      <span>
+        ${monthLabel} ${esc(month.startDate || '')} — ${esc(month.endDate || '')}
+        ${charges ? `· 充电 ${charges} 次 · 快充 ${month.fastChargeCount || 0} / 慢充 ${month.slowChargeCount || 0}` : ''}
+        ${demo ? '<em class="en-demo">演示数据</em>' : ''}
+      </span>
+    </div>
+    <div class="en-range">
+      <span>每日分布 · ${isCurrent ? `近 ${windowStats.days} 天` : `${esc(monthLabel)}共 ${windowStats.days} 天`}</span>
+      ${isCurrent ? `<span class="seg">
+        <button data-days="7" class="${state.days === 7 ? 'on' : ''}">7天</button>
+        <button data-days="30" class="${state.days !== 7 ? 'on' : ''}">30天</button>
+      </span>` : ''}
+    </div>
     <div class="chart-box">
       <div class="card-title">
-        <span>百公里能耗趋势</span>
-        <span class="seg">
-          <button data-days="7" class="${state.days === 7 ? 'on' : ''}">7天</button>
-          <button data-days="30" class="${state.days === 30 ? 'on' : ''}">30天</button>
-          <button data-days="90" class="${state.days === 90 ? 'on' : ''}">90天</button>
-        </span>
+        <span><i class="en-dot" style="background:#7C5CFC"></i>每日里程</span>
+        <span class="en-unit">km</span>
       </div>
-      <canvas id="consChart"></canvas>
+      <div class="chart-scroll"><canvas id="tripMileageChart"></canvas></div>
     </div>
-
-    <div class="list">
-      ${trips.slice(0, 30).map(tripItem).join('')}
+    <div class="chart-box">
+      <div class="card-title">
+        <span><i class="en-dot" style="background:#F0913C"></i>每日电耗</span>
+        <span class="en-unit">kWh</span>
+      </div>
+      <div class="chart-scroll"><canvas id="tripEnergyChart"></canvas></div>
     </div>`;
+}
+
+/* ── 月份选择：iOS 风格底部弹层 ──
+   用按钮 + 弹层而不是 <select>：原生下拉在移动端观感与 iOS 相差太远。
+   弹层挂在 body 上（不随视图重绘销毁），选择后重新取数并整页渲染。 */
+function openMonthSheet() {
+  let root = document.getElementById('sheetRoot');
+  if (!root) {
+    root = document.createElement('div');
+    root.id = 'sheetRoot';
+    root.className = 'sheet-root hidden';
+    document.body.appendChild(root);
+  }
+
+  /* 官方给的是「本月 + 各个月份」，这里拆成年份与月份两段：
+     年份横排、月份按 4 列网格；没有数据的月份置灰不可点。 */
+  const now = new Date();
+  const months = state.months.length ? state.months : [{ yearMonth: 'currentMonth', label: '本月' }];
+  // 键统一成 "YYYY-MM"（两位月份）—— 接口返回的是 2026-09，
+  // 自己拼成 2026-9 会永远匹配不上，整月列表就会全部置灰
+  const pad2 = (v) => String(v).padStart(2, '0');
+  const map = {};
+  months.forEach((m) => {
+    if (m.yearMonth === 'currentMonth') {
+      map[`${now.getFullYear()}-${pad2(now.getMonth() + 1)}`] = 'currentMonth';
+    } else {
+      map[m.yearMonth] = m.yearMonth;
+    }
+  });
+
+  const years = Array.from(new Set(Object.keys(map).map((k) => Number(k.split('-')[0]))))
+    .sort((a, b) => b - a);
+
+  const currentKey = state.yearMonth === 'currentMonth'
+    ? `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`
+    : state.yearMonth;
+  let pickYear = Number(currentKey.split('-')[0]) || now.getFullYear();
+
+  const body = () => {
+    const yearRow = years
+      .map((y) => `<button class="sheet-year${y === pickYear ? ' on' : ''}" data-year="${y}">${y}</button>`)
+      .join('');
+
+    const monthCells = Array.from({ length: 12 }, (_, i) => i + 1)
+      .map((m) => {
+        const key = `${pickYear}-${pad2(m)}`;
+        const value = map[key];
+        const active = value && value === state.yearMonth;
+        return `<button class="sheet-mon${active ? ' on' : ''}" data-mon="${m}"${value ? '' : ' disabled'}>${m}</button>`;
+      })
+      .join('');
+
+    return `
+      <div class="sheet-title">选择月份</div>
+      <div class="sheet-cols">
+        <div class="sheet-col">
+          <div class="sheet-sec">年份</div>
+          <div class="sheet-years">${yearRow}</div>
+        </div>
+        <div class="sheet-col">
+          <div class="sheet-sec">月份</div>
+          <div class="sheet-months">${monthCells}</div>
+        </div>
+      </div>
+      <button class="sheet-cancel" data-sheet-close>取消</button>`;
+  };
+
+  /* 选中项滚到列表中间，打开就能看到当前年月 */
+  const centerSelected = () => {
+    const sheet = root.querySelector('.sheet');
+    if (!sheet) return;
+    ['sheet-mon', 'sheet-year'].forEach((cls) => {
+      const active = sheet.querySelector(`.${cls}.on`);
+      const list = active && active.parentElement;
+      if (!active || !list) return;
+      list.scrollTop = Math.max(
+        0,
+        active.offsetTop - list.offsetTop - list.clientHeight / 2 + active.offsetHeight / 2
+      );
+    });
+  };
+
+  root.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-label="选择月份">${body()}</div>`;
+  root.classList.remove('hidden');
+  requestAnimationFrame(() => {
+    root.classList.add('show');
+    centerSelected();
+  });
+
+  // 用 onclick 赋值而不是 addEventListener：弹层节点复用，避免重复绑定
+  root.onclick = (e) => {
+    if (e.target === root) { closeMonthSheet(); return; }
+    if (e.target.closest('[data-sheet-close]')) { closeMonthSheet(); return; }
+
+    const yearBtn = e.target.closest('[data-year]');
+    if (yearBtn) {
+      pickYear = Number(yearBtn.dataset.year);
+      root.querySelector('.sheet').innerHTML = body();
+      requestAnimationFrame(centerSelected);
+      return;
+    }
+
+    const monthBtn = e.target.closest('[data-mon]');
+    if (monthBtn && !monthBtn.disabled) {
+      const value = map[`${pickYear}-${pad2(Number(monthBtn.dataset.mon))}`];
+      if (!value) return;
+      state.yearMonth = value;
+      closeMonthSheet();
+      loadTrips().then(render);
+    }
+  };
+}
+
+function closeMonthSheet() {
+  const root = document.getElementById('sheetRoot');
+  if (!root) return;
+  root.classList.remove('show');
+  setTimeout(() => root.classList.add('hidden'), 180);
 }
 
 function tripItem(t) {
@@ -2867,8 +3292,13 @@ function nearbyStationsCard() {
   }
 
   const sorted = sortStations(list);
+  /* 头部写「已加载 / 总数」而不是只写总数 ——
+     否则「50 站」配着 10 条列表，会被当成"剩下的没加载出来"。 */
+  const countText = state.stationsHasMore || state.stations.length < state.stationsTotal
+    ? `${state.stations.length} / ${state.stationsTotal} 站`
+    : `${state.stationsTotal} 站`;
   return `<div class="card">
-    ${title(`${state.stationsTotal} 站`)}
+    ${title(countText)}
     ${state.stationsPriceOk ? '' : `<div class="st-note">价格服务暂时不可用，以下仅显示距离与枪数。</div>`}
     <div class="st-bar">
       <span class="cap-badge">点卡片看分时电价</span>
@@ -2878,17 +3308,32 @@ function nearbyStationsCard() {
       </div>
     </div>
     <div class="st-list">${sorted.map(stationRow).join('')}</div>
+    ${state.stationsHasMore
+      ? `<div id="stationsSentinel" class="st-more">${state.stationsLoadingMore
+          ? '正在加载更多…'
+          : '继续下滑加载更多'}</div>`
+      : `<div class="st-more">已全部显示</div>`}
     <div class="st-note">位置仅用于本次查询，不落盘、不发给第三方。</div>
   </div>`;
 }
 
 /* 一键导航：交给系统/地图 App，不在本页画地图 ——
-   画地图要引入瓦片、手势与坐标系纠偏，成本远高于收益。 */
+   画地图要引入瓦片、手势与坐标系纠偏，成本远高于收益。
+
+   两个参数缺一不可：
+   · `navigation` 而不是 `marker` —— 用户点的是「导航到这里」，要的是路线；
+     `marker` 只会在地图上戳一个点，没有规划。
+   · `callnative=1` —— 高德官方文档写明该参数**默认 0**，不传就只在浏览器里
+     打开 H5 网页版。这正是此前"跳到浏览器高德"的原因。
+   不传 `from`：高德移动端会自动用「我的位置」作起点（PC 端无效，但本页是手机用）。
+   坐标用 `coordinate=gaode`，因为站点坐标本身就是 GCJ-02。 */
 function openStationNav(stationId) {
   const s = (state.stations || []).find((x) => x.stationId === stationId);
   if (!s || s.lat == null || s.lng == null) { toast('该站点缺少坐标，无法导航'); return; }
   const name = encodeURIComponent(s.name || '充电站');
-  window.open(`https://uri.amap.com/marker?position=${s.lng},${s.lat}&name=${name}`, '_blank');
+  const url = `https://uri.amap.com/navigation?to=${s.lng},${s.lat},${name}`
+    + '&mode=car&policy=0&coordinate=gaode&callnative=1&src=zeekrdash';
+  window.open(url, '_blank');
 }
 
 /* ── 定位 ──
@@ -2951,15 +3396,26 @@ function useManualLoc() {
   loadStations().then(render);
 }
 
+/* 每页条数。
+   为什么是 10 而不是 20：取价格是**按站请求**第三方网关的（并发 6），
+   首屏 10 个只要 2 轮，20 个要 4 轮 —— 这正是"充电桩加载慢"的主因。
+   而用户通常只看最前面几个，剩下的滑到再取更划算。 */
+const STATIONS_PAGE_SIZE = 10;
+
 async function loadStations() {
   if (!state.loc) return false;
   state.stationsLoading = true;
+  state.stationsOffset = 0;
+  state.stationsHasMore = false;
   render();
   try {
     const data = await api(
-      `/api/stations/nearby?lat=${state.loc.lat}&lng=${state.loc.lng}&limit=20`);
+      `/api/stations/nearby?lat=${state.loc.lat}&lng=${state.loc.lng}`
+      + `&limit=${STATIONS_PAGE_SIZE}&offset=0`);
     state.stations = data.stations || [];
     state.stationsTotal = data.total == null ? state.stations.length : data.total;
+    state.stationsOffset = state.stations.length;
+    state.stationsHasMore = state.stations.length < state.stationsTotal;
     // 显式判 `!== false`：后端不返回该字段时按"有价格"处理，避免误报不可用
     state.stationsPriceOk = data.priceAvailable !== false;
     state.locError = '';
@@ -2972,6 +3428,38 @@ async function loadStations() {
     return false;
   } finally {
     state.stationsLoading = false;
+  }
+}
+
+/* 滑到列表底部时追加下一页。由 window scroll 监听触发（见文件末尾）。 */
+async function loadMoreStations() {
+  if (!state.loc || state.stationsLoadingMore || !state.stationsHasMore) return;
+
+  state.stationsLoadingMore = true;
+  render();
+  try {
+    const data = await api(
+      `/api/stations/nearby?lat=${state.loc.lat}&lng=${state.loc.lng}`
+      + `&limit=${STATIONS_PAGE_SIZE}&offset=${state.stationsOffset}`);
+    const more = data.stations || [];
+
+    /* 按 stationId 去重再追加。
+       正常切片不会重复，但距离相同的站点排序可能抖动（服务端 sort 不保证稳定），
+       真重了会在列表里出现两行同一个站 —— 这条保险很便宜。 */
+    const seen = new Set((state.stations || []).map((s) => s.stationId));
+    state.stations = (state.stations || []).concat(more.filter((s) => !seen.has(s.stationId)));
+
+    state.stationsTotal = data.total == null ? state.stations.length : data.total;
+    state.stationsOffset += more.length;
+    state.stationsHasMore = more.length > 0 && state.stations.length < state.stationsTotal;
+    state.stationsPriceOk = state.stationsPriceOk && data.priceAvailable !== false;
+  } catch (e) {
+    console.warn('加载更多充电站失败', e);
+    // 失败就停在当前页，别让滚动监听反复重试打接口
+    state.stationsHasMore = false;
+  } finally {
+    state.stationsLoadingMore = false;
+    render();
   }
 }
 
@@ -3404,14 +3892,48 @@ function render() {
   // 图表延后绘制（需等布局完成）
   requestAnimationFrame(() => {
     if (state.tab === 'trips') {
-      const c = $('#consChart');
-      if (c && state.trend.length) {
-        drawLineChart(c,
-          state.trend.map((p) => ({
-            v: p.consumption,
-            label: String(p.date).slice(5),
-          })),
-          { height: 168, decimals: 0 });
+      // 官方日统计：里程与电耗各一张，共用一个 X（只含有数据的日期）
+      const source = state.energyWindow || state.energy;
+      const series = (source && source.series) || [];
+      /* 两张图刻意用不同色系（紫 / 橙），并标出每个点的数值与日期。 */
+      const mileageCanvas = $('#tripMileageChart');
+      if (mileageCanvas && series.length) {
+        drawLineChart(
+          mileageCanvas,
+          series.map((p) => ({ v: p.distanceKm, label: String(p.date).slice(5) })),
+          { height: 172, decimals: 0, showValue: true, scrollable: true,
+            xLabelStep: 1, minPointWidth: 56, niceMax: true, bar: true,
+            color: '#7C5CFC', fillTop: 'rgba(124,92,252,.24)' });
+      }
+      const energyCanvas = $('#tripEnergyChart');
+      if (energyCanvas && series.length) {
+        drawLineChart(
+          energyCanvas,
+          series.map((p) => ({ v: p.energyKwh, label: String(p.date).slice(5) })),
+          { height: 172, decimals: 1, showValue: true, scrollable: true,
+            xLabelStep: 1, minPointWidth: 56,
+            color: '#F0913C', fillTop: 'rgba(240,145,60,.24)' });
+      }
+
+      /* 两张图横向联动：滑任意一个，另一张同步 —— 核对同一天的里程与电耗。
+         加 syncing 标记避免互相触发形成死循环。 */
+      const scrollers = [mileageCanvas, energyCanvas]
+        .filter(Boolean)
+        .map((el) => el.parentElement)
+        .filter(Boolean);
+      if (scrollers.length === 2) {
+        let syncing = false;
+        scrollers.forEach((box, index) => {
+          box.addEventListener('scroll', () => {
+            if (syncing) return;
+            syncing = true;
+            const other = scrollers[1 - index];
+            if (other && other.scrollLeft !== box.scrollLeft) {
+              other.scrollLeft = box.scrollLeft;
+            }
+            requestAnimationFrame(() => { syncing = false; });
+          }, { passive: true });
+        });
       }
     }
     if (state.tab === 'charges') {
@@ -3499,17 +4021,41 @@ async function loadLocation() {
 }
 
 async function loadTrips() {
+  /* 行程页支持按月筛选（官方 App 也有）：
+     - 本月：汇总卡用「本月」，图表用「近 N 天」（默认 7 天，可切 30 天）
+     - 历史月份：卡片与图表都只显示该月
+     逐次行程明细（/api/trips）不请求：服务端没落库，回落模拟时会长出假行程。 */
+  const isCurrent = !state.yearMonth || state.yearMonth === 'currentMonth';
+  const monthQuery = isCurrent ? '' : '&yearMonth=' + encodeURIComponent(state.yearMonth);
+
   try {
-    const [trips, trend] = await Promise.all([
-      api('/api/trips?days=' + state.days),
-      api('/api/energy/trend?days=' + state.days),
-    ]);
-    state.trips = trips || [];
-    state.trend = trend || [];
+    state.energy = await api('/api/trips/energy?scope=month' + monthQuery);
+    if (isCurrent) {
+      const energyDays = Math.min(state.days, 31);   // 官方上限 31 个自然日（A008）
+      state.energyWindow =
+        (await api('/api/trips/energy?days=' + energyDays).catch(() => null)) || state.energy;
+    } else {
+      state.energyWindow = state.energy;   // 历史月：图表就是这一个月
+    }
     return true;
   } catch (e) {
-    console.warn('行程加载失败', e);
+    console.warn('能耗统计加载失败', e);
+    state.energy = null;
+    state.energyWindow = null;
     return false;
+  }
+}
+
+async function loadEnergyMonths() {
+  try {
+    const data = await api('/api/trips/energy/months');
+    state.months = data.months || [];
+    // 选中的月份若已不在可查清单里（跨月后），退回本月
+    if (state.months.length && !state.months.some((m) => m.yearMonth === state.yearMonth)) {
+      state.yearMonth = 'currentMonth';
+    }
+  } catch (e) {
+    state.months = [];
   }
 }
 
@@ -3530,8 +4076,14 @@ async function loadCharges() {
 
 function seedMock() {
   state.status = MOCK.status;
-  state.trips = MOCK.trips;
-  state.trend = MOCK.trend.slice(-state.days);
+  state.trips = [];
+  state.trend = [];
+  state.energy = MOCK.energy;
+  state.months = MOCK.months;
+  state.yearMonth = 'currentMonth';
+  state.months = MOCK.months;
+  state.yearMonth = 'currentMonth';
+  state.energyWindow = MOCK.energyWindow;
   state.summary = MOCK.summary;
   state.records = MOCK.records;
   state.health = MOCK.health;
@@ -3541,6 +4093,10 @@ function seedMock() {
   state.location = MOCK.location;
   state.stations = MOCK.stations;
   state.stationsTotal = MOCK.stations.length;
+  // 演示数据一次给完，不做分页（也不该让用户滑出"加载更多"的假动作）
+  state.stationsOffset = MOCK.stations.length;
+  state.stationsHasMore = false;
+  state.stationsLoadingMore = false;
   state.stationsPriceOk = true;
   /* 预览兜底数据的位置：与 MOCK.stations 里各站的距离基准一致（上海市中心）。
      直接给值而不是走定位 —— 预览页的本职是"看设计"，
@@ -3677,7 +4233,7 @@ async function loadAll() {
     //    以「车辆状态 + 健康检查」是否都拿到作为后端可用的判据，
     //    任一失败即视为不可达，回落模拟数据
     const [statusOk, healthOk] = await Promise.all([loadStatus(), loadHealth()]);
-    await Promise.all([loadTrips(), loadCharges(), loadCapabilities(), loadAuth(), loadLocation()]);
+    await Promise.all([loadEnergyMonths(), loadTrips(), loadCharges(), loadCapabilities(), loadAuth(), loadLocation()]);
 
     if (statusOk && healthOk) {
       state.mode = 'live';
@@ -3745,7 +4301,12 @@ document.addEventListener('click', (e) => {
     sendCommand(ctrl);
     return;
   }
-  // 时间区间切换（限定 data-days：`.seg` 被附近充电站的排序复用了）
+  // 月份选择：弹出 iOS 风格底部弹层（年份 + 月份两段）
+  if (e.target.closest('#monthBtn')) {
+    openMonthSheet();
+    return;
+  }
+  // 图表区间切换（限定 data-days：`.seg` 被附近充电站的排序复用了）
   const seg = e.target.closest('.seg button[data-days]');
   if (seg) {
     state.days = parseInt(seg.dataset.days, 10);
@@ -3872,6 +4433,7 @@ const DBG_ENDPOINTS = [
   { m: 'POST', p: '/api/vehicle/command',   d: '下发车控指令', body: { command: 'lock' } },
   { m: 'GET',  p: '/api/vehicle/snapshots', d: '历史快照' },
   { m: 'GET',  p: '/api/trips',             d: '行程列表' },
+  { m: 'GET',  p: '/api/trips/energy',      d: '官方能耗统计（≤31 天）' },
   { m: 'GET',  p: '/api/energy/trend',      d: '能耗趋势' },
   { m: 'GET',  p: '/api/charges/summary',   d: '充电消费汇总' },
   { m: 'GET',  p: '/api/charges/records',   d: '充电消费明细' },
@@ -4124,6 +4686,20 @@ function initDebugUI() {
    ═══════════════════════════════════════════════ */
 initDebugUI();
 bootstrap();     // 先确认登录态，再决定要不要加载数据
+
+/* ── 充电站滑动分页 ──
+   哨兵元素进入视口（提前 240px）就取下一页。
+   用 window scroll 而不是 IntersectionObserver：render() 每次都重建 DOM，
+   observer 得反复重绑；scroll 监听一次就够，且天然能判断"当前在充电页"。 */
+window.addEventListener('scroll', () => {
+  if (state.tab !== 'charges') return;
+  if (!state.stationsHasMore || state.stationsLoadingMore) return;
+  const sentinel = document.getElementById('stationsSentinel');
+  if (!sentinel) return;
+  if (sentinel.getBoundingClientRect().top < window.innerHeight + 240) {
+    loadMoreStations();
+  }
+}, { passive: true });
 
 /* 滚动响应：下滑超过一屏的 6% 时，顶栏玻璃变实
    —— 对应 iOS 26 从 scrollEdge 到 inline 的过渡行为 */
