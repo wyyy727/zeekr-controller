@@ -216,6 +216,97 @@ enum MockData {
         }
     }
 
+    // MARK: - 官方行程与能耗（/api/trips/energy）
+    //
+    // 对应 preview/index.html → mockEnergy()：数字自洽 ——
+    // 总电耗 = 动态 + 静态，总÷里程 与 动态÷里程 都能对上卡片上的均耗。
+
+    static func energyMonths() -> EnergyMonths {
+        let cal = Calendar.current
+        let now = Date()
+        var list: [EnergyMonth] = [EnergyMonth(yearMonth: "currentMonth", label: "本月")]
+        for i in 1...5 {
+            guard let date = cal.date(byAdding: .month, value: -i, to: now) else { continue }
+            let comps = cal.dateComponents([.year, .month], from: date)
+            let year = comps.year ?? 1970
+            let month = comps.month ?? 1
+            list.append(EnergyMonth(
+                yearMonth: String(format: "%04d-%02d", year, month),
+                label: "\(year)年\(month)月"
+            ))
+        }
+        return EnergyMonths(months: list, monthMileageKm: nil, monthEnergyKwh: nil)
+    }
+
+    /// 近 N 天
+    static func dailyEnergy(days: Int) -> DailyEnergy {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let n = max(1, min(days, 31))
+        let dates = (0..<n).compactMap { offset in
+            cal.date(byAdding: .day, value: -(n - 1 - offset), to: today)
+        }
+        return buildDailyEnergy(dates: dates)
+    }
+
+    /// 历史整月（`yearMonth` 形如 `2026-09`）
+    static func dailyEnergy(yearMonth: String) -> DailyEnergy {
+        let cal = Calendar.current
+        let parts = yearMonth.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 2,
+              let first = cal.date(from: DateComponents(year: parts[0], month: parts[1], day: 1)),
+              let range = cal.range(of: .day, in: .month, for: first) else {
+            return dailyEnergy(days: 30)
+        }
+        let dates = range.compactMap { cal.date(byAdding: .day, value: $0 - 1, to: first) }
+        return buildDailyEnergy(dates: dates)
+    }
+
+    private static func buildDailyEnergy(dates: [Date]) -> DailyEnergy {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        let display = DateFormatter()
+        display.dateFormat = "yyyy年MM月dd日"
+
+        var series: [DailyEnergyPoint] = []
+        var totalKm = 0.0
+        var totalKwh = 0.0
+
+        for (index, date) in dates.enumerated() {
+            // 约五分之一的天数不动车
+            if index % 5 == 3 { continue }
+            let distance = 12.0 + Double(index % 7) * 5.5
+            let energy = (distance * 0.2 * 100).rounded() / 100
+            totalKm += distance
+            totalKwh += energy
+            series.append(DailyEnergyPoint(
+                date: formatter.string(from: date),
+                distanceKm: (distance * 10).rounded() / 10,
+                energyKwh: energy,
+                minutes: Int(distance * 1.35),
+                consumption: 20.0
+            ))
+        }
+
+        let dynamicKwh = (totalKwh * 0.9 * 100).rounded() / 100
+        let avg = totalKm > 0 ? ((totalKwh / totalKm) * 1000).rounded() / 10 : 0
+        let avgDynamic = totalKm > 0 ? ((dynamicKwh / totalKm) * 1000).rounded() / 10 : 0
+
+        return DailyEnergy(
+            days: dates.count,
+            startDate: dates.first.map { display.string(from: $0) },
+            endDate: dates.last.map { display.string(from: $0) },
+            distanceKm: (totalKm * 10).rounded() / 10,
+            energyKwh: (totalKwh * 100).rounded() / 100,
+            dynamicEnergyKwh: dynamicKwh,
+            avgConsumption: avg,
+            avgDynamicConsumption: avgDynamic,
+            fastChargeCount: max(1, dates.count / 5),
+            slowChargeCount: 0,
+            series: series
+        )
+    }
+
     // MARK: - 充电记录
     //
     // 对应 preview/index.html → MOCK.records（12 条，逐条对齐）
@@ -409,6 +500,15 @@ enum MockData {
     ///
     /// `seatVent: false` 是刻意留的 —— 演示"这台车没开通后排座椅通风时，
     /// 网页与 App 都会把那个按钮隐藏"。
+    /// 对应 preview/index.html → MOCK.chargePlan
+    static let chargePlan = ChargePlan(
+        enabled: true,
+        startTime: "23:30",
+        endTime: "06:30",
+        targetSoc: 90,
+        mode: "谷电优先"
+    )
+
     static let capabilities: [String: Bool] = [
         "sentinel": true,
         "sentinelPhoto": false,

@@ -231,8 +231,10 @@ struct DashboardView: View {
     }
 
     private func tyreItem(_ position: String, _ value: Double?, _ temp: Double? = nil) -> some View {
-        // 正常胎压区间（kPa）—— 低于 220 或高于 280 视为异常
-        let isAbnormal = value.map { $0 < 220 || $0 > 280 } ?? false
+        /* 正常胎压区间（kPa）。
+           门限按**本车实测**放宽到 240–320：本车四轮约 299–305 kPa（2.99–3.05 bar），
+           旧的 220–280 会把四个正常值全判成异常 —— 全是红的反而看不出真问题。 */
+        let isAbnormal = value.map { $0 < 240 || $0 > 320 } ?? false
 
         return VStack(spacing: 3) {
             Text(position)
@@ -241,7 +243,9 @@ struct DashboardView: View {
 
             Text(value.map { String(format: "%.0f", $0) } ?? "--")
                 .font(.system(size: 16, weight: .semibold, design: .rounded))
-                .foregroundStyle(isAbnormal ? ChineseColor.statusBad : Theme.textPrimary(scheme))
+                // 正常值用靛蓝（读数感、不刺眼）；越界用藤黄表示"该看一眼"，
+                // 朱砂红留给车门未关这类必须立刻处理的状态
+                .foregroundStyle(isAbnormal ? ChineseColor.tengHuang : ChineseColor.dianLan)
                 .monospacedDigit()
 
             // 胎温副行：拿不到时不占位显示，避免出现无意义的 "----"

@@ -32,6 +32,10 @@ enum APIRoutes {
     // 行程与能耗
     static let trips          = "/api/trips"
     static let energyTrend    = "/api/energy/trend"
+    /// 官方「行程与能耗」统计：`?scope=month`（本月）/ `?days=7`（近 N 天）/ `?yearMonth=2026-09`
+    static let tripsEnergy    = "/api/trips/energy"
+    /// 可选月份清单（官方 existingMonth）
+    static let tripsEnergyMonths = "/api/trips/energy/months"
 
     // 充电消费
     static let chargesSummary = "/api/charges/summary"

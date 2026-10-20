@@ -188,6 +188,52 @@ struct EnergyTrendPoint: Codable, Identifiable {
     var tripCount: Int?
 }
 
+// MARK: - 官方行程与能耗统计
+
+/// 官方「行程与能耗」统计（`GET /api/trips/energy`，与 App「行程统计」页同源）。
+///
+/// 口径（服务端算法，改动前先确认）：
+///   · **总电耗 = 动态 + 静态**（静态是空调、待机等非行驶消耗）；
+///   · **平均动态电耗 = 动态 ÷ 里程**，只有它能和「动态电耗」相互验算；
+///     只摆「总电耗 + 平均动态电耗」会让人一除就对不上。
+struct DailyEnergy: Codable {
+    var days: Int?
+    var startDate: String?
+    var endDate: String?
+    var distanceKm: Double?
+    var energyKwh: Double?
+    var dynamicEnergyKwh: Double?
+    var avgConsumption: Double?
+    var avgDynamicConsumption: Double?
+    var fastChargeCount: Int?
+    var slowChargeCount: Int?
+    var series: [DailyEnergyPoint]?
+}
+
+/// 逐日一项（服务端只返回有数据的日期，X 轴是不连续的）
+struct DailyEnergyPoint: Codable, Identifiable {
+    var id: String { date }
+    var date: String
+    var distanceKm: Double?
+    var energyKwh: Double?
+    var minutes: Int?
+    var consumption: Double?
+}
+
+/// 可选月份（官方 `mileageBaseInfo.existingMonth`）
+struct EnergyMonth: Codable, Identifiable {
+    var id: String { yearMonth }
+    /// `currentMonth` 表示本月，其余形如 `2026-09`
+    var yearMonth: String
+    var label: String
+}
+
+struct EnergyMonths: Codable {
+    var months: [EnergyMonth]?
+    var monthMileageKm: Double?
+    var monthEnergyKwh: Double?
+}
+
 // MARK: - 充电消费
 
 /// 充电服务商
@@ -695,11 +741,85 @@ struct CommandResult: Codable {
 /// 注意：服务端**只对「服务类」功能下判断**（充电管理 / 车辆守卫 / 行程…）。
 /// 硬件能力（胎压 / 空调 / 车窗 / 门锁）不会出现在 `capabilities` 里 ——
 /// 权限接口不回答硬件问题，拿它隐藏硬件按钮就是臆测。
+/// 预约充电计划（`/api/vehicle/capability` 的 `chargePlan` 字段）。
+///
+/// **为什么手写解码**：后端是把上游字段原样透传的（`pick("targetSoc", "socLimit",
+/// "chargeLimit", ...)`），`targetSoc` 可能是数字 `90` 也可能是字符串 `"90"`。
+/// 如果按 `Double` 硬解，遇到字符串会让**整个 `VehicleCapabilities` 解码失败** ——
+/// 不是少一个字段，而是能力集全丢、按钮全部回到"全显示"。
+/// 所以这里逐字段用 `try?`：解不出来就是 nil，绝不让它抛出去。
+struct ChargePlan: Codable {
+    var enabled: Bool?
+    var startTime: String?
+    var endTime: String?
+    var targetSoc: Double?
+    var mode: String?
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, startTime, endTime, targetSoc, mode
+    }
+
+    init(
+        enabled: Bool? = nil,
+        startTime: String? = nil,
+        endTime: String? = nil,
+        targetSoc: Double? = nil,
+        mode: String? = nil
+    ) {
+        self.enabled = enabled
+        self.startTime = startTime
+        self.endTime = endTime
+        self.targetSoc = targetSoc
+        self.mode = mode
+    }
+
+    init(from decoder: Decoder) throws {
+        // container 取不到（不是 JSON 对象）也不抛：整块当"没有计划"处理，
+        // 因为这张卡是附加信息，不值得让它连累能力集。
+        let container = try? decoder.container(keyedBy: CodingKeys.self)
+
+        enabled = Self.decode(Bool.self, container, .enabled)
+        startTime = Self.decode(String.self, container, .startTime)
+        endTime = Self.decode(String.self, container, .endTime)
+        mode = Self.decode(String.self, container, .mode)
+
+        // targetSoc 上游可能给 90 也可能给 "90"，两种都试；都不成就是 nil
+        if let number = Self.decode(Double.self, container, .targetSoc) {
+            targetSoc = number
+        } else if let text = Self.decode(String.self, container, .targetSoc) {
+            targetSoc = Double(text)
+        } else {
+            targetSoc = nil
+        }
+    }
+
+    /// 逐字段"尽力解码"：取不到或类型不符就返回 nil，绝不抛。
+    ///
+    /// 不能直接写 `try? container?.decodeIfPresent(...)` —— 可选链 + `try?`
+    /// 会把结果包成 `T???`，赋值给 `T?` 编译不过。这里把展平逻辑收在一处。
+    private static func decode<T: Decodable>(
+        _ type: T.Type,
+        _ container: KeyedDecodingContainer<CodingKeys>?,
+        _ key: CodingKeys
+    ) -> T? {
+        guard let container else { return nil }
+        return (try? container.decodeIfPresent(type, forKey: key)) ?? nil
+    }
+
+    /// 有没有可展示的内容（全空时不渲染这张卡）
+    var hasContent: Bool {
+        enabled != nil || startTime != nil || endTime != nil || targetSoc != nil
+    }
+}
+
+/// 车辆能力集（`GET /api/vehicle/capability`）
 struct VehicleCapabilities: Codable {
     /// 原始权限包 ID。为空数组 = 服务端确认该车无权限（与 nil「没取到」不同）。
     var permissions: [String]?
     var capabilities: [String: Bool]?
     var verified: Bool?
+    /// 预约充电计划。取不到时为 nil，界面不渲染该卡。
+    var chargePlan: ChargePlan?
 }
 
 /// 车控指令的**车端执行结果**（`GET /api/vehicle/command/result`）
