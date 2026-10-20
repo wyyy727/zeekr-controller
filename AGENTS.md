@@ -142,6 +142,7 @@ python scripts/apk_intel.py <新版.apk> --compare docs/zeekr-apk-intel.json
 | `server/app/adapters/zeekr_signing.py` | 三网关签名（GW1 SHA1 / GW2 HMAC-SHA1 / GW3 HMAC-SHA256 + AES-128-CBC）。**GW2 已停用**，回退分支是历史遗留 |
 | `server/app/adapters/haohan.py` | 第三方充电网关（站名 + 电价来源），与极氪侧零耦合 |
 | `server/app/api/stations.py` | `GET /api/stations/nearby` —— 两跳合并、并发取价、降级与缓存 |
+| `server/app/api/trips.py` | `GET /api/trips/energy` —— **官方「行程与能耗」日统计**（`h5/getDailyStatisticsInfo`，≤31 天），行程页的数据源 |
 | `server/app/adapters/tencent_map.py` | 腾讯位置服务（逆地理编码 + 静态图）。**key 只在服务端** |
 | `server/app/core/coords.py` | WGS-84 ↔ GCJ-02。车坐标 `marsCoordinates="0"` 时必须转，否则地图偏约 500 米 |
 | `server/app/api/location.py` | `GET /api/vehicle/location` 与 `.../map.png` —— **全项目唯一把车坐标发给第三方的出口** |
@@ -184,6 +185,16 @@ python scripts/apk_intel.py <新版.apk> --compare docs/zeekr-apk-intel.json
 浩汉**没有**"一次返回多站价格的列表接口"。它自己的前端是**逐站预取 detail 再合并**，
 `server/app/api/stations.py` 照这个做（并发上限 6）。
 
+**分页是服务端切片，不是上游分页**：极氪 `getListV2` 一次就把视野内的站点全给了
+（它自己没有分页参数），所以 `limit` / `offset` 是在排好序的列表上切。
+`total` 是切片前的总数，前端靠 `offset + count < total` 判断还有没有下一页。
+首屏取 10 条而不是 20 —— 取价是按站请求的，10 个只要 2 轮、20 个要 4 轮，
+这是"加载慢"的主要来源。
+
+**导航必须带 `callnative=1`**：高德 URI 文档里该参数**默认是 0**，不传就只在浏览器
+打开 H5 网页版（用户报过"跳到浏览器高德"）。另外要用 `navigation` 而不是 `marker`
+—— 后者只标点、不规划路线。iOS 优先走 `iosamap://navi` scheme，失败再退回 H5。
+
 ---
 
 ## 📍 车辆位置：改这块之前先读
@@ -202,7 +213,7 @@ python scripts/apk_intel.py <新版.apk> --compare docs/zeekr-apk-intel.json
 
 ---
 
-## ❗ 五个容易搞错的认知
+## ❗ 六个容易搞错的认知
 
 1. **车控返回「已提交」≠ 车端已执行。** 网关收下只代表请求被受理。
    要确认真执行，必须查 `queryProcessResult`，或以**车实际动作**为准。
@@ -228,6 +239,18 @@ python scripts/apk_intel.py <新版.apk> --compare docs/zeekr-apk-intel.json
    - `api/trips.py` / `api/vehicle.py` 在 `is_mock()` 为真时**不落库**；
    - `tests/conftest.py` 把 `config.database` 指向临时库，**并重建 `app.main.store`**
      （store 是导入时创建的，只改 config 不够）。
+
+6. **官方接口的「命名空间」不认识就是 404，别拿 404 当"功能不存在"。**
+   `journey-statistics-service` 下统计接口全在 **`h5`** 命名空间（`/api/v2.0/h5/getDailyStatisticsInfo`），
+   而 `phone` 下只有一条 `protocolConfirm`。2026-10-19 因为只试了 `phone` + 名词词根，
+   枚举 136 条全 `00A01`，据此写下"官方不给行程数据"的错误结论，白费一天。
+   ⇒ 找接口的第一手段是**读前端代码**（H5 路由 → 静态站 → webpack chunk），不是猜路径。
+   同时还踩到：日统计接口**只回查 60 天**（`A010`）、月报**不能查当月**（`A007`）、
+   窗口上限 **31 自然日**（`A008`）—— 历史月份必须换 `getMonthlyStatisticsInfo`。
+
+   同样的教训在电耗口径上重演过一次：一开始只摆「总电耗 + 平均动态电耗」两张卡，
+   用户拿 22.7 ÷ 102 得 22.3 去对卡片上的 18.1，怎么看都对不上 ——
+   因为少了「动态电耗」这一项（总 = 动态 + 静态）。**三个数必须同时出现。**
 
 ---
 
