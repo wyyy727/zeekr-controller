@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import base64
+import calendar
 import json
 import logging
 import re
@@ -49,6 +50,18 @@ from .zeekr_signing import (
 )
 
 logger = logging.getLogger(__name__)
+
+# 官方「行程与能耗」日统计（官方 App「行程统计」页的数据源）。
+# 注意命名空间是 **h5** 而不是 phone —— phone 下只有 `protocolConfirm` 一条协议确认，
+# 按 phone + 名词词根去枚举会全部 404（踩过，别再按名字猜）。
+ENERGY_DAILY_PATH = "/journey-statistics-service/api/v2.0/h5/getDailyStatisticsInfo"
+# 服务端硬限制：一次最多查询 31 个自然日，超了报 A008。
+ENERGY_MAX_DAYS = 31
+# 可选月份清单 + 车辆总里程（同服务的 mileageBaseInfo）
+ENERGY_MONTHS_PATH = "/journey-statistics-service/api/v2.0/h5/mileageBaseInfo"
+# 月度报告：日统计接口 A010「只允许查询 60 天内数据」，
+# 更早的月份只能走这条（支持约两年，`existingMonth` 就是它的可查清单）
+ENERGY_MONTHLY_PATH = "/journey-statistics-service/api/v2.0/h5/getMonthlyStatisticsInfo"
 
 # 会话被顶替
 ERR_LOGGED_IN_ELSEWHERE = "079021"
@@ -1608,40 +1621,257 @@ class LiveZeekrClient(ZeekrClient):
             })
         return trips
 
-    async def get_energy_trend(self, vin: str | None = None, days: int = 30) -> list[dict[str, Any]]:
-        """获取能耗趋势。
+    async def get_daily_energy(
+        self,
+        vin: str | None = None,
+        days: int = 30,
+        scope: str = "window",
+        year_month: str | None = None,
+    ) -> dict[str, Any]:
+        """官方「行程与能耗」日统计。
 
-        由行程数据按日聚合得到 —— 极氪未提供独立的能耗趋势接口。
+        端点 `POST /journey-statistics-service/api/v2.0/h5/getDailyStatisticsInfo`，
+        就是官方 App「行程统计」页的数据源（同 host、同 GW3 签名，**不需要 H5 那套第三方签名**）。
+
+        要点（都是实测踩出来的，别改）：
+          - `start` / `end` 必须是**毫秒 Long**；传 `"2026-10-01"` 会 `52A02`；
+          - 服务端限制**最多 31 个自然日**，超了报 `A008`。窗口按自然日算：
+            `start` 取「今天-(N-1)天」的本地 00:00，`end` 取当前时刻 —— 直接用
+            `now-31*86400s` 会因为多出当天已过的时分秒而变成 31.02 天，同样 `A008`；
+          - 四组序列（里程/时长/动态电耗/静态电耗）**共用同一个 X 轴**，
+            而且 X **只含有数据的日期**，不能按下标硬对齐到日历。
         """
-        trips = await self.get_trips(vin=vin, days=days)
-        if not trips:
-            return []
+        target_vin = vin or self._session.get("active_vin") or ""
+        if not target_vin:
+            vehicles = await self.list_vehicles()
+            if not vehicles:
+                raise ZeekrAPIError("no_vehicle", "账号下未找到车辆")
+            target_vin = vehicles[0]["vin"]
+            self._session["active_vin"] = target_vin
 
-        buckets: dict[str, dict[str, Any]] = {}
-        for trip in trips:
-            start = trip.get("startTime")
-            if not start:
-                continue
-            day = str(start)[:10]
-            bucket = buckets.setdefault(day, {
-                "date": day,
-                "distanceKm": 0.0,
-                "energyKwh": 0.0,
-                "consumption": None,
-                "tripCount": 0,
+        now_ms = int(time.time() * 1000)
+        current_month = time.strftime("%Y-%m", time.localtime(now_ms / 1000))
+
+        if year_month and year_month not in ("currentMonth", "current") and year_month != current_month:
+            # 历史月份：日统计接口只允许回查 60 天（A010），改用月度报告接口。
+            return await self.get_month_energy(year_month=year_month, vin=target_vin)
+
+        if year_month or scope == "month":
+            # 「本月」= 当月 1 日 00:00 起 —— 官方 App 行程统计页用的就是这个区间，
+            # 想和 App 的数字对上就必须用这个，而不是「近 N 天」。
+            local = time.localtime(now_ms / 1000)
+            start_ms = int(time.mktime((local.tm_year, local.tm_mon, 1, 0, 0, 0, 0, 0, -1)) * 1000)
+            end_ms = now_ms
+        else:
+            days = max(1, min(int(days), ENERGY_MAX_DAYS))
+            start_ms = self._day_start_ms(now_ms) - (days - 1) * 86_400_000
+            end_ms = now_ms
+
+        # 按实际区间反算天数：历史月可能是 28/30/31 天，传进来的 days 不作数
+        days = max(1, min((end_ms - start_ms) // 86_400_000 + 1, ENERGY_MAX_DAYS))
+
+        payload = await self._request_gw3(
+            "POST",
+            ENERGY_DAILY_PATH,
+            vin=target_vin,
+            body={"vin": target_vin, "start": start_ms, "end": end_ms},
+        )
+        return self._normalize_daily_energy(payload.get("data") or {}, days)
+
+    async def get_month_energy(self, year_month: str, vin: str | None = None) -> dict[str, Any]:
+        """历史月份统计（月度报告接口）。
+
+        日统计接口对 60 天以前的区间直接报 `A010`，所以历史月份必须走这条。
+        返回字段与 `get_daily_energy` 对齐，前端不用区分来源。
+        """
+        target_vin = vin or self._session.get("active_vin") or ""
+        if not target_vin:
+            vehicles = await self.list_vehicles()
+            if not vehicles:
+                raise ZeekrAPIError("no_vehicle", "账号下未找到车辆")
+            target_vin = vehicles[0]["vin"]
+            self._session["active_vin"] = target_vin
+
+        payload = await self._request_gw3(
+            "POST", ENERGY_MONTHLY_PATH, vin=target_vin,
+            body={"vin": target_vin, "yearMonth": year_month},
+        )
+        return self._normalize_month_energy(payload.get("data") or {}, year_month)
+
+    @staticmethod
+    def _normalize_month_energy(data: dict[str, Any], year_month: str) -> dict[str, Any]:
+        """把月度报告整成与日统计一致的形状（汇总 + 逐日序列）。
+
+        与日统计的区别：
+          - 总里程字段叫 `mileage`（不是 `totalMileage`）；
+          - 逐日 X 只有 `01`/`02` 这样的日号，要自己补上年月；
+          - 逐日电量仍是 `dynamicEcY + staticEcY`（`ecy` 恒 0）。
+        """
+
+        def num(value: Any) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return 0.0
+
+        year, month = (int(x) for x in year_month.split("-")[:2])
+        xs = data.get("dailyMileageX") or []
+        mileage_y = data.get("dailyMileageY") or []
+        minutes_y = data.get("drivingTimeY") or []
+        dynamic_y = data.get("dynamicEcY") or []
+        static_y = data.get("staticEcY") or []
+
+        def at(seq: list[Any], index: int) -> Any:
+            return seq[index] if index < len(seq) else 0
+
+        series: list[dict[str, Any]] = []
+        for index, raw_day in enumerate(xs):
+            day = str(raw_day).zfill(2)
+            distance = num(at(mileage_y, index))
+            energy = num(at(dynamic_y, index)) + num(at(static_y, index))
+            series.append({
+                "date": f"{year:04d}-{month:02d}-{day}",
+                "distanceKm": round(distance, 1),
+                "energyKwh": round(energy, 2),
+                "minutes": int(num(at(minutes_y, index))),
+                "consumption": round(energy / distance * 100, 1) if distance > 0 else None,
             })
-            bucket["distanceKm"] += float(trip.get("distanceKm") or 0)
-            bucket["energyKwh"] += float(trip.get("energyKwh") or 0)
-            bucket["tripCount"] += 1
+        series.sort(key=lambda item: item["date"])
 
-        for bucket in buckets.values():
-            distance = bucket["distanceKm"]
-            if distance > 0:
-                bucket["consumption"] = round(bucket["energyKwh"] / distance * 100, 1)
-            bucket["distanceKm"] = round(bucket["distanceKm"], 1)
-            bucket["energyKwh"] = round(bucket["energyKwh"], 2)
+        distance_total = num(data.get("mileage"))
+        energy_total = num(data.get("electricityConsumed"))
+        return {
+            "days": calendar.monthrange(year, month)[1],
+            "startDate": f"{year}年{month:02d}月01日",
+            "endDate": f"{year}年{month:02d}月{calendar.monthrange(year, month)[1]:02d}日",
+            "distanceKm": round(distance_total, 1),
+            "energyKwh": round(energy_total, 2),
+            "dynamicEnergyKwh": round(num(data.get("dynamicEc")), 2),
+            # 月报没有直接给「总口径」均耗，自己算，保证 总÷里程 与卡片一致
+            "avgConsumption": round(energy_total / distance_total * 100, 1) if distance_total > 0 else 0.0,
+            "avgDynamicConsumption": round(num(data.get("dynamicAvgEc")), 1),
+            "fastChargeCount": int(num(data.get("fastChargeNum"))),
+            "slowChargeCount": int(num(data.get("normalChargeNum"))),
+            "series": series,
+        }
 
-        return sorted(buckets.values(), key=lambda x: x["date"])
+    async def get_energy_months(self, vin: str | None = None) -> dict[str, Any]:
+        """可选月份清单 + 车辆总里程。
+
+        官方 `mileageBaseInfo.existingMonth` 就是 App 里月份选择器的数据源：
+        第一项固定 `yearMonth: "currentMonth"`（本月），其余按月份倒序。
+        """
+        target_vin = vin or self._session.get("active_vin") or ""
+        if not target_vin:
+            vehicles = await self.list_vehicles()
+            if not vehicles:
+                raise ZeekrAPIError("no_vehicle", "账号下未找到车辆")
+            target_vin = vehicles[0]["vin"]
+            self._session["active_vin"] = target_vin
+
+        payload = await self._request_gw3(
+            "POST", ENERGY_MONTHS_PATH, vin=target_vin, body={"vin": target_vin}
+        )
+        data = payload.get("data") or {}
+
+        months: list[dict[str, str]] = []
+        for item in data.get("existingMonth") or []:
+            if not isinstance(item, dict):
+                continue
+            key = item.get("yearMonth")
+            if not key:
+                continue
+            months.append({"yearMonth": str(key), "label": str(item.get("label") or key)})
+
+        return {
+            "months": months,
+            "monthMileageKm": round(self._to_float(data.get("monthTotalMileage")), 1),
+            "monthEnergyKwh": round(self._to_float(data.get("monthElectricityConsumed")), 2),
+        }
+
+    @staticmethod
+    def _to_float(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
+    def _day_start_ms(ts_ms: int) -> int:
+        """毫秒时间戳 → 当天 00:00（本地时区）的毫秒时间戳。"""
+        lt = time.localtime(ts_ms / 1000)
+        return int(time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1)) * 1000)
+
+    @staticmethod
+    def _normalize_daily_energy(data: dict[str, Any], days: int) -> dict[str, Any]:
+        """把官方日统计整理成「汇总 + 逐日序列」。
+
+        口径（用真车数据验算过）：界面上的「总电耗」= 动态 + 静态，
+        所以逐日电量取 `dynamicEcY[i] + staticEcY[i]`，**不是** `ecy`（那个恒 0）。
+        """
+
+        def num(value: Any) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return 0.0
+
+        xs = data.get("dailyMileageX") or data.get("ecx") or []
+        mileage_y = data.get("dailyMileageY") or []
+        minutes_y = data.get("drivingTimeY") or []
+        dynamic_y = data.get("dynamicEcY") or []
+        static_y = data.get("staticEcY") or []
+
+        def at(seq: list[Any], index: int) -> Any:
+            return seq[index] if index < len(seq) else 0
+
+        series: list[dict[str, Any]] = []
+        for index, raw_date in enumerate(xs):
+            distance = num(at(mileage_y, index))
+            energy = num(at(dynamic_y, index)) + num(at(static_y, index))
+            series.append({
+                # 服务端给的是 `2026/10/06`，统一成 `2026-10-06`，前端好排序与切片
+                "date": str(raw_date).replace("/", "-"),
+                "distanceKm": round(distance, 1),
+                "energyKwh": round(energy, 2),
+                "minutes": int(num(at(minutes_y, index))),
+                "consumption": round(energy / distance * 100, 1) if distance > 0 else None,
+            })
+        series.sort(key=lambda item: item["date"])
+
+        return {
+            "days": days,
+            "startDate": data.get("startDate"),
+            "endDate": data.get("endDate"),
+            "distanceKm": round(num(data.get("totalMileage")), 1),
+            "energyKwh": round(num(data.get("electricityConsumed")), 2),
+            "dynamicEnergyKwh": round(num(data.get("dynamicEc")), 2),
+            # 官方两个口径：avgEc 含静态耗电，avgDynamicEc 只算行驶中（App 展示的是后者）
+            "avgConsumption": round(num(data.get("avgEc")), 1),
+            "avgDynamicConsumption": round(num(data.get("dynamicAvgEc")), 1),
+            "fastChargeCount": int(num(data.get("fastChargeNum"))),
+            "slowChargeCount": int(num(data.get("normalChargeNum"))),
+            "series": series,
+        }
+
+    async def get_energy_trend(self, vin: str | None = None, days: int = 30) -> list[dict[str, Any]]:
+        """获取逐日能耗趋势。
+
+        数据源是官方 `getDailyStatisticsInfo`（见 `get_daily_energy`）。
+        历史上这里拿行程明细聚合，而行程明细服务端恒为空 ⇒ 永远返回空列表；
+        现在改走官方统计，字段保持原样（`date`/`distanceKm`/`energyKwh`/`consumption`）以免破坏调用方。
+        """
+        stats = await self.get_daily_energy(vin=vin, days=days)
+        return [
+            {
+                "date": item["date"],
+                "distanceKm": item["distanceKm"],
+                "energyKwh": item["energyKwh"],
+                "consumption": item["consumption"],
+                "tripCount": 0,
+            }
+            for item in stats["series"]
+        ]
 
     # MARK: - 车控
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 
 from fastapi import APIRouter, HTTPException
@@ -91,9 +92,59 @@ async def get_trips(
     return {"success": True, "data": trips or cached}
 
 
+@router.get("/trips/energy")
+async def get_daily_energy(
+    days: int = 30,
+    vin: str | None = None,
+    scope: str = "window",
+    yearMonth: str | None = None,
+) -> dict:
+    """官方「行程与能耗」日统计：汇总（里程/电耗/充电次数）+ 逐日序列。
+
+    数据源是官方 App「行程统计」页同一个接口，口径与 App 一致。
+    `days` 上限 31 是**服务端约束**（超了返回 A008），不是我们的选择。
+    `scope=month` 取「本月 1 日至今」——**要跟官方 App 对得上就必须用这个**，
+    否则「近 7 天」的充电次数天然小于 App 的本月值。
+    `yearMonth=2026-09` 取指定月份：本月走日统计，历史月走月度报告
+    （日统计接口对 60 天以前报 `A010`）。
+    """
+    if scope not in ("window", "month"):
+        raise HTTPException(status_code=400, detail="scope 只能为 window 或 month")
+    if scope == "window" and not 1 <= days <= 31:
+        raise HTTPException(
+            status_code=400, detail="days 取值范围为 1–31（官方接口单次最多 31 个自然日）"
+        )
+    if yearMonth and yearMonth not in ("currentMonth",):
+        if not re.fullmatch(r"\d{4}-\d{2}", yearMonth):
+            raise HTTPException(status_code=400, detail="yearMonth 格式应为 YYYY-MM")
+
+    client = get_client()
+    try:
+        data = await client.get_daily_energy(
+            vin=vin, days=days, scope=scope, year_month=yearMonth
+        )
+    except Exception as exc:  # noqa: BLE001
+        # 不回显原始异常：网关报文可能含令牌片段
+        fail("获取能耗统计失败，请检查服务端日志与登录状态", exc)
+
+    return {"success": True, "data": data}
+
+
+@router.get("/trips/energy/months")
+async def get_energy_months(vin: str | None = None) -> dict:
+    """可选月份清单（官方 `mileageBaseInfo.existingMonth`）+ 车辆总里程。"""
+    client = get_client()
+    try:
+        data = await client.get_energy_months(vin=vin)
+    except Exception as exc:  # noqa: BLE001
+        fail("获取可查月份失败，请检查服务端日志与登录状态", exc)
+
+    return {"success": True, "data": data}
+
+
 @router.get("/energy/trend")
 async def get_energy_trend(days: int = 30, vin: str | None = None) -> dict:
-    """获取能耗趋势。"""
+    """获取能耗趋势（逐日）。"""
     if not 1 <= days <= 365:
         raise HTTPException(status_code=400, detail="days 取值范围为 1–365")
 

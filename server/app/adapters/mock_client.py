@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import calendar
 import hashlib
 import math
 import random
@@ -224,6 +225,82 @@ class MockZeekrClient(ZeekrClient):
 
         trips.sort(key=lambda t: t["startTime"], reverse=True)
         return trips
+
+    async def get_daily_energy(
+        self,
+        vin: str | None = None,
+        days: int = 30,
+        scope: str = "window",
+        year_month: str | None = None,
+    ) -> dict[str, Any]:
+        """模拟「行程与能耗」日统计（形状与官方接口一致）。"""
+        now = datetime.now()
+        if year_month and year_month not in ("currentMonth", "current"):
+            year, month = (int(x) for x in year_month.split("-")[:2])
+            last_day = calendar.monthrange(year, month)[1]
+            days = last_day
+            first = datetime(year, month, 1)
+            last = datetime(year, month, last_day)
+        else:
+            if scope == "month":
+                days = now.day
+            days = max(1, min(int(days), 31))
+            first = datetime(now.year, now.month, now.day) - timedelta(days=days - 1)
+            last = now
+
+        series: list[dict[str, Any]] = []
+        total_km = 0.0
+        total_kwh = 0.0
+
+        for offset in range(days):
+            day = first + timedelta(days=offset)
+            rng = _seeded_rng(f"energy-{day:%Y%m%d}")
+            # 演示：约五分之一的天数不动车，其余通勤为主
+            if rng.random() < 0.2:
+                continue
+            distance = round(rng.uniform(18, 52), 1)
+            consumption = round(rng.uniform(14.8, 19.6), 1)
+            energy = round(distance / 100 * consumption, 2)
+            total_km += distance
+            total_kwh += energy
+            series.append({
+                "date": day.strftime("%Y-%m-%d"),
+                "distanceKm": distance,
+                "energyKwh": energy,
+                "minutes": int(distance / rng.uniform(0.5, 0.9)),
+                "consumption": consumption,
+            })
+
+        avg = round(total_kwh / total_km * 100, 1) if total_km > 0 else 0.0
+        return {
+            "days": days,
+            "startDate": first.strftime("%Y年%m月%d日"),
+            "endDate": last.strftime("%Y年%m月%d日"),
+            "distanceKm": round(total_km, 1),
+            "energyKwh": round(total_kwh, 2),
+            "dynamicEnergyKwh": round(total_kwh * 0.94, 2),
+            "avgConsumption": round(avg * 1.06, 1),
+            "avgDynamicConsumption": avg,
+            "fastChargeCount": max(0, days // 9),
+            "slowChargeCount": max(0, days // 21),
+            "series": series,
+        }
+
+    async def get_energy_months(self, vin: str | None = None) -> dict[str, Any]:
+        """模拟可选月份清单（本月 + 前 5 个月）。"""
+        now = datetime.now()
+        months = [{"yearMonth": "currentMonth", "label": "本月"}]
+        for i in range(1, 6):
+            year, month = now.year, now.month - i
+            if month <= 0:
+                year, month = year - 1, month + 12
+            months.append({"yearMonth": f"{year}-{month:02d}", "label": f"{year}年{month}月"})
+        month_brief = await self.get_daily_energy(scope="month")
+        return {
+            "months": months,
+            "monthMileageKm": month_brief["distanceKm"],
+            "monthEnergyKwh": month_brief["energyKwh"],
+        }
 
     async def get_energy_trend(self, vin: str | None = None, days: int = 30) -> list[dict[str, Any]]:
         now = datetime.now()
