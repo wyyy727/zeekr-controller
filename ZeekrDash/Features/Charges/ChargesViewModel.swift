@@ -25,6 +25,8 @@ final class ChargesViewModel {
     var totalAmount: Double { summary?.totalAmount ?? 0 }
     var totalCount: Int { summary?.totalCount ?? 0 }
     var avgUnitPrice: Double? { summary?.avgUnitPrice }
+    /// 统计区间总电量（kWh）。服务端早就在返回，此前只是没在汇总卡上显示。
+    var totalEnergyKwh: Double? { summary?.totalEnergyKwh }
 
     var providerCount: Int {
         (summary?.byProvider ?? []).count

@@ -33,6 +33,12 @@ struct ChargesView: View {
                     NearbyStationsCard()
                 }
 
+                // 预约充电计划：与能力集同一次请求返回（/api/vehicle/capability），
+                // 取不到就不渲染 —— 不编造"已启用"。
+                if let plan = store.chargePlan, plan.hasContent {
+                    chargePlanCard(plan)
+                }
+
                 if model.isLoading && model.summary == nil {
                     LoadingView(text: "正在加载消费数据")
                         .padding(.top, 60)
@@ -137,6 +143,11 @@ struct ChargesView: View {
 
             HStack(spacing: 0) {
                 totalItem("笔数", value: "\(model.totalCount)")
+                // 与网页一致显示「总电量」；「覆盖服务商」是 iOS 多出来的一项，保留
+                totalItem(
+                    "总电量",
+                    value: model.totalEnergyKwh.map { String(format: "%.1f", $0) } ?? "--"
+                )
                 totalItem("覆盖服务商", value: "\(model.providerCount)")
                 totalItem(
                     "平均单价",
@@ -160,6 +171,68 @@ struct ChargesView: View {
                 .foregroundStyle(Theme.textTertiary(scheme))
         }
         .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - 预约充电计划
+
+    /// 预约充电（只读展示）。
+    ///
+    /// 与 `preview/index.html` 的 `chargePlanCard()` 对齐：启用状态、起止时间、
+    /// 目标电量、当前电量。**不做编辑** —— 官方 App 里改计划要发另一组命令，
+    /// 那部分没验证过，这里不假装能改。
+    private func chargePlanCard(_ plan: ChargePlan) -> some View {
+        let on = plan.enabled == true
+        let socText: String = {
+            guard let soc = store.vehicleStatus?.soc else { return "--" }
+            return "\(Int(soc.rounded()))%"
+        }()
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("预约充电")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary(scheme))
+
+                Spacer(minLength: 8)
+
+                // 未启用时不用红/绿判断"好坏" —— 没开预约不是故障
+                Text(on ? (plan.mode.map { "已启用 · \($0)" } ?? "已启用") : "未启用")
+                    .font(.system(size: 11))
+                    .foregroundStyle(on ? ChineseColor.statusGood : Theme.textTertiary(scheme))
+            }
+
+            LazyVGrid(
+                columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
+                spacing: 8
+            ) {
+                planItem("开始时间", plan.startTime ?? "--", dimmed: !on)
+                planItem("结束时间", plan.endTime ?? "--", dimmed: !on)
+                planItem("目标电量", plan.targetSoc.map { "\(Int($0.rounded()))%" } ?? "--", dimmed: !on)
+                planItem("当前电量", socText, dimmed: false)
+            }
+        }
+        .padding(Metrics.cardPadding)
+        .background(Theme.surface(scheme))
+        .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+    }
+
+    private func planItem(_ title: String, _ value: String, dimmed: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textTertiary(scheme))
+
+            Text(value)
+                .font(.system(size: 15, weight: .medium, design: .rounded))
+                // 未启用时计划项灰掉：避免把"计划里的 23:30"看成"现在就会充"
+                .foregroundStyle(dimmed ? Theme.textTertiary(scheme) : Theme.textPrimary(scheme))
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Theme.surfaceAlt(scheme).opacity(0.55))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     // MARK: - 服务商分布

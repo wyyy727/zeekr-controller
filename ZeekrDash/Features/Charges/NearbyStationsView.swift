@@ -63,7 +63,9 @@ struct NearbyStationsCard: View {
         case .idle:            return "待定位"
         case .locating:        return "定位中"
         case .loadingStations: return "加载中"
-        case .loaded:          return "\(model.total) 站"
+        case .loaded:
+            // 写「已加载 / 总数」，否则「50 站」配着 10 条列表会让人以为没加载完
+            return model.hasMore ? "\(model.stations.count) / \(model.total) 站" : "\(model.total) 站"
         // 失败可能是定位被拒，也可能是网络问题 —— 写「需定位」会误判后者
         case .failed:          return "失败"
         }
@@ -178,10 +180,32 @@ struct NearbyStationsCard: View {
                 // 而按下标走会让"排序一变、行身份就跟着变"，展开态跟着乱跳。
                 ForEach(model.sortedStations) { station in
                     row(station)
+                        // 滑到最后一行就取下一页（没有"加载更多"按钮）
+                        .onAppear {
+                            Task { await model.loadMoreIfNeeded(current: station) }
+                        }
                     if station.id != model.sortedStations.last?.id {
                         Divider().overlay(Theme.separator(scheme))
                     }
                 }
+            }
+
+            // 分页尾部提示：加载中 / 已全部显示
+            if model.isLoadingMore {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("正在加载更多…")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Theme.textTertiary(scheme))
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, 10)
+            } else if !model.hasMore {
+                Text("已全部显示")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Theme.textTertiary(scheme))
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 10)
             }
 
             note(
@@ -370,19 +394,48 @@ struct NearbyStationsCard: View {
     /// 一键导航交给地图 App，不在页内画地图 ——
     /// 画地图要引入瓦片、手势与坐标系纠偏，成本远高于收益。
     ///
-    /// 用高德 URI 而不是 MapKit：站点坐标是 GCJ-02（国内地图通用），
-    /// 且与 `preview/index.html` 保持同一条跳转，两端行为一致。
+    /// 站点名放进 URL 查询串时的安全字符集。
+    ///
+    /// 不能直接用 `.urlQueryAllowed` —— 它**放行 `&` `=` `#`**，
+    /// 站点名里出现这些字符会把 `to=` 参数截断，导航到错误的地方。
+    private static let queryValueAllowed: CharacterSet = {
+        var set = CharacterSet.urlQueryAllowed
+        set.remove(charactersIn: "&=?#+")
+        return set
+    }()
+
+    /// 导航到站点。
+    ///
+    /// 两段式：先试高德 App 的原生 scheme（直接进导航页，不闪浏览器），
+    /// 没装高德再退回 H5；H5 带上 `callnative=1`（高德文档里默认是 0），
+    /// 否则只会停在网页版 —— 这正是此前「跳到浏览器高德」的原因。
+    ///
+    /// `dev=0`：传入的就是 GCJ-02 坐标，不需要高德再转换。
     private func openNavigation(_ station: ChargingStation) {
         guard let lat = station.lat, let lng = station.lng else {
             hint = "该站点缺少坐标，无法导航"
             return
         }
         let name = station.displayName
-            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "充电站"
-        guard let url = URL(string: "https://uri.amap.com/marker?position=\(lng),\(lat)&name=\(name)") else {
+            .addingPercentEncoding(withAllowedCharacters: Self.queryValueAllowed) ?? ""
+
+        let appURL = URL(string:
+            "iosamap://navi?sourceApplication=ZeekrDash&poiname=\(name)"
+            + "&lat=\(lat)&lon=\(lng)&dev=0&style=2")
+        let webURL = URL(string:
+            "https://uri.amap.com/navigation?to=\(lng),\(lat),\(name)"
+            + "&mode=car&policy=0&coordinate=gaode&callnative=1&src=zeekrdash")
+
+        guard let appURL else {
+            if let webURL { openURL(webURL) }
             return
         }
-        openURL(url)
+
+        openURL(appURL) { accepted in
+            // accepted == false：设备上没装高德（或系统拦了 scheme）
+            guard !accepted, let webURL else { return }
+            openURL(webURL)
+        }
     }
 
     // MARK: - 小组件

@@ -82,6 +82,10 @@ final class AppStore {
     /// 「某个按钮为什么不见了」就没法解释。
     var permissions: [String]?
 
+    /// 预约充电计划（`/api/vehicle/capability` 的 `chargePlan`）。
+    /// 取不到就是 nil，充电页不渲染这张卡 —— 不编造"已启用"。
+    var chargePlan: ChargePlan?
+
     /// 后端可达、但尚未登录 —— 此时**一个数据接口都不调**。
     ///
     /// 对齐 `preview/index.html` 的 `needLogin` 态：live 模式下服务端要求登录，
@@ -151,6 +155,7 @@ final class AppStore {
                 // 没登录就没有权限包可言 —— 留着上一轮的会让设置页显示别人的清单
                 capabilities = nil
                 permissions = nil
+                chargePlan = nil
                 // 位置是更敏感的个人数据：上一会话的车停在哪，绝不能留给下一位
                 vehicleLocation = nil
                 locationMapData = nil
@@ -268,9 +273,12 @@ final class AppStore {
             let caps: VehicleCapabilities = try await APIClient.shared.get(APIRoutes.vehicleCapability)
             capabilities = caps.capabilities
             permissions = caps.permissions
+            // 与能力集同一次请求返回，没必要为它单开一个接口
+            chargePlan = caps.chargePlan
         } catch {
             capabilities = nil
             permissions = nil
+            chargePlan = nil
         }
     }
 
@@ -285,6 +293,7 @@ final class AppStore {
         // 而这恰恰是网页预览里能看到的东西（两边演示要对得上）
         capabilities = MockData.capabilities
         permissions = MockData.permissions
+        chargePlan = MockData.chargePlan
         vehicleLocation = MockData.vehicleLocation
         // 演示模式不联网，也就不该去请求地图图片
         locationMapData = nil

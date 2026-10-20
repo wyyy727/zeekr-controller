@@ -149,8 +149,19 @@ final class NearbyStationsViewModel {
     var stations: [ChargingStation] = []
     /// 视野内站点总数（可能大于 `stations.count`）
     var total: Int = 0
+    /// 还有下一页（`stations.count < total`）
+    var hasMore = false
+    /// 正在取下一页，防止滑动时重复触发
+    var isLoadingMore = false
     /// 第三方价格服务是否可用
     var isPriceAvailable = true
+
+    /// 每页条数。
+    ///
+    /// 为什么是 10 而不是 20：取价格是**按站请求**第三方网关的（后端并发 6），
+    /// 首屏 10 个只要 2 轮，20 个要 4 轮 —— 这是"充电桩加载慢"的主因。
+    /// 用户通常只看最前面几个，剩下的滑到再取。
+    private let pageSize = 10
     var sort: Sort = .distance
     /// 当前展开（看分时电价）的站点 ID
     var expanded: String?
@@ -247,21 +258,62 @@ final class NearbyStationsViewModel {
                 query: [
                     "lat": String(lat),
                     "lng": String(lng),
-                    "limit": "20",
+                    "limit": String(pageSize),
+                    "offset": "0",
                 ]
             )
             stations = data.stations ?? []
             total = data.total ?? stations.count
+            hasMore = stations.count < total
             // 显式判 `!= false`：后端不返回该字段时按"可用"处理，避免误报不可用
             isPriceAvailable = data.isPriceAvailable
             state = .loaded
         } catch {
             stations = []
             total = 0
+            hasMore = false
             isPriceAvailable = false
             state = .failed(
                 (error as? ApiError)?.errorDescription ?? error.localizedDescription
             )
+        }
+    }
+
+    /// 滑到列表末尾时取下一页。
+    ///
+    /// 用"是不是最后一个"来触发，而不是给列表加"加载更多"按钮 ——
+    /// 用户要的就是继续滑，不该多一次点击。
+    func loadMoreIfNeeded(current: ChargingStation) async {
+        guard let last = sortedStations.last, last.id == current.id else { return }
+        await loadMore()
+    }
+
+    func loadMore() async {
+        guard hasMore, !isLoadingMore, let coordinate else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+
+        do {
+            let data: NearbyStations = try await APIClient.shared.get(
+                APIRoutes.stationsNearby,
+                query: [
+                    "lat": String(coordinate.latitude),
+                    "lng": String(coordinate.longitude),
+                    "limit": String(pageSize),
+                    "offset": String(stations.count),
+                ]
+            )
+            let more = data.stations ?? []
+            // 按 stationId 去重：正常切片不会重复，但距离相同的站点排序可能抖动
+            let seen = Set(stations.map(\.id))
+            stations.append(contentsOf: more.filter { !seen.contains($0.id) })
+
+            total = data.total ?? stations.count
+            hasMore = !more.isEmpty && stations.count < total
+            isPriceAvailable = isPriceAvailable && data.isPriceAvailable
+        } catch {
+            // 失败就停在当前页，别让 onAppear 反复重试打接口
+            hasMore = false
         }
     }
 
@@ -270,6 +322,8 @@ final class NearbyStationsViewModel {
         coordinate = nil
         stations = []
         total = 0
+        hasMore = false
+        isLoadingMore = false
         expanded = nil
         // 手动坐标标记也要清 —— 否则下一位登录者会看到"当前用的是手填坐标"的提示
         usedManualCoordinate = false
