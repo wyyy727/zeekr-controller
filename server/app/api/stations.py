@@ -163,17 +163,28 @@ async def _enrich(stations: list[dict[str, Any]]) -> bool:
 async def get_nearby(
     lat: float = Query(..., ge=-90, le=90, description="纬度"),
     lng: float = Query(..., ge=-180, le=180, description="经度"),
-    limit: int = Query(PRICE_BATCH_DEFAULT, ge=1, le=50, description="返回站点数上限"),
+    limit: int = Query(PRICE_BATCH_DEFAULT, ge=1, le=50, description="本页返回站点数上限"),
+    offset: int = Query(0, ge=0, description="跳过前 N 个（滑动分页用）"),
 ) -> dict:
     """附近充电站（距离升序，含电价与分时电价表）。
+
+    **分页**：极氪气泡接口一次就把视野内的站点全给了（它自己不分页），
+    所以"翻页"是在服务端对排好序的列表做切片。这样做还有一个实际好处：
+    取价格是按站请求浩汉的，首屏只要 limit=10 就比一次拉 20 个快一倍 ——
+    而用户很可能只看得下前几个。
+
+    `total` 是**视野内总数**（切片前），`count` 是本页条数。
+    前端据此判断还有没有下一页：`offset + count < total`。
 
     **坐标不会被转发给第三方网关**：发给极氪的是坐标（本来就是它家的数据），
     发给浩汉的只有 `stationId`。这条边界是刻意的，改动时请保留。
     """
+    t0 = time.perf_counter()
     try:
         stations = await _load_stations(lat, lng)
     except Exception as exc:  # noqa: BLE001 - 统一转 HTTP 错误，不回显原始报文
         fail("获取附近充电站失败，请检查登录状态与服务端日志", exc)
+    t1 = time.perf_counter()
 
     # 补距离：坐标缺失的站点直接剔除（没有坐标既排不了序也导航不了）
     located: list[dict[str, Any]] = []
@@ -185,16 +196,29 @@ async def get_nearby(
         located.append(item)
 
     located.sort(key=lambda item: item["distanceKm"])
-    picked = located[:limit]
+    total = len(located)
+    picked = located[offset : offset + limit]
 
     price_available = await _enrich(picked)
+    t2 = time.perf_counter()
+
+    # 慢的时候要能一眼看出慢在哪一段：列表（极氪一跳）还是取价（逐站问浩汉）。
+    # 只记耗时与条数，不记坐标。
+    logger.debug(
+        "附近充电站：列表 %.0fms + 取价 %.0fms（本页 %d / 共 %d 站）",
+        (t1 - t0) * 1000,
+        (t2 - t1) * 1000,
+        len(picked),
+        total,
+    )
 
     # 取价后按距离重排即可（价格不参与排序，排序由前端决定）
     return {
         "success": True,
         "data": {
             "location": {"lat": lat, "lng": lng},
-            "total": len(located),
+            "total": total,
+            "offset": offset,
             "count": len(picked),
             # False ⇒ 第三方价格服务不可用；前端应提示"价格暂不可用"，
             # 而不是把空价格当成"这个站免费"。

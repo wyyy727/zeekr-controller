@@ -262,9 +262,10 @@ def test_nearby_endpoint_shape(client):
     assert resp.status_code == 200
 
     data = resp.json()["data"]
-    assert set(data) == {"location", "total", "count", "priceAvailable", "stations"}
+    assert set(data) == {"location", "total", "offset", "count", "priceAvailable", "stations"}
     assert data["count"] == len(data["stations"])
     assert data["total"] >= data["count"]
+    assert data["offset"] == 0
 
 
 def test_nearby_endpoint_sorts_by_distance(client):
@@ -280,6 +281,41 @@ def test_nearby_endpoint_respects_limit(client):
                       params={"lat": 30.1234, "lng": 120.1234, "limit": 2})
 
     assert len(resp.json()["data"]["stations"]) == 2
+
+
+def test_nearby_endpoint_pages_by_offset(client):
+    """滑动分页：offset 切片不重不漏，total 不随 offset 变化。"""
+    base = {"lat": 30.1234, "lng": 120.1234, "limit": 3}
+
+    first = client.get("/api/stations/nearby", params={**base, "offset": 0}).json()["data"]
+    second = client.get("/api/stations/nearby", params={**base, "offset": 3}).json()["data"]
+
+    # 总数是切片前的视野内总数，翻页不该改变它
+    assert first["total"] == second["total"]
+    assert first["offset"] == 0 and second["offset"] == 3
+
+    first_ids = [s["stationId"] for s in first["stations"]]
+    second_ids = [s["stationId"] for s in second["stations"]]
+    assert not set(first_ids) & set(second_ids), "两页出现了同一个站点"
+
+    # 距离升序的前提下，第二页的最近一个应不近于第一页的任何一个
+    if first["stations"] and second["stations"]:
+        assert second["stations"][0]["distanceKm"] >= first["stations"][-1]["distanceKm"]
+
+
+def test_nearby_endpoint_offset_beyond_end_returns_empty(client):
+    """offset 超出总数时返回空列表，而不是报错或回到第一页。
+
+    前端就是靠 `offset + count < total` 判断"没有下一页"的，
+    这里若回退成第一页，会变成无限加载。
+    """
+    resp = client.get("/api/stations/nearby",
+                      params={"lat": 30.1234, "lng": 120.1234, "offset": 9999})
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["stations"] == []
+    assert data["count"] == 0
 
 
 def test_nearby_endpoint_rejects_invalid_coordinates(client):
