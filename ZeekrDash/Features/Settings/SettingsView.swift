@@ -25,15 +25,26 @@ struct SettingsView: View {
         // 页面标题与底部导航重复，已移除；顶部右上角为数据来源徽标
         NavigationStack {
             ScreenContainer(modeText: store.modeBadgeText) {
+                // 顺序对齐 preview/index.html：
+                //   车辆权限 → 服务连接 → 车辆控制 → 关于当前数据 → 待配置项 → 账号与凭据
+                // iOS 独有的「数据刷新」「诊断」放在后面，不与网页抢前面的位置。
+                capabilitySection
                 connectionSection
-                if model.isLocalEndpoint {
-                    mockNotice
-                } else {
+                commandSection
+
+                // 对齐网页：非 live 时给一段"现在看到的是不是真数据"的说明
+                if store.dataMode != .live {
+                    dataSourceNoticeCard
+                }
+                if !model.missingKeys.isEmpty {
+                    pendingConfigCard
+                }
+                // 地址指向本机时没有可登录的后端，放出账号区只会诱导点一个必然失败的按钮
+                if !model.isLocalEndpoint {
                     accountSection
                 }
+
                 pollingSection
-                commandSection
-                capabilitySection
                 diagnosticsSection
                 aboutSection
             }
@@ -127,6 +138,21 @@ struct SettingsView: View {
 
                 Divider().overlay(Theme.separator(scheme))
 
+                // 对齐网页「服务连接」里的「地址形态」。
+                // 只判断"是不是本机"看不出「根本没填」和「填了本机」的区别，
+                // 而这两者的处理方式不一样（前者要提示去填，后者是刻意的离线用）。
+                HStack {
+                    Text("地址形态")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.textSecondary(scheme))
+                    Spacer()
+                    Text(endpointModeText)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.textPrimary(scheme))
+                }
+
+                Divider().overlay(Theme.separator(scheme))
+
                 HStack {
                     Text("状态")
                         .font(.system(size: 13))
@@ -142,6 +168,15 @@ struct SettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+        }
+    }
+
+    /// 地址形态三态文案，与网页 `${ENDPOINT_MODE}` 的映射一致。
+    private var endpointModeText: String {
+        switch model.endpointMode {
+        case .unset:    return "未配置"
+        case .loopback: return "本机地址"
+        case .remote:   return "远程地址"
         }
     }
 
@@ -183,18 +218,50 @@ struct SettingsView: View {
         }
     }
 
-    private var mockNotice: some View {        HStack(spacing: 8) {
-            Image(systemName: "info.circle.fill")
-                .font(.system(size: 13))
-                .foregroundStyle(ChineseColor.statusWarn)
-            Text("演示模式：地址未配置或指向本机，界面展示的是内置模拟数据")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textSecondary(scheme))
+    /// 「关于当前数据」—— 对齐网页同名卡片，只在非 live 时出现。
+    ///
+    /// 这一段的用处不是装饰：模拟数据长得像真的，不写清楚「现在看到的不是真实车况」，
+    /// 用户会把演示数据当成车。网页那边是一整张卡，这里保持一致。
+    private var dataSourceNoticeCard: some View {
+        SettingsCard(title: "关于当前数据") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(store.dataMode == .mock
+                     ? "服务地址未配置或指向本机，界面展示的是内置模拟数据，不是真实车况。"
+                     : "服务地址已配置，但后端当前不可达，已暂时切换为模拟数据，不是真实车况。")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textSecondary(scheme))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("在上方「服务端」里填写后端地址即可切换到真实数据。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textTertiary(scheme))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ChineseColor.tengHuang.opacity(scheme == .dark ? 0.10 : 0.14))
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+    }
+
+    /// 「待配置项」—— 对齐网页独立卡片。
+    ///
+    /// 与「诊断」里那行分开：这里说的是"服务端缺什么密钥"，
+    /// 是用户下一步要去改 `.env` 的清单，不该埋在诊断数字里。
+    private var pendingConfigCard: some View {
+        SettingsCard(title: "待配置项") {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(model.missingKeys, id: \.self) { key in
+                    Text("· \(key)")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Theme.textSecondary(scheme))
+                }
+
+                Text("填入服务端 .env 后重启服务即可切换到真实数据。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textTertiary(scheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     // MARK: - 账号
@@ -217,51 +284,87 @@ struct SettingsView: View {
                     }
                 }
 
-                Divider().overlay(Theme.separator(scheme))
+                if model.isAuthenticated {
+                    // 已登录只给退出入口，不再摆着登录表单 —— 与网页一致。
+                    // 此前 iOS 既没有退出按钮、表单又一直在，想换个账号只能重装 App。
+                    Text("会话保存在服务端。退出后立即回到未登录态，车辆数据会被清空。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary(scheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                HStack {
-                    Text("手机号")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textSecondary(scheme))
-                    Spacer()
-                    TextField("13800138000", text: Bindable(model).phone)
-                        .font(.system(size: 13))
-                        .multilineTextAlignment(.trailing)
-                        .keyboardType(.numberPad)
-                }
-
-                Button {
-                    Task {
-                        let sent = await model.sendCode()
-                        if sent { showCodeSheet = true }
-                    }
-                } label: {
-                    HStack {
-                        if model.isSending {
-                            ProgressView().controlSize(.small)
+                    Button {
+                        Task {
+                            if await model.logout() {
+                                // 清理交给 AppStore：refresh 会进 needsLogin 分支，
+                                // 车况 / 权限包 / 车辆位置在那里被一并清掉
+                                await store.refresh()
+                            }
                         }
-                        Text(model.isSending ? "发送中" : "获取验证码")
-                            .font(.system(size: 14, weight: .medium))
+                    } label: {
+                        HStack(spacing: 6) {
+                            if model.isLoggingOut {
+                                ProgressView().controlSize(.small)
+                            }
+                            Text(model.isLoggingOut ? "退出中" : "退出登录")
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: Metrics.minTouchTarget)
+                        .foregroundStyle(ChineseColor.statusBad)
+                        .background(ChineseColor.statusBad.opacity(0.10))
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: Metrics.minTouchTarget)
-                    .foregroundStyle(ChineseColor.xiangYaBai)
-                    .background(canSendCode ? Theme.accent(scheme) : Theme.textTertiary(scheme).opacity(0.4))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .disabled(model.isLoggingOut)
+                } else {
+                    Divider().overlay(Theme.separator(scheme))
+
+                    HStack {
+                        Text("手机号")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.textSecondary(scheme))
+                        Spacer()
+                        TextField("13800138000", text: Bindable(model).phone)
+                            .font(.system(size: 13))
+                            .multilineTextAlignment(.trailing)
+                            .keyboardType(.numberPad)
+                    }
+
+                    Button {
+                        Task {
+                            let sent = await model.sendCode()
+                            if sent { showCodeSheet = true }
+                        }
+                    } label: {
+                        HStack {
+                            if model.isSending {
+                                ProgressView().controlSize(.small)
+                            }
+                            Text(model.isSending ? "发送中" : "获取验证码")
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: Metrics.minTouchTarget)
+                        .foregroundStyle(ChineseColor.xiangYaBai)
+                        .background(canSendCode ? Theme.accent(scheme) : Theme.textTertiary(scheme).opacity(0.4))
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                    .disabled(!canSendCode)
+
+                    Text("建议使用独立的极氪子账号并共享车辆，避免与手机 App 会话冲突")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary(scheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .disabled(!canSendCode)
 
                 if let message = model.accountMessage {
                     Text(message)
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.textTertiary(scheme))
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-
-                Text("建议使用独立的极氪子账号并共享车辆，避免与手机 App 会话冲突")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textTertiary(scheme))
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -382,6 +485,30 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 10) {
                 permissionChips
 
+                // 对齐网页：被能力集裁掉的功能用灰色 chip 逐个列出。
+                // 只写"已隐藏 3 项"回答不了「到底哪个按钮不见了」——
+                // 而这张卡存在的意义就是让这件事可解释。
+                if !hiddenCommandNames.isEmpty {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 88), spacing: 6)],
+                        alignment: .leading,
+                        spacing: 6
+                    ) {
+                        ForEach(hiddenCommandNames, id: \.self) { name in
+                            Text(name)
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Theme.textTertiary(scheme))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 4)
+                                .frame(maxWidth: .infinity)
+                                .background(Theme.textTertiary(scheme).opacity(0.08))
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+
                 Text(capabilityHint)
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textTertiary(scheme))
@@ -389,6 +516,13 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+
+    /// 被能力集裁掉、从界面隐藏的车控功能名。
+    private var hiddenCommandNames: [String] {
+        VehicleCommand.allCases
+            .filter { !store.isCapabilityAvailable($0) }
+            .map(\.displayName)
     }
 
     /// 「这台车开通了什么」的原始清单。
@@ -463,19 +597,8 @@ struct SettingsView: View {
                     $0.formatted(date: .omitted, time: .shortened)
                 } ?? "--")
 
-                if !model.missingKeys.isEmpty {
-                    Divider().overlay(Theme.separator(scheme))
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("缺少的服务端配置")
-                            .font(.system(size: 12))
-                            .foregroundStyle(ChineseColor.statusWarn)
-                        Text(model.missingKeys.joined(separator: "\n"))
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(Theme.textTertiary(scheme))
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 8)
-                }
+                // 「缺少的服务端配置」已移到独立卡片（对齐网页的「待配置项」），
+                // 这里不再重复列，免得同一个信息出现两遍、还两处都可能过期。
             }
         }
     }

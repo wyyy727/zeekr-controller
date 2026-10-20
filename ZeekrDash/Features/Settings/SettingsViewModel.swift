@@ -38,6 +38,7 @@ final class SettingsViewModel {
     var pendingPhone: String = ""
     var isSending = false
     var isVerifying = false
+    var isLoggingOut = false
     var isAuthenticated = false
     var accountMessage: String?
     var loginError: String?
@@ -151,6 +152,36 @@ final class SettingsViewModel {
             return false
         }
     }
+
+    // MARK: - 退出登录
+
+    /// 退出登录。
+    ///
+    /// 服务端会清掉本地会话文件；客户端这边只需要把登录态置回未登录，
+    /// 再由调用方 `store.refresh()` 触发一次「需要登录」的门禁 ——
+    /// 车况、权限包、车辆位置都会在那一轮里被清空（见 AppStore 的 needsLogin 分支）。
+    ///
+    /// **不自己清 AppStore**：那些字段的清理规则集中在 AppStore 里，
+    /// 设置页再清一遍容易漏（漏的就是隐私），也容易和轮询打架。
+    func logout() async -> Bool {
+        guard !isLoggingOut else { return false }
+        isLoggingOut = true
+        defer { isLoggingOut = false }
+
+        do {
+            let _: LogoutResult = try await APIClient.shared.post(APIRoutes.authLogout)
+            isAuthenticated = false
+            accountMessage = "已退出登录"
+            loginError = nil
+            return true
+        } catch let error as ApiError {
+            accountMessage = "退出失败：\(error.errorDescription ?? "未知错误")"
+            return false
+        } catch {
+            accountMessage = "退出失败：\(error.localizedDescription)"
+            return false
+        }
+    }
 }
 
 // MARK: - 接口响应模型
@@ -177,4 +208,13 @@ struct AuthActionResult: Codable {
     var success: Bool
     var message: String?
     var vehicleCount: Int?
+}
+
+/// 退出登录的响应。
+///
+/// 后端返回的是 `{"success": true, "data": {"message": "已登出"}}` ——
+/// `data` 里**只有 message**，没有 `success` 字段，所以不能复用
+/// `AuthActionResult`（它的 `success` 是必填，会解码失败）。
+struct LogoutResult: Codable {
+    var message: String?
 }
