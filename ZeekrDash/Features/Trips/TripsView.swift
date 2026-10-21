@@ -53,7 +53,7 @@ struct TripsView: View {
             await model.load(days: model.selectedDays)
         }
         .sheet(isPresented: $showMonthPicker) {
-            MonthPickerSheet(months: model.months, selection: model.selectedMonth) { picked in
+            MonthPickerSheet(months: model.monthOptions, selection: model.selectedMonth) { picked in
                 Task { await model.select(month: picked) }
             }
         }
@@ -333,9 +333,14 @@ struct TripsView: View {
 
 /// 左轮选年、右轮选月，都是系统原生 `.wheel`，可上下滑动。
 /// 只列出**有数据**的月份，避免选到一个查不到数的月份。
-private struct MonthPickerSheet: View {
+/// 月份选择弹窗（行程页与充电页共用）。
+///
+/// 用 `MonthOption` 而不是各自的数据模型：两个页面的月份来源不同
+/// （行程来自官方接口、充电来自本地库），但"选哪个月"这件事完全一样，
+/// 各写一套滚轮只是多一处要同步修改的地方。
+struct MonthPickerSheet: View {
 
-    let months: [EnergyMonth]
+    let months: [MonthOption]
     let selection: String
     let onPick: (String) -> Void
 

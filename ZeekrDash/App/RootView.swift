@@ -80,6 +80,21 @@ struct RootView: View {
             tabBar
         }
         .tint(Theme.accent(scheme))
+        // 全局请求指示条（对应网页顶部的 #netBar）。
+        //
+        // 挂在最外层的 `.overlay(alignment: .top)` 而不是塞进 ZStack：
+        // ZStack 的对齐是 `.bottom`（给底部胶囊和 Toast 用的），
+        // 放进去会贴着屏幕底边。
+        // 对齐基准是**安全区上沿**，所以它正好落在状态栏下方，
+        // 不会压到灵动岛。
+        .overlay(alignment: .top) {
+            if NetworkActivity.shared.isBusy {
+                NetworkProgressBar()
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: NetworkActivity.shared.isBusy)
         .alert(
             "已切换为模拟数据",
             isPresented: Binding(

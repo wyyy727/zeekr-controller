@@ -147,12 +147,20 @@ final class NearbyStationsViewModel {
 
     var state: LoadState = .idle
     var stations: [ChargingStation] = []
-    /// 视野内站点总数（可能大于 `stations.count`）
+    /// 候选站点总数（可能大于 `stations.count` —— 后者是已取价并返回的那些）。
+    ///
+    /// ⚠️ 用了价格类筛选（停车免费）时它只是"候选数"，不是匹配总数，
+    /// 界面不能拿它当分母 —— 见 `priceFilterApplied`。
     var total: Int = 0
-    /// 还有下一页（`stations.count < total`）
+    /// 还有下一页 —— 由服务端 `hasMore` 给出，不要自己用 `count < total` 猜
     var hasMore = false
     /// 正在取下一页，防止滑动时重复触发
     var isLoadingMore = false
+    /// 已有数据时的"就地刷新"（筛选变化 / 重新定位）。
+    ///
+    /// 与首次加载的 `state == .loadingStations` 分开：首次没有内容可留，
+    /// 就地刷新有旧内容可留 —— 后者保留列表、压暗表达更新中，避免闪。
+    var isRefreshing = false
     /// 第三方价格服务是否可用
     var isPriceAvailable = true
 
@@ -162,9 +170,95 @@ final class NearbyStationsViewModel {
     /// 首屏 10 个只要 2 轮，20 个要 4 轮 —— 这是"充电桩加载慢"的主因。
     /// 用户通常只看最前面几个，剩下的滑到再取。
     private let pageSize = 10
+
+    /// 下一页在**服务端切片**里的起点。
+    ///
+    /// 不能用 `stations.count` 当 offset：去重会把重复站点滤掉，
+    /// 一旦有重复，`stations.count` 就追不上服务端位置，窗口原地打转，
+    /// 反复请求同一页 —— 表现就是"一直加载、停不下来"。
+    private var nextOffset = 0
+
+    /// 请求序号。
+    ///
+    /// 取价是**逐站**请求第三方网关的，一页经常要好几秒，所以"连点两个筛选 chip"
+    /// 极易产生两个并发请求。没有序号时，"更早发出、条件更旧"的那个后到，
+    /// 会把新筛选的结果覆盖掉 —— 界面上 chip 显示「快充 + 自营」，
+    /// 列表却是「只有快充」的数据。
+    /// 规则：`await` 之后只有"序号仍是最新"的那次才允许写状态。
+    private var loadGeneration = 0
     var sort: Sort = .distance
     /// 当前展开（看分时电价）的站点 ID
     var expanded: String?
+
+    // MARK: - 筛选
+
+    /// 只看快充（`connector=dc`）。
+    ///
+    /// **筛选由服务端执行**，不能在前端过滤已加载的这 10 条 ——
+    /// 否则"筛出 2 个"会被说成"附近只有 2 个"，那是假信息。
+    var onlyFastCharge = false
+    /// 只看极氪自营。
+    var selfOnly = false
+    /// 只看停车免费。
+    ///
+    /// 这一项与上面两个不同：枪数和自营标记来自极氪气泡接口（零成本），
+    /// 而停车费只有第三方电价里才有 —— 属"价格类筛选"，服务端要逐站取价，
+    /// 只能扫描有限范围，`total` 因此不再等于匹配总数。
+    var parkFree = false
+
+    /// 是否有任一筛选生效
+    var hasAnyFilter: Bool { onlyFastCharge || selfOnly || parkFree }
+
+    /// 是否用了价格类筛选 ⇒ 头部不写分母、空结果文案改口径
+    private(set) var priceFilterApplied = false
+
+    /// 切换「快充」后重查第一页。
+    func toggleFastCharge() async {
+        onlyFastCharge.toggle()
+        await reload()
+    }
+
+    func toggleSelfOnly() async {
+        selfOnly.toggle()
+        await reload()
+    }
+
+    func toggleParkFree() async {
+        parkFree.toggle()
+        await reload()
+    }
+
+    func clearFilters() async {
+        guard hasAnyFilter else { return }
+        onlyFastCharge = false
+        selfOnly = false
+        parkFree = false
+        await reload()
+    }
+
+    /// 换了筛选条件后重查第一页。
+    ///
+    /// **不调 `locate()` 是常态路径**：条件变了不该再弹一次定位权限框，
+    /// 上次的坐标还在内存里，直接拿它重查即可。
+    func reload() async {
+        guard let coordinate else {
+            /* 没有坐标 = 演示模式（`locate()` 在那里直接返回演示数据，从不写坐标），
+               或还从没定位过。`locate()` 内部会自己分情况：
+               演示模式走本地过滤，真机才去要位置。 */
+            await locate()
+            return
+        }
+        await load(lat: coordinate.latitude, lng: coordinate.longitude)
+    }
+
+    /// 当前的筛选条件 → 查询参数。
+    private var filterQuery: [String: String] {
+        var query: [String: String] = [:]
+        if onlyFastCharge { query["connector"] = "dc" }
+        if selfOnly { query["self_only"] = "true" }
+        if parkFree { query["park_free"] = "true" }
+        return query
+    }
 
     /// 当前坐标。
     ///
@@ -194,8 +288,22 @@ final class NearbyStationsViewModel {
 
         // 模拟数据模式：不联网，也不（不该）去真定位
         guard !SettingsStore.shared.prefersMockData else {
-            stations = MockData.stations
+            // 作废可能还在飞的真实请求 —— 否则它回来会把演示数据冲掉
+            loadGeneration += 1
+            /* 演示模式没有后端可查，筛选只能在本地对全量做。
+               规则**必须与后端一致**（枪型/自营看气泡字段，停车费看 price），
+               否则会出现"演示里能筛、真机筛不了"的假象。 */
+            stations = MockData.stations.filter { station in
+                if onlyFastCharge && !((station.dcCount ?? 0) > 0) { return false }
+                if selfOnly && station.selfOperate != true { return false }
+                if parkFree && station.price?.parkFree != true { return false }
+                return true
+            }
             total = stations.count
+            // 演示数据一次给完，不做分页（也别留下"还有更多"的假动作）
+            hasMore = false
+            nextOffset = stations.count
+            priceFilterApplied = parkFree
             isPriceAvailable = true
             state = .loaded
             return
@@ -250,28 +358,57 @@ final class NearbyStationsViewModel {
 
     private func load(lat: Double, lng: Double) async {
         coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
-        state = .loadingStations
+
+        // 每次查询占一个新序号；`await` 之后凭它判断"我还是不是最新的那次"
+        loadGeneration += 1
+        let generation = loadGeneration
+
+        /* 已有数据时**不切成 `loadingStations`**。
+           那个状态会把整张卡（含筛选 chip）换成一行 spinner ——
+           用户点一下「快充」，按钮就消失了，回来还得重新找；
+           而且列表会先清空再长回来，闪得很明显。
+           改为"就地刷新"：保留旧列表，靠压暗 + 顶部进度条表达"在更新"。 */
+        if stations.isEmpty {
+            state = .loadingStations
+        } else {
+            isRefreshing = true
+        }
+        // 只有最新那次才有权收掉「更新中」，否则先完成的旧请求会让指示提前消失
+        defer { if generation == loadGeneration { isRefreshing = false } }
 
         do {
+            var query = [
+                "lat": String(lat),
+                "lng": String(lng),
+                "limit": String(pageSize),
+                "offset": "0",
+            ]
+            // 筛选条件交给服务端：它必须在切片之前生效，前端只负责传上去
+            query.merge(filterQuery) { _, new in new }
+
             let data: NearbyStations = try await APIClient.shared.get(
                 APIRoutes.stationsNearby,
-                query: [
-                    "lat": String(lat),
-                    "lng": String(lng),
-                    "limit": String(pageSize),
-                    "offset": "0",
-                ]
+                query: query
             )
+            // 过期响应：期间已有更新的查询发出，这批数据属于旧条件，丢弃
+            guard generation == loadGeneration else { return }
+
             stations = data.stations ?? []
             total = data.total ?? stations.count
-            hasMore = stations.count < total
+            // 服务端给了明确字段就照用，老服务端才回落到推导
+            nextOffset = data.nextOffset ?? stations.count
+            hasMore = data.hasMore ?? (stations.count < total)
+            priceFilterApplied = data.priceFilterApplied ?? false
             // 显式判 `!= false`：后端不返回该字段时按"可用"处理，避免误报不可用
             isPriceAvailable = data.isPriceAvailable
             state = .loaded
         } catch {
+            // 过期请求的失败不该清屏 —— 那会把新查询已经拿到的列表抹掉
+            guard generation == loadGeneration else { return }
             stations = []
             total = 0
             hasMore = false
+            nextOffset = 0
             isPriceAvailable = false
             state = .failed(
                 (error as? ApiError)?.errorDescription ?? error.localizedDescription
@@ -279,10 +416,10 @@ final class NearbyStationsViewModel {
         }
     }
 
-    /// 滑到列表末尾时取下一页。
+    /// 取下一页。
     ///
-    /// 用"是不是最后一个"来触发，而不是给列表加"加载更多"按钮 ——
-    /// 用户要的就是继续滑，不该多一次点击。
+    /// 触发点是**展开态列表**滚到最后一行（见 `NearbyStationsView.expandedList`），
+    /// 折叠态不触发 —— 折叠时列表底部不在视口里，挂了只会变成"一进页面就自动翻页"。
     func loadMoreIfNeeded(current: ChargingStation) async {
         guard let last = sortedStations.last, last.id == current.id else { return }
         await loadMore()
@@ -290,41 +427,70 @@ final class NearbyStationsViewModel {
 
     func loadMore() async {
         guard hasMore, !isLoadingMore, let coordinate else { return }
+        // 记下这页属于哪次查询：翻页途中若改了筛选，这批数据就属于旧条件
+        let generation = loadGeneration
         isLoadingMore = true
         defer { isLoadingMore = false }
 
         do {
+            var query = [
+                "lat": String(coordinate.latitude),
+                "lng": String(coordinate.longitude),
+                "limit": String(pageSize),
+                "offset": String(nextOffset),
+            ]
+            // 翻页必须带上同一套筛选条件，否则"筛选后翻页"会混进不符合条件的站
+            query.merge(filterQuery) { _, new in new }
+
             let data: NearbyStations = try await APIClient.shared.get(
                 APIRoutes.stationsNearby,
-                query: [
-                    "lat": String(coordinate.latitude),
-                    "lng": String(coordinate.longitude),
-                    "limit": String(pageSize),
-                    "offset": String(stations.count),
-                ]
+                query: query
             )
             let more = data.stations ?? []
+            // 筛选已变：这批属于旧条件，追加进去就是"筛选结果里混进不符合条件的站"
+            guard generation == loadGeneration else { return }
+
             // 按 stationId 去重：正常切片不会重复，但距离相同的站点排序可能抖动
             let seen = Set(stations.map(\.id))
-            stations.append(contentsOf: more.filter { !seen.contains($0.id) })
+            let fresh = more.filter { !seen.contains($0.id) }
+            stations.append(contentsOf: fresh)
+
+            // 游标以服务端为准：价格类筛选时它会跳过被扫描掉的候选
+            nextOffset = data.nextOffset ?? (nextOffset + more.count)
 
             total = data.total ?? stations.count
-            hasMore = !more.isEmpty && stations.count < total
+            priceFilterApplied = data.priceFilterApplied ?? priceFilterApplied
+            /* 兜底：本页一条新的都没进来就当作到底。
+               若上游忽略 offset 反复回同一页，去重会让 `stations.count` 永远不增长，
+               而「已加载 < total」恒成立 ⇒ hasMore 恒真 ⇒ 无限翻页。
+               这正是"一直渲染、停不下来"的直接原因。 */
+            let serverHasMore = data.hasMore ?? (stations.count < total)
+            hasMore = serverHasMore && !fresh.isEmpty && !more.isEmpty
             isPriceAvailable = isPriceAvailable && data.isPriceAvailable
         } catch {
-            // 失败就停在当前页，别让 onAppear 反复重试打接口
+            // 失败就停在当前页；但过期请求不该动新查询的状态
+            guard generation == loadGeneration else { return }
             hasMore = false
         }
     }
 
     /// 登出时清空：坐标不该跨会话留存
     func clear() {
+        // 作废在飞的请求：否则它回来会把登出后的列表重新填上
+        loadGeneration += 1
         coordinate = nil
         stations = []
         total = 0
         hasMore = false
         isLoadingMore = false
+        isRefreshing = false
+        nextOffset = 0
         expanded = nil
+        // 筛选条件也要清 —— 下一位登录者不该继承别人"只看快充"的偏好
+        onlyFastCharge = false
+        selfOnly = false
+        parkFree = false
+        priceFilterApplied = false
         // 手动坐标标记也要清 —— 否则下一位登录者会看到"当前用的是手填坐标"的提示
         usedManualCoordinate = false
         state = .idle
@@ -332,6 +498,17 @@ final class NearbyStationsViewModel {
 
     /// 当前位置是否来自手动输入（界面据此提示"用的是手填坐标"）
     var isUsingManualCoordinate: Bool { usedManualCoordinate }
+
+    /// 导航起点（= 本次查询用的坐标）。
+    ///
+    /// 为什么需要：高德的 `iosamap://navi` 只接受一个点，收不到"从哪出发"，
+    /// 于是只把 App 拉起来、不生成路线。`iosamap://path` 这条路要求
+    /// 起点终点都给，起点就取这里。
+    /// **只读快照，仍然只在内存里** —— 位置不落盘、不进日志。
+    var startPoint: (lat: Double, lng: Double)? {
+        guard let coordinate else { return nil }
+        return (coordinate.latitude, coordinate.longitude)
+    }
 
     // MARK: - 排序与展开
 

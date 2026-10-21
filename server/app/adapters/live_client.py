@@ -63,6 +63,17 @@ ENERGY_MONTHS_PATH = "/journey-statistics-service/api/v2.0/h5/mileageBaseInfo"
 # 更早的月份只能走这条（支持约两年，`existingMonth` 就是它的可查清单）
 ENERGY_MONTHLY_PATH = "/journey-statistics-service/api/v2.0/h5/getMonthlyStatisticsInfo"
 
+# 官方「充电记录」：按年 → 月分组，一次给出约两年全部流水。
+#
+# 三个必踩的坑（都是实测，别改）：
+#   1. 除了 GW3 的签名头，还必须带 `X-TENANT-ID: ZEEKR` 与 `X-VEHICLE-BRAND: ZEEKR`，
+#      缺一个就 `079001`，看起来像"没权限"，其实是缺头；
+#   2. `X-VIN` 必须是**加密后的** VIN（明文报 `079025 Decrypt X-VIN failed.`）；
+#   3. body 里 `startTimeStart` 可传 null（表示不限起点）、`chargeType` 传空串表示不筛。
+#
+# 它**没有**金额、单价、站点名 —— 车不知道电价，站点也不在这条链路上。
+CHARGE_LOG_PATH = "/ms-charge-manage/api/v2.0/charge/log/queryGroupMouth"
+
 # 会话被顶替
 ERR_LOGGED_IN_ELSEWHERE = "079021"
 # 接口未被授权（通常是令牌代际不对，应回退 GW2 而非重登）
@@ -910,8 +921,16 @@ class LiveZeekrClient(ZeekrClient):
         body: dict[str, Any] | None = None,
         query: dict[str, str] | None = None,
         retry_on_session_conflict: bool = True,
+        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """发起 GW3 请求，自动处理签名与令牌问题。"""
+        """发起 GW3 请求，自动处理签名与令牌问题。
+
+        Args:
+            extra_headers: 个别服务的**必填但非签名**头（如充电记录的
+                `X-TENANT-ID` / `X-VEHICLE-BRAND`）。它们不参与验签
+                （见 `GW3_SIGNED_HEADERS` 白名单），所以可以在签名之后追加。
+                不要用它在调用处覆盖签名头 —— 那样只会得到验签失败。
+        """
         self._assert_query_signable(query)
         body_str = compact_json(body) if body is not None else None
 
@@ -931,6 +950,8 @@ class LiveZeekrClient(ZeekrClient):
             encrypted_vin=self._encrypted_vin(vin),
             device_id=self._device_id(),
         )
+        if extra_headers:
+            headers.update(extra_headers)
 
         kwargs: dict[str, Any] = {"headers": headers}
         if body_str is not None:
@@ -1872,6 +1893,120 @@ class LiveZeekrClient(ZeekrClient):
             }
             for item in stats["series"]
         ]
+
+    # MARK: - 充电流水
+
+    async def get_charge_sessions(self, vin: str | None = None) -> list[dict[str, Any]]:
+        """拉取官方「充电记录」（按年 → 月分组，一次给约两年）。
+
+        这就是 App「充电记录」页的数据源，也是**唯一**能自动拿到"充了多少度"的接口。
+
+        上游只有电量/时长/交直流，没有金额、单价、站点名：
+          · 车端不知道电价 ⇒ 金额只能来自支付侧（截图 OCR / 手工）；
+          · 站点名不在这条链路上 ⇒ 只能由 OCR 的商户名反填。
+        所以这里**只归一化能量相关字段**，不要试图编造金额。
+
+        Returns:
+            [{"sessionId", "source", "startTime", "endTime", "durationMin",
+              "energyKwh", "chargeType", "chargeTypeName"}]
+        """
+        target_vin = vin or self._session.get("active_vin") or ""
+        if not target_vin:
+            vehicles = await self.list_vehicles()
+            if not vehicles:
+                raise ZeekrAPIError("no_vehicle", "账号下未找到车辆")
+            target_vin = vehicles[0]["vin"]
+            self._session["active_vin"] = target_vin
+
+        payload = await self._request_gw3(
+            "POST",
+            CHARGE_LOG_PATH,
+            vin=target_vin,
+            body={"startTimeStart": None, "chargeType": ""},
+            extra_headers={"X-TENANT-ID": "ZEEKR", "X-VEHICLE-BRAND": "ZEEKR"},
+        )
+        return self._normalize_charge_sessions(payload.get("data"))
+
+    @staticmethod
+    def _normalize_charge_sessions(raw: Any) -> list[dict[str, Any]]:
+        """把「年 → 月 → 记录」三层结构摊平成一条条流水。
+
+        幂等键用 `eventId`（回退 `id`）：实测同一笔充电的 `eventId` 稳定，
+        而 `id` 是订单号形态的字符串，两者都在就用 `eventId`。
+        时间戳是**毫秒**，落库前转成本地 `YYYY-MM-DD HH:MM:SS`。
+        """
+        if not isinstance(raw, list):
+            return []
+
+        out: list[dict[str, Any]] = []
+        for year_group in raw:
+            if not isinstance(year_group, dict):
+                continue
+            for month in year_group.get("monthList") or []:
+                if not isinstance(month, dict):
+                    continue
+                for rec in month.get("records") or []:
+                    if not isinstance(rec, dict):
+                        continue
+
+                    start_ms = rec.get("startTime")
+                    if not isinstance(start_ms, (int, float)) or start_ms <= 0:
+                        continue
+                    end_ms = rec.get("endTime")
+                    duration = rec.get("chargedTime")
+                    if not isinstance(duration, (int, float)):
+                        # 上游偶尔只给起止时间，用时间差补时长（分钟）
+                        duration = (
+                            (float(end_ms) - float(start_ms)) / 60000
+                            if isinstance(end_ms, (int, float)) and end_ms > start_ms
+                            else None
+                        )
+
+                    name = str(rec.get("chargeTypeName") or "")
+                    if "直流" in name:
+                        charge_type = "dc"
+                    elif "交流" in name:
+                        charge_type = "ac"
+                    else:
+                        charge_type = "unknown"
+
+                    external_id = rec.get("eventId") or rec.get("id")
+                    if external_id is None:
+                        continue
+
+                    power = rec.get("power")
+                    out.append(
+                        {
+                            "sessionId": f"zeekr:{external_id}",
+                            "source": "zeekr",
+                            "startTime": datetime.fromtimestamp(float(start_ms) / 1000).strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            ),
+                            "endTime": (
+                                datetime.fromtimestamp(float(end_ms) / 1000).strftime(
+                                    "%Y-%m-%d %H:%M:%S"
+                                )
+                                if isinstance(end_ms, (int, float)) and end_ms > 0
+                                else None
+                            ),
+                            "durationMin": (
+                                round(float(duration), 1)
+                                if isinstance(duration, (int, float))
+                                else None
+                            ),
+                            "energyKwh": (
+                                round(float(power), 2)
+                                if isinstance(power, (int, float))
+                                else None
+                            ),
+                            "chargeType": charge_type,
+                            "chargeTypeName": name or None,
+                        }
+                    )
+
+        # 上游分组顺序不稳定，这里统一按开始时间倒序，落库/展示都不再依赖它
+        out.sort(key=lambda item: item["startTime"], reverse=True)
+        return out
 
     # MARK: - 车控
 

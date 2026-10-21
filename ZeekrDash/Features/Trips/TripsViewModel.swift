@@ -23,6 +23,11 @@ final class TripsViewModel {
     /// 可选月份（官方 `mileageBaseInfo.existingMonth`，首项固定「本月」）
     var months: [EnergyMonth] = []
 
+    /// 供通用月份滚轮使用（`MonthPickerSheet` 只认 `MonthOption`）
+    var monthOptions: [MonthOption] {
+        months.map { MonthOption(yearMonth: $0.yearMonth, label: $0.label) }
+    }
+
     /// 汇总卡数据：本月 → 本月 1 日至今；历史月 → 该整月
     var monthStats: DailyEnergy?
     /// 图表数据：本月 → 近 N 天；历史月 → 该整月

@@ -388,6 +388,154 @@ enum MockData {
         ]
     )
 
+    // MARK: - 充入电量（演示流水）
+    //
+    // 对应 preview/index.html → mockCharge()
+    //
+    // **只有电量、时长、直/交流 —— 没有金额、没有站点名**，与真实接口
+    // （`charge/log/queryGroupMouth`）的字段边界严格一致。
+    // 演示数据要是"长得更完整"，界面就会按"有金额"的样子去做，接真数据时全露馅。
+
+    static var chargeSessions: [ChargeSession] {
+        let cal = Calendar.current
+        let now = Date()
+
+        let kwhPool = [38.5, 52.1, 44.0, 61.3, 29.8, 47.6, 55.2, 33.4, 49.9, 41.2]
+        var out: [ChargeSession] = []
+
+        // 从本月 1 号往前按月退，而不是拼 `DateComponents(month: thisMonth - m)` ——
+        // 后者在跨年时依赖系统对 month: 0 / 负数的归一化，不如直接做日期加减稳。
+        let startOfMonth = cal.date(from: cal.dateComponents([.year, .month], from: now)) ?? now
+
+        for m in 0..<10 {
+            guard let monthDate = cal.date(byAdding: .month, value: -m, to: startOfMonth) else {
+                continue
+            }
+            let year = cal.component(.year, from: monthDate)
+            let mon = cal.component(.month, from: monthDate)
+            let lastDay = (cal.range(of: .day, in: .month, for: monthDate)?.upperBound ?? 29) - 1
+            // 当月只回溯到「昨天」：演示数据里不该出现还没发生的充电
+            let upper = m == 0 ? max(1, cal.component(.day, from: now) - 1) : lastDay
+            let count = m == 0 ? max(1, min(4, cal.component(.day, from: now) / 8 + 1)) : 3 + ((m * 2) % 3)
+
+            for i in 0..<count {
+                let kwh = kwhPool[(m * 3 + i) % kwhPool.count]
+                let isAc = (m + i) % 11 == 4
+                // 直流按 ~75 kW、交流按 ~7 kW 反推时长，保证「平均功率」这一列看起来合理
+                let minutes = (kwh / (isAc ? 7 : 75)) * 60
+                let day = max(1, min(upper, 1 + ((m * 7 + i * 5) % upper)))
+                let hour = [7, 12, 18, 21, 22][(m + i) % 5]
+                let minute = [3, 15, 28, 41, 55][(m * 2 + i) % 5]
+
+                out.append(
+                    ChargeSession(
+                        sessionId: String(format: "mock-%04d%02d-%d", year, mon, i),
+                        startTime: String(format: "%04d-%02d-%02d %02d:%02d:00", year, mon, day, hour, minute),
+                        endTime: nil,
+                        durationMin: minutes.rounded(),
+                        energyKwh: kwh,
+                        chargeType: isAc ? "ac" : "dc",
+                        stationName: nil,
+                        amount: nil,
+                        amountSource: nil
+                    )
+                )
+            }
+        }
+
+        // 倒序（最近一次在最前），与服务端 `list_sessions` 一致
+        return out.sorted { ($0.startTime ?? "") > ($1.startTime ?? "") }
+    }
+
+    /// 演示用的月份清单（含每月电量与每次充电时长），当月统一叫 `currentMonth`
+    static var chargeMonthOptions: [ChargeMonthOption] {
+        var keys: [String] = []
+        for item in chargeSessions {
+            let key = String((item.startTime ?? "").prefix(7))
+            guard key.count == 7, !keys.contains(key) else { continue }
+            keys.append(key)
+        }
+
+        return keys.map { key in
+            let stat = chargeStat(yearMonth: key)
+            let isCurrent = key == currentYearMonth
+            return ChargeMonthOption(
+                yearMonth: isCurrent ? "currentMonth" : key,
+                label: isCurrent ? "本月" : monthLabel(key),
+                count: stat.count,
+                kwh: stat.totalKwh,
+                avgMinutes: stat.avgMinutes,
+                dcCount: stat.dcCount,
+                acCount: stat.acCount
+            )
+        }
+    }
+
+    /// 演示用的单月汇总（口径与后端 `_summarize_month` 一致）
+    static func chargeStat(yearMonth: String) -> ChargeMonthStat {
+        let ym = yearMonth == "currentMonth" ? currentYearMonth : yearMonth
+        let rows = chargeSessions.filter { ($0.startTime ?? "").hasPrefix(ym) }
+
+        var totalKwh = 0.0
+        var totalMinutes = 0.0
+        var dcKwh = 0.0
+        var acKwh = 0.0
+        var dcCount = 0
+        var acCount = 0
+
+        for row in rows {
+            let kwh = row.energyKwh ?? 0
+            totalKwh += kwh
+            totalMinutes += row.durationMin ?? 0
+            if row.isDC { dcCount += 1; dcKwh += kwh }
+            if row.isAC { acCount += 1; acKwh += kwh }
+        }
+
+        let count = rows.count
+        return ChargeMonthStat(
+            yearMonth: yearMonth,
+            label: yearMonth == "currentMonth" ? "本月" : monthLabel(ym),
+            count: count,
+            totalKwh: round1(totalKwh),
+            dcCount: dcCount,
+            dcKwh: round1(dcKwh),
+            acCount: acCount,
+            acKwh: round1(acKwh),
+            totalMinutes: totalMinutes.rounded(),
+            avgKwh: count > 0 ? round1(totalKwh / Double(count)) : 0,
+            avgMinutes: count > 0 ? (totalMinutes / Double(count)).rounded() : 0,
+            avgPowerKw: totalMinutes > 0 ? round1(totalKwh / (totalMinutes / 60)) : nil,
+            amountTotal: nil,
+            amountCount: 0,
+            pricedKwh: 0,
+            unitPrice: nil,
+            unpricedCount: count,
+            unpricedKwh: round1(totalKwh),
+            estimatedTotal: nil,
+            estimatedCount: 0,
+            pendingPayments: 0,
+            unmatchedPayments: 0,
+            records: rows
+        )
+    }
+
+    private static var currentYearMonth: String {
+        let cal = Calendar.current
+        let now = Date()
+        return String(format: "%04d-%02d", cal.component(.year, from: now), cal.component(.month, from: now))
+    }
+
+    /// `2026-09` → `2026年9月`
+    private static func monthLabel(_ yearMonth: String) -> String {
+        let parts = yearMonth.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 2 else { return yearMonth }
+        return "\(parts[0])年\(parts[1])月"
+    }
+
+    private static func round1(_ value: Double) -> Double {
+        (value * 10).rounded() / 10
+    }
+
     // MARK: - 附近充电站
     //
     // 对应 preview/index.html → MOCK.stations
@@ -479,7 +627,94 @@ enum MockData {
             ableAcCount: 0, ableDcCount: 9
             // price 留空：这一站就是「取不到价格」的样本
         ),
+
+        // 以下 10 条是为"能看出折叠与分页"补的。
+        // 只有 4 个站时，「默认只露 6 条」「展开全部」「列表内滚动」
+        // 在界面上一个都成立不了 —— 没数据就没法验证交互。
+        demoStation(5, "演示站 E · 写字楼", 0.48,
+                    available: 3, total: 6, ac: 6, dc: 0, selfOperate: false,
+                    price: 1.20, parkFree: true, score: 4.2),
+        demoStation(6, "演示站 F · 高速服务区", 0.62,
+                    available: 12, total: 16, ac: 0, dc: 16, selfOperate: true,
+                    price: 1.35, parkFree: true, score: 4.5),
+        demoStation(7, "演示站 G · 小区门口", 0.95,
+                    available: 1, total: 4, ac: 4, dc: 0, selfOperate: false,
+                    price: 0.95, parkFree: true, score: 3.9),
+        demoStation(8, "演示站 H · 加油站旁", 1.15,
+                    available: 5, total: 6, ac: 0, dc: 6, selfOperate: false,
+                    price: 1.72, parkFree: false, score: 4.0),
+        demoStation(9, "演示站 I · 医院停车场", 1.62,
+                    available: 4, total: 8, ac: 8, dc: 0, selfOperate: false,
+                    price: 1.58, parkFree: false, score: 4.3),
+        demoStation(10, "演示站 J · 酒店地库", 1.88,
+                    available: 6, total: 8, ac: 4, dc: 4, selfOperate: false,
+                    price: 1.88, parkFree: false, score: 4.4),
+        demoStation(11, "演示站 K · 物流园", 2.40,
+                    available: 8, total: 12, ac: 0, dc: 12, selfOperate: true,
+                    price: 1.12, parkFree: true, score: 4.1),
+        demoStation(12, "演示站 L · 学校对面", 2.75,
+                    available: 2, total: 6, ac: 6, dc: 0, selfOperate: false,
+                    price: 1.05, parkFree: false, score: 3.7),
+        demoStation(13, "演示站 M · 商场 B2", 3.60,
+                    available: 10, total: 16, ac: 8, dc: 8, selfOperate: false,
+                    price: 2.05, parkFree: false, score: 4.6),
+        demoStation(14, "演示站 N · 体育馆", 5.20,
+                    available: 7, total: 10, ac: 0, dc: 10, selfOperate: false,
+                    price: 2.20, parkFree: false, score: 4.0),
     ]
+
+    /// 生成一条演示站点。
+    ///
+    /// 取值规则与 `preview/index.html` 的 `demoStation()` 完全一致 ——
+    /// 两端各写一套的话，"网页里看到的"和"App 里看到的"就会对不上，
+    /// 那正是这个文件开头那条约束要防的事。
+    private static func demoStation(
+        _ index: Int,
+        _ name: String,
+        _ distanceKm: Double,
+        available: Int,
+        total: Int,
+        ac: Int,
+        dc: Int,
+        selfOperate: Bool,
+        price: Double,
+        parkFree: Bool,
+        score: Double
+    ) -> ChargingStation {
+        // 固定方位角：让坐标与距离大致自洽（距离仍由服务端 haversine 重算）
+        let bearing = Double((index * 47) % 360) * .pi / 180
+        let latOffset = (distanceKm / 111) * cos(bearing)
+        let lngOffset = (distanceKm / (111 * cos(31.23 * .pi / 180))) * sin(bearing)
+        let lat = ((31.2304 + latOffset) * 1_000_000).rounded() / 1_000_000
+        let lng = ((121.4737 + lngOffset) * 1_000_000).rounded() / 1_000_000
+
+        let electric = (price * 0.6 * 100).rounded() / 100
+        let service = ((price - electric) * 100).rounded() / 100
+        let ableDc = min(available, dc)
+
+        return ChargingStation(
+            stationId: "mock-station-\(index)",
+            name: name,
+            address: "演示路 \(index) 号",
+            lat: lat, lng: lng,
+            distanceKm: distanceKm,
+            score: score,
+            tags: ["演示数据"],
+            selfOperate: selfOperate,
+            availableCount: available, totalCount: total,
+            acCount: ac, dcCount: dc,
+            ableAcCount: max(0, available - ableDc), ableDcCount: ableDc,
+            price: StationPrice(
+                totalPrice: price, feeElectric: electric, serviceFee: service,
+                currentPeriod: "00:00-23:59",
+                periods: [PricePeriod(timeFrame: "00:00-23:59",
+                                      electric: electric, service: service, total: price)],
+                parkingFee: parkFree ? "充电期间免费" : "按停车场标准收费",
+                parkFree: parkFree, holdFee: false,
+                feeDesc: "演示数据：全天一口价"
+            )
+        )
+    }
 
     // MARK: - 车辆权限包
     //

@@ -80,6 +80,13 @@ def _env_int(key: str, default: int) -> int:
         return default
 
 
+def _env_float(key: str, default: float) -> float:
+    try:
+        return float(_env(key) or default)
+    except ValueError:
+        return default
+
+
 @dataclass
 class ZeekrConfig:
     """极氪国区密钥配置。
@@ -203,6 +210,37 @@ class AppConfig:
     # 注释与日志里都不要打印坐标。
     tencent_map_key: str = field(
         default_factory=lambda: _env("TENCENT_MAP_KEY")
+    )
+
+    # ── DeepSeek Vision（充电账单截图 OCR）─────────────────────
+    #
+    # 金额的**唯一自动化来源**。极氪接口只给电量（`power`），车端报文里
+    # 也没有任何费率字段；「补能订单」金额页在浩汉网关后、要浩汉账号态，
+    # 不可自动化 ⇒ 只能靠截图识别。
+    #
+    # 隐私边界（硬约束，别为了省事放宽）：
+    #   · 截图**不落盘**，只在内存里 base64 后直传，不写 /tmp、不进对象存储；
+    #   · 上传前不做框选/涂黑（已核实截图不含 VIN），但**回传要做字段白名单 + 正则过滤**；
+    #   · 日志只记 sha256 前 8 位、字节数、耗时、字段数，**不记图片也不记上游原文**。
+    #
+    # 未配置 key 时 OCR 接口返回 503，界面提示"去 .env 填 key"；
+    # 手工录入不依赖任何外部服务，照常可用。
+    deepseek_api_key: str = field(default_factory=lambda: _env("DEEPSEEK_API_KEY"))
+    deepseek_base_url: str = field(
+        default_factory=lambda: _env("DEEPSEEK_BASE_URL") or "https://api.deepseek.com"
+    )
+    vision_model: str = field(
+        default_factory=lambda: _env("DEEPSEEK_VISION_MODEL")
+        or "deepseek-v4-flash-vision-exp"
+    )
+
+    # 估算用的兜底单价（元/度）。**0 = 关闭估算**。
+    #
+    # 为什么默认关：估算说不出"这笔到底是谁付的"，一个凭空算出来的金额
+    # 很容易被当成实际支出。只有在用户自己配了本地电价（比如家充 0.5 元/度）
+    # 时才打开，且界面必须与「已确认金额」分两列、不参与单价计算。
+    charge_estimate_price: float = field(
+        default_factory=lambda: _env_float("CHARGE_ESTIMATE_PRICE", 0.0)
     )
 
     zeekr: ZeekrConfig = field(default_factory=ZeekrConfig)

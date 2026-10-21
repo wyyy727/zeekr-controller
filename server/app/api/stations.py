@@ -45,6 +45,15 @@ CACHE_MAX_ENTRIES = 256
 # 单次请求最多对多少个站点取价（按距离取最近的这些）
 PRICE_BATCH_DEFAULT = 20
 
+# 带"价格类"筛选（电价上限 / 停车免费）时，单次请求最多**扫描**多少个候选站点。
+#
+# 为什么需要这个上限：枪数、是否自营来自极氪气泡接口，判断成本为零；
+# 而电价与停车费只能逐站问浩汉。若为了筛"1.2 元以下"去扫全部候选，
+# 视野里几十上百个站会变成几十上百次第三方请求 —— 那是明确的风控红线。
+# 30 个 ≈ 最近 5~10 km，已经覆盖绝大多数使用场景；
+# 更远的站按"距离优先"分批滚动，翻页时接着扫，不会漏。
+PRICE_SCAN_MAX = 30
+
 _station_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _price_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _haohan: HaohanClient | None = None
@@ -159,12 +168,59 @@ async def _enrich(stations: list[dict[str, Any]]) -> bool:
     return price_ok
 
 
+def _passes_basic(
+    item: dict[str, Any], connector: str | None, self_only: bool
+) -> bool:
+    """只靠极氪气泡字段就能判定的筛选（零请求成本）。
+
+    这些条件必须在**切片之前**过滤，否则"第 2 页里混进一堆不符合条件的站"，
+    用户会以为筛选没生效。价格类条件做不到这一步（要先问浩汉），见 `_passes_price`。
+    """
+    if connector == "dc" and not (item.get("dcCount") or 0):
+        return False
+    if connector == "ac" and not (item.get("acCount") or 0):
+        return False
+    if self_only and not item.get("selfOperate"):
+        return False
+    return True
+
+
+def _passes_price(
+    item: dict[str, Any], max_price: float | None, park_free: bool
+) -> bool:
+    """价格类筛选（需要先取到浩汉的电价与停车费）。
+
+    **没有价格一律判为不通过** —— 用户明确要"低于 X 元"，
+    一个查不到价格的站不满足这个条件。这与"价格缺失不等于免费"是同一条原则：
+    拿不到就不猜。
+    """
+    if max_price is None and not park_free:
+        return True
+
+    price = item.get("price") or {}
+    if max_price is not None:
+        total = price.get("totalPrice")
+        if not isinstance(total, (int, float)) or total > max_price:
+            return False
+    if park_free and price.get("parkFree") is not True:
+        return False
+    return True
+
+
 @router.get("/nearby")
 async def get_nearby(
     lat: float = Query(..., ge=-90, le=90, description="纬度"),
     lng: float = Query(..., ge=-180, le=180, description="经度"),
     limit: int = Query(PRICE_BATCH_DEFAULT, ge=1, le=50, description="本页返回站点数上限"),
-    offset: int = Query(0, ge=0, description="跳过前 N 个（滑动分页用）"),
+    offset: int = Query(0, ge=0, description="从第几个候选开始（滑动分页用）"),
+    connector: str | None = Query(
+        None, pattern="^(dc|ac)$", description="只看快充 dc / 慢充 ac（不传＝不限）"
+    ),
+    self_only: bool = Query(False, description="只看极氪自营"),
+    max_price: float | None = Query(
+        None, gt=0, le=20, description="只看当前总价不高于该值（元/度）"
+    ),
+    park_free: bool = Query(False, description="只看停车免费"),
 ) -> dict:
     """附近充电站（距离升序，含电价与分时电价表）。
 
@@ -173,8 +229,17 @@ async def get_nearby(
     取价格是按站请求浩汉的，首屏只要 limit=10 就比一次拉 20 个快一倍 ——
     而用户很可能只看得下前几个。
 
-    `total` 是**视野内总数**（切片前），`count` 是本页条数。
-    前端据此判断还有没有下一页：`offset + count < total`。
+    **筛选分两类，别混在一起看**：
+    · 枪型（`connector`）、自营（`self_only`）来自气泡接口，零成本，
+      在切片**之前**过滤 ⇒ `total` 就是筛选后的真实条数；
+    · 电价（`max_price`）、停车（`park_free`）必须先取价才知道，
+      只能在切片后逐批取价再筛，并受 `PRICE_SCAN_MAX` 限制扫描范围。
+      此时 `total` 仍表示"零成本筛选后的候选数"，**不是**符合条件的总数，
+      所以响应里带 `priceFilterApplied` 让前端别把 total 当匹配数显示。
+
+    `nextOffset` 是下一次分页该传的 offset（带价格筛选时它会**大于**
+    `offset + count`，因为中间扫描掉的候选不返回）。前端只该用它翻页，
+    不要自己用 `count` 推算。
 
     **坐标不会被转发给第三方网关**：发给极氪的是坐标（本来就是它家的数据），
     发给浩汉的只有 `stationId`。这条边界是刻意的，改动时请保留。
@@ -196,20 +261,57 @@ async def get_nearby(
         located.append(item)
 
     located.sort(key=lambda item: item["distanceKm"])
-    total = len(located)
-    picked = located[offset : offset + limit]
 
-    price_available = await _enrich(picked)
+    # 零成本的筛选先做掉 —— 后面所有口径（total / 翻页）都建立在这个候选集上
+    candidates = [i for i in located if _passes_basic(i, connector, self_only)]
+    total = len(candidates)
+
+    needs_price = max_price is not None or park_free
+    price_available = False
+
+    if not needs_price:
+        picked = candidates[offset : offset + limit]
+        price_available = await _enrich(picked)
+        next_offset = offset + len(picked)
+    else:
+        # 逐批取价 + 筛选，直到凑满一页或扫到上限。
+        # `consumed` 只算**真正看过**的候选 —— 凑满一页就停时可以留几只在
+        # 本批未看的位置，下一轮从那里接着来，既不重复也不漏。
+        picked = []
+        cursor = offset
+        scan_end = min(total, offset + PRICE_SCAN_MAX)
+        while cursor < scan_end and len(picked) < limit:
+            batch = candidates[cursor:cursor + limit]
+            if not batch:
+                break
+            ok = await _enrich(batch)
+            price_available = price_available or ok
+            consumed = 0
+            for item in batch:
+                consumed += 1
+                if _passes_price(item, max_price, park_free):
+                    picked.append(item)
+                    if len(picked) >= limit:
+                        break
+            cursor += consumed
+        next_offset = cursor
+
+    has_more = next_offset < total
     t2 = time.perf_counter()
 
     # 慢的时候要能一眼看出慢在哪一段：列表（极氪一跳）还是取价（逐站问浩汉）。
     # 只记耗时与条数，不记坐标。
     logger.debug(
-        "附近充电站：列表 %.0fms + 取价 %.0fms（本页 %d / 共 %d 站）",
+        "附近充电站：列表 %.0fms + 取价 %.0fms（本页 %d / 候选 %d，筛选=%s）",
         (t1 - t0) * 1000,
         (t2 - t1) * 1000,
         len(picked),
         total,
+        ",".join(
+            [x for x in (connector, "self" if self_only else "",
+                         "price" if max_price is not None else "",
+                         "parkFree" if park_free else "") if x]
+        ) or "无",
     )
 
     # 取价后按距离重排即可（价格不参与排序，排序由前端决定）
@@ -219,10 +321,15 @@ async def get_nearby(
             "location": {"lat": lat, "lng": lng},
             "total": total,
             "offset": offset,
+            # 下一页该从哪开始（带价格筛选时会跳过被扫描掉的候选）
+            "nextOffset": next_offset,
+            "hasMore": has_more,
             "count": len(picked),
             # False ⇒ 第三方价格服务不可用；前端应提示"价格暂不可用"，
             # 而不是把空价格当成"这个站免费"。
             "priceAvailable": price_available,
+            # True ⇒ 用了价格类筛选，此时 total 只是候选数，不是匹配总数
+            "priceFilterApplied": needs_price,
             "stations": picked,
         },
     }

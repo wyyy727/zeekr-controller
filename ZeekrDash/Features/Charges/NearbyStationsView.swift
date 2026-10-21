@@ -64,7 +64,14 @@ struct NearbyStationsCard: View {
         case .locating:        return "定位中"
         case .loadingStations: return "加载中"
         case .loaded:
-            // 写「已加载 / 总数」，否则「50 站」配着 10 条列表会让人以为没加载完
+            // 换筛选条件 / 重新定位时列表还在，这里只标"更新中"（对应网页的 is-busy）
+            if model.isRefreshing { return "更新中" }
+            // 写「已加载 / 总数」，否则「50 站」配着 10 条列表会让人以为没加载完。
+            // 用价格类条件（停车免费）筛时**不写分母**：那种筛选要先取价才能判断，
+            // 服务端只扫固定范围，total 是候选数而不是匹配总数。
+            if model.priceFilterApplied {
+                return "\(model.stations.count) 站 · 已筛选"
+            }
             return model.hasMore ? "\(model.stations.count) / \(model.total) 站" : "\(model.total) 站"
         // 失败可能是定位被拒，也可能是网络问题 —— 写「需定位」会误判后者
         case .failed:          return "失败"
@@ -149,14 +156,32 @@ struct NearbyStationsCard: View {
 
     private var emptyBlock: some View {
         VStack(alignment: .leading, spacing: 9) {
-            note("附近没有查到充电站。")
-            actionButton("重新定位", filled: false) {
-                Task { await model.locate() }
+            /* 有筛选时的空结果**不能说成"附近没有充电站"** —— 那是在撒谎：
+               站是有的，只是不符合条件。必须留一个清除筛选的出口。 */
+            note(model.hasAnyFilter
+                 ? "附近没有符合当前筛选条件的站。放宽条件或清除筛选再看看。"
+                 : "附近没有查到充电站。")
+
+            if model.hasAnyFilter {
+                actionButton("清除筛选", filled: true) {
+                    Task { await model.clearFilters() }
+                }
+            } else {
+                actionButton("重新定位", filled: false) {
+                    Task { await model.locate() }
+                }
             }
         }
     }
 
     // MARK: - 列表
+
+    /// 列表高度上限。
+    ///
+    /// 卡片**不再折叠/展开**：一进来就是最终高度，位置不跳。
+    /// 384pt ≈ 5~6 行，够判断"附近有没有能用的站"，又让下面的
+    /// 「预约充电」「消费账单」留在正常翻页范围内。
+    private let listMaxHeight: CGFloat = 384
 
     private var listBlock: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -174,13 +199,40 @@ struct NearbyStationsCard: View {
                 sortControl
             }
 
-            VStack(alignment: .leading, spacing: 0) {
+            filterRow
+
+            // 就地刷新时保留旧列表、压暗并暂时禁点 —— 与网页 `.st-list.is-busy` 一致。
+            // 换成 spinner 会把筛选 chip 一起带走，用户点一下"快充"按钮就消失了。
+            stationList
+                .opacity(model.isRefreshing ? 0.45 : 1)
+                .disabled(model.isRefreshing)
+                .animation(.easeInOut(duration: 0.15), value: model.isRefreshing)
+
+            note(
+                model.isUsingManualCoordinate
+                    ? "当前用的是手动输入的坐标。位置仅用于本次查询，不落盘、不发给第三方。"
+                    : "位置仅用于本次查询，不落盘、不发给第三方。"
+            )
+        }
+    }
+
+    /// 站点列表：高度固定、自己滚。
+    ///
+    /// 三个关键点：
+    /// 1. **卡片本身不动** —— 手指在列表上滑只翻站点，滑到底自动取下一页；
+    ///    滑列表之外才是翻整页。两者用不同的滚动容器隔开，
+    ///    就不会再出现"越滑越加载、下面两张卡永远看不到"。
+    /// 2. 必须 `LazyVStack` —— 普通 `VStack` 会把所有行一次性建出来，
+    ///    末行的 `onAppear` 在首屏就触发，于是不用滑也会一页页往下取。
+    /// 3. 必须高度封顶 —— 否则整页还是被列表撑长，封顶后才有"内层滚动"这回事。
+    private var stationList: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 // 用 `station.id` 而不是 `enumerated()` 的下标做身份 ——
                 // Swift 的 key path **不能指向元组元素**（`\.element.id` 编不过），
-                // 而按下标走会让"排序一变、行身份就跟着变"，展开态跟着乱跳。
+                // 而按下标走会让"排序一变、行身份就跟着变"。
                 ForEach(model.sortedStations) { station in
                     row(station)
-                        // 滑到最后一行就取下一页（没有"加载更多"按钮）
                         .onAppear {
                             Task { await model.loadMoreIfNeeded(current: station) }
                         }
@@ -188,31 +240,62 @@ struct NearbyStationsCard: View {
                         Divider().overlay(Theme.separator(scheme))
                     }
                 }
-            }
 
-            // 分页尾部提示：加载中 / 已全部显示
-            if model.isLoadingMore {
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text("正在加载更多…")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(Theme.textTertiary(scheme))
-                    Spacer(minLength: 0)
-                }
-                .padding(.top, 10)
-            } else if !model.hasMore {
-                Text("已全部显示")
+                listFooter
+            }
+        }
+        .frame(height: listHeight)
+        .scrollIndicators(.hidden)
+    }
+
+    /// 列表高度：按行数估算，再夹到上限。
+    ///
+    /// 为什么不直接 `.frame(maxHeight:)`：`ScrollView` 在滚动轴上是**贪心**的，
+    /// 只给上限时它照样占满 384pt —— 只剩 2 个站时，卡片下面会空出一大块。
+    /// 网页是 `max-height`（内容少就收缩），这里要对齐同样的观感。
+    ///
+    /// 也没有用 `GeometryReader` 去量内容高度：`LazyVStack` 的尺寸要等行被
+    /// 真正创建才准，量它会把"懒"变成"全建"，而那正是"一进页面就连锁翻页"的根源。
+    private var listHeight: CGFloat {
+        let rowEstimate: CGFloat = 64      // 站名一行 + 距离/枪数一行 ≈ 64pt
+        let footerEstimate: CGFloat = 44
+        let estimated = CGFloat(model.sortedStations.count) * rowEstimate + footerEstimate
+        return min(max(estimated, 140), listMaxHeight)
+    }
+
+    /// 列表底部：加载中 / 加载更多 / 已全部显示。
+    ///
+    /// 「加载更多」是**兜底**：某一页条数很少（比如价格筛选命中不多）时，
+    /// 列表压根不需要滚动，那条"滚到底触发"就永远等不到 ——
+    /// 没有这个按钮用户会以为卡住了。
+    @ViewBuilder
+    private var listFooter: some View {
+        if model.isLoadingMore {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("正在加载更多…")
                     .font(.system(size: 10.5))
                     .foregroundStyle(Theme.textTertiary(scheme))
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.top, 10)
+                Spacer(minLength: 0)
             }
-
-            note(
-                model.isUsingManualCoordinate
-                    ? "当前用的是手动输入的坐标。位置仅用于本次查询，不落盘、不发给第三方。"
-                    : "位置仅用于本次查询，不落盘、不发给第三方。"
-            )
+            .padding(.vertical, 10)
+        } else if model.hasMore {
+            // 价格类筛选时 total 是候选数，写「x / y」会把"还有这么多"夸大
+            actionButton(
+                model.priceFilterApplied
+                    ? "加载更多"
+                    : "加载更多（\(model.stations.count) / \(model.total)）",
+                filled: false
+            ) {
+                Task { await model.loadMore() }
+            }
+            .padding(.top, 8)
+        } else if !model.stations.isEmpty {
+            Text("已全部显示")
+                .font(.system(size: 10.5))
+                .foregroundStyle(Theme.textTertiary(scheme))
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 10)
         }
     }
 
@@ -232,10 +315,74 @@ struct NearbyStationsCard: View {
                             isOn ? Theme.surfaceAlt(scheme) : Color.clear,
                             in: Capsule()
                         )
+                        // 同样把点击区补到 44pt（HIG），视觉不变
+                        .frame(minHeight: Metrics.minTouchTarget)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(isOn ? [.isSelected] : [])
             }
         }
+    }
+
+    /// 筛选 chip。
+    ///
+    /// 与网页保持一致：只露 **快充 / 极氪自营 / 停车免费**。
+    /// 电价档位（≤1.0 / 1.5 / 2.0 元）试过一版，一行铺七个 chip 太占地方，已去掉 ——
+    /// 接口的 `max_price` 参数仍在，要恢复只需在这里加一个 chip。
+    ///
+    /// 用横向 ScrollView 而不是 `HStack` 直接铺：窄屏（SE 宽度）上四个元素
+    /// 会换行，一换行卡片就变高，而这张卡下面还压着别的卡。
+    private var filterRow: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 6) {
+                filterChip("快充", isOn: model.onlyFastCharge) {
+                    Task { await model.toggleFastCharge() }
+                }
+                filterChip("极氪自营", isOn: model.selfOnly) {
+                    Task { await model.toggleSelfOnly() }
+                }
+                filterChip("停车免费", isOn: model.parkFree) {
+                    Task { await model.toggleParkFree() }
+                }
+                if model.hasAnyFilter {
+                    filterChip("清除", isOn: false) {
+                        Task { await model.clearFilters() }
+                    }
+                }
+            }
+            .padding(.vertical, 1)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    /// 一个筛选 chip。
+    ///
+    /// 不用 `Toggle(.button)`：它的样式在卡片里要么太大，要么和上面的排序胶囊打架。
+    /// 选中态用强调色 + 淡底，未选用中性底 —— 两组互斥/开关共用一套外观，好读也好看。
+    private func filterChip(
+        _ title: String,
+        isOn: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11.5, weight: isOn ? .semibold : .regular))
+                .foregroundStyle(isOn ? Theme.accent(scheme) : Theme.textSecondary(scheme))
+                .padding(.horizontal, 11)
+                .padding(.vertical, 6)
+                .background(
+                    isOn ? Theme.accent(scheme).opacity(0.14) : Theme.surfaceAlt(scheme),
+                    in: Capsule()
+                )
+                // 胶囊本身只有 ~28pt 高，但**点击区**要补到 HIG 的 44pt：
+                // frame 放在 background 之后 ⇒ 视觉不变，只有可点范围变大。
+                .frame(minHeight: Metrics.minTouchTarget)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // 读屏要能听出"已选中"，否则一排胶囊听起来一模一样
+        .accessibilityAddTraits(isOn ? [.isSelected] : [])
     }
 
     private func row(_ station: ChargingStation) -> some View {
@@ -391,37 +538,62 @@ struct NearbyStationsCard: View {
         }
     }
 
-    /// 一键导航交给地图 App，不在页内画地图 ——
-    /// 画地图要引入瓦片、手势与坐标系纠偏，成本远高于收益。
-    ///
-    /// 站点名放进 URL 查询串时的安全字符集。
+    /// 站点名 / 起点名放进 URL 查询串时的安全字符集。
     ///
     /// 不能直接用 `.urlQueryAllowed` —— 它**放行 `&` `=` `#`**，
-    /// 站点名里出现这些字符会把 `to=` 参数截断，导航到错误的地方。
+    /// 站点名里出现这些字符会把参数截断，导航到错误的地方。
     private static let queryValueAllowed: CharacterSet = {
         var set = CharacterSet.urlQueryAllowed
         set.remove(charactersIn: "&=?#+")
         return set
     }()
 
+    private static func escape(_ text: String) -> String {
+        text.addingPercentEncoding(withAllowedCharacters: queryValueAllowed) ?? ""
+    }
+
     /// 导航到站点。
     ///
-    /// 两段式：先试高德 App 的原生 scheme（直接进导航页，不闪浏览器），
-    /// 没装高德再退回 H5；H5 带上 `callnative=1`（高德文档里默认是 0），
-    /// 否则只会停在网页版 —— 这正是此前「跳到浏览器高德」的原因。
+    /// **不用 `iosamap://navi`**：那个接口只接受一个点（`lat`/`lon`），
+    /// 没有起点（`sid`/`slat`/`slon`）、也没有终点标识（`did`/`dlat`/`dlon`/`dname`）。
+    /// 高德收到这种"只有一个点"的请求，只会把 App 拉起来 ——
+    /// 不显示目的地、也不生成路线，正是用户看到的「跳到高德，什么都没发生」。
     ///
-    /// `dev=0`：传入的就是 GCJ-02 坐标，不需要高德再转换。
+    /// 改用 `iosamap://path`（路线规划）：起点终点都给齐，落地页就是带终点
+    /// 信息的路线页，点一下开始导航即可。这也顺带满足了"显示目的地详情"。
+    ///
+    /// `dev=0`：传入坐标已是 GCJ-02（站点坐标来自极氪/浩汉，都是国内加密坐标），
+    /// 不能再让高德转一次，否则会偏几百米。
+    ///
+    /// 兜底：没装高德（`accepted == false`）就退回 H5，并带 `callnative=1`
+    /// ——该参数默认 0，不传只会停在网页版。
     private func openNavigation(_ station: ChargingStation) {
         guard let lat = station.lat, let lng = station.lng else {
             hint = "该站点缺少坐标，无法导航"
             return
         }
-        let name = station.displayName
-            .addingPercentEncoding(withAllowedCharacters: Self.queryValueAllowed) ?? ""
+        // 超范围 / 零值坐标，高德只会静默打开首页。与其跳过去什么都不显示，
+        // 不如在这里说清楚。
+        guard (-90...90).contains(lat), (-180...180).contains(lng),
+              lat != 0, lng != 0 else {
+            hint = "该站点坐标异常，无法导航"
+            return
+        }
 
-        let appURL = URL(string:
-            "iosamap://navi?sourceApplication=ZeekrDash&poiname=\(name)"
-            + "&lat=\(lat)&lon=\(lng)&dev=0&style=2")
+        let name = Self.escape(station.displayName)
+        var scheme = "iosamap://path?sourceApplication=ZeekrDash"
+            + "&did=BGVIS2&dlat=\(lat)&dlon=\(lng)&dname=\(name)"
+
+        // 起点优先取本次查询用的坐标 —— 与服务端算距离用的是同一个点，
+        // 路线才和"离我多远"对得上。拿不到就不传，高德会以"我的位置"为起点。
+        if let start = model.startPoint,
+           (-90...90).contains(start.lat), (-180...180).contains(start.lng) {
+            scheme += "&sid=BGVIS1&slat=\(start.lat)&slon=\(start.lng)"
+                + "&sname=\(Self.escape("我的位置"))"
+        }
+        scheme += "&dev=0&t=0"   // t=0：驾车
+
+        let appURL = URL(string: scheme)
         let webURL = URL(string:
             "https://uri.amap.com/navigation?to=\(lng),\(lat),\(name)"
             + "&mode=car&policy=0&coordinate=gaode&callnative=1&src=zeekrdash")

@@ -37,10 +37,35 @@ enum APIRoutes {
     /// 可选月份清单（官方 existingMonth）
     static let tripsEnergyMonths = "/api/trips/energy/months"
 
-    // 充电消费
+    // 充电消费（历史遗留：本地导入的支付宝 / 微信账单）
     static let chargesSummary = "/api/charges/summary"
     static let chargesRecords = "/api/charges/records"
     static let chargesImport  = "/api/charges/import"
+
+    // 充入电量（官方「充电记录」，充电页主线）
+    //
+    // 与上面三个是**两套完全不同的数据**：这里是车端流水（只有电量、没有金额），
+    // 上面是支付账单（有金额、实测 0 行）。接口前缀相同只是历史原因。
+    /// 可查月份清单（含每月电量与每次充电时长），供选择器与趋势图使用
+    static let chargeMonths   = "/api/charges/months"
+    /// 单月充电流水（`?yearMonth=2026-09`，默认本月）。**只读本地库**，不打网关
+    static let chargeSessions = "/api/charges/sessions"
+    /// 从官方同步充电流水（幂等，服务端有 10 秒冷却）
+    static let chargeSync     = "/api/charges/sync"
+    /// 截图识别是否可用
+    static let chargeOcrStatus = "/api/charges/receipts/status"
+    /// 上传一张「补能订单」截图 → 返回待确认的金额行（不入库）
+    static let chargeOcr      = "/api/charges/receipts/ocr"
+    /// 把核对过的识别结果入库
+    static let chargeOcrCommit = "/api/charges/receipts/commit"
+    /// 手工补录一笔金额
+    static let chargePaymentManual = "/api/charges/payments/manual"
+    /// 金额证据列表（未配对的会附上候选）
+    static let chargePayments = "/api/charges/payments"
+    /// 指定 / 解除某笔金额属于哪次充电
+    static func chargePaymentLink(_ paymentId: String) -> String {
+        "/api/charges/payments/\(paymentId)/link"
+    }
 
     // 附近充电站
     //

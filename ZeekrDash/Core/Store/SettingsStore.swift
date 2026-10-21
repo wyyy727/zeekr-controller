@@ -16,7 +16,6 @@ final class SettingsStore {
 
     private enum Key {
         static let baseURL        = "settings.baseURL"
-        static let pollMinutes    = "settings.pollMinutes"
         static let commandsEnabled = "settings.commandsEnabled"
         static let apiToken       = "settings.apiToken"
     }
@@ -41,14 +40,6 @@ final class SettingsStore {
     /// 是否应当直接使用本地模拟数据（不需要发起任何网络请求）
     var prefersMockData: Bool {
         endpointMode.preferredSourceIsMock
-    }
-
-    // MARK: - 轮询间隔（分钟，默认 5；充电中自动缩短为 60 秒）
-
-    var pollIntervalMinutes: Double {
-        didSet {
-            UserDefaults.standard.set(pollIntervalMinutes, forKey: Key.pollMinutes)
-        }
     }
 
     // MARK: - 车控指令总开关（默认关）
@@ -83,8 +74,6 @@ final class SettingsStore {
     private init() {
         let d = UserDefaults.standard
         baseURL = d.string(forKey: Key.baseURL) ?? APIClient.defaultBaseURL
-        let storedMinutes = d.double(forKey: Key.pollMinutes)
-        pollIntervalMinutes = storedMinutes > 0 ? storedMinutes : 5
         commandsEnabled = d.bool(forKey: Key.commandsEnabled)
         apiToken = d.string(forKey: Key.apiToken) ?? ""
 

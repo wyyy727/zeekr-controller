@@ -35,6 +35,71 @@ CREATE TABLE IF NOT EXISTS charge_records (
 CREATE INDEX IF NOT EXISTS idx_charge_ts ON charge_records(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_charge_provider ON charge_records(provider);
 
+-- 官方充电流水（`ms-charge-manage/.../charge/log/queryGroupMouth`）。
+--
+-- 与 `charge_records` 的分工是**刻意的、不要合并**：
+--   · 这张表 = 「车到底充进去多少度」，极氪官方接口自动同步，权威且零操作；
+--   · `charge_records` = 「支付账单解析出来的金额」，历史遗留通道，实测 0 行。
+-- 两个数据来源根本不同（电来自车、钱来自支付），合成一行就会逼着二选一 ——
+-- 历史上的 `charge_records.energy_kwh` 恒为 NULL 就是这么来的。
+-- 金额能不能补上（截图 OCR / 手工）是另一条链路，补上就写 amount，
+-- 并必须同时写 amount_source，否则「真值」与「估算」会被混算成单价。
+--
+-- ⚠️ **不存 VIN**：本机是单车主场景，落一份车架号只会凭空多一处敏感数据，
+-- 而它对这个页面没有任何用处（查询靠月份，不靠车辆）。
+-- ⚠️ `raw_json` 里上游确实带 VIN，所以**整列不落库**，只保留归一化后的字段。
+CREATE TABLE IF NOT EXISTS charge_sessions (
+    session_id    TEXT PRIMARY KEY,      -- zeekr:<eventId>
+    source        TEXT NOT NULL DEFAULT 'zeekr',
+    start_ts      TEXT NOT NULL,         -- 本地时间 'YYYY-MM-DD HH:MM:SS'
+    end_ts        TEXT,
+    duration_min  REAL,
+    energy_kwh    REAL,
+    charge_type   TEXT,                  -- dc / ac / unknown
+    station_name  TEXT,                  -- 上游没有站点字段，只能来自 OCR/手工
+    amount        REAL,                  -- 可空；有值时必须同时有 amount_source
+    amount_source TEXT,                  -- zeekr_order / ocr / manual / estimate
+    updated_at    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_start ON charge_sessions(start_ts DESC);
+
+-- 金额证据层：每一笔"支付"（截图识别 / 手工录入）先落这里，配对成功后再回写
+-- `charge_sessions.amount`。
+--
+-- 为什么不直接写 session：
+--   1. 有些支付**根本配不上**（停车费 / 占位费 / 别人付的），但它们也是事实，
+--      静默丢掉等于吞数据；
+--   2. 同一张截图重跑要能幂等（`payment_id` 由 image_sha + 金额 + 时间算出）；
+--   3. 原始证据要可追溯：用户改过一次金额，得能看出改之前是多少。
+CREATE TABLE IF NOT EXISTS charge_payments (
+    payment_id   TEXT PRIMARY KEY,      -- sha256(imageSha|amount|paidAt)[:16] 或 manual:<uuid>
+    source       TEXT NOT NULL,         -- ocr / manual
+    paid_at      TEXT,                  -- 支付/充电开始时间（本地时间）
+    amount       REAL NOT NULL,
+    energy_kwh   REAL,
+    station_name TEXT,
+    order_tail   TEXT,                  -- 订单号只留后四位
+    confidence   REAL,
+    status       TEXT NOT NULL,         -- matched / pending / unmatched
+    note         TEXT,
+    image_sha    TEXT,                  -- 截图 hash 前 8 位，仅用于去重
+    created_at   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_payment_paid ON charge_payments(paid_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payment_status ON charge_payments(status);
+
+-- 配对关系：一个 session 只能有一笔已确认金额（PRIMARY KEY 保证），
+-- 一笔 payment 也只能落到一个 session（UNIQUE 保证）。
+CREATE TABLE IF NOT EXISTS charge_matches (
+    session_id TEXT PRIMARY KEY,
+    payment_id TEXT UNIQUE NOT NULL,
+    kind       TEXT,                    -- strong / weak / manual
+    confidence TEXT,                    -- high / low
+    matched_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS trips (
     trip_id     TEXT PRIMARY KEY,
     start_time  TEXT,
@@ -191,6 +256,394 @@ class Store:
         with self._connect() as conn:
             cursor = conn.execute("DELETE FROM charge_records")
             return cursor.rowcount
+
+    # MARK: - 官方充电流水
+
+    def save_sessions(self, sessions: list[dict[str, Any]]) -> dict[str, int]:
+        """批量写入官方充电流水（按 `session_id` upsert，重复同步无副作用）。
+
+        为什么用 upsert 而不是 `INSERT OR IGNORE`：上游会修正历史记录
+        （实测同一 `eventId` 的 `chargedTime`/`power` 有过变化），
+        IGNORE 会让库里永远停在第一次同步那份。upsert 同时保住已配对的
+        `amount`/`station_name` —— 那两个值上游根本没有，覆盖掉就白配了。
+
+        Returns:
+            {"inserted": 新增条数, "updated": 覆盖条数}
+        """
+        if not sessions:
+            return {"inserted": 0, "updated": 0}
+
+        rows = [
+            (
+                str(s.get("sessionId") or ""),
+                str(s.get("source") or "zeekr"),
+                str(s.get("startTime") or ""),
+                s.get("endTime"),
+                s.get("durationMin"),
+                s.get("energyKwh"),
+                s.get("chargeType"),
+                s.get("stationName"),
+                s.get("amount"),
+                s.get("amountSource"),
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            )
+            for s in sessions
+            if s.get("sessionId") and s.get("startTime")
+        ]
+        if not rows:
+            return {"inserted": 0, "updated": 0}
+
+        ids = [r[0] for r in rows]
+        placeholders = ",".join("?" * len(ids))
+        with self._connect() as conn:
+            existing = {
+                row["session_id"]
+                for row in conn.execute(
+                    f"SELECT session_id FROM charge_sessions WHERE session_id IN ({placeholders})",
+                    ids,
+                ).fetchall()
+            }
+            conn.executemany(
+                """
+                INSERT INTO charge_sessions
+                    (session_id, source, start_ts, end_ts, duration_min, energy_kwh,
+                     charge_type, station_name, amount, amount_source, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    start_ts     = excluded.start_ts,
+                    end_ts       = excluded.end_ts,
+                    duration_min = excluded.duration_min,
+                    energy_kwh   = excluded.energy_kwh,
+                    charge_type  = excluded.charge_type,
+                    -- 站点与金额来自 OCR/手工，上游没有 ⇒ 只在本地为空时补，绝不覆盖
+                    station_name  = COALESCE(charge_sessions.station_name, excluded.station_name),
+                    amount        = COALESCE(charge_sessions.amount, excluded.amount),
+                    amount_source = COALESCE(charge_sessions.amount_source, excluded.amount_source),
+                    updated_at   = excluded.updated_at
+                """,
+                rows,
+            )
+
+        updated = sum(1 for i in ids if i in existing)
+        return {"inserted": len(ids) - updated, "updated": updated}
+
+    def list_sessions(
+        self, year_month: str | None = None, limit: int = 500
+    ) -> list[dict[str, Any]]:
+        """查询充电流水，可按 `YYYY-MM` 过滤（`start_ts` 前 7 位即年月）。"""
+        sql = "SELECT * FROM charge_sessions"
+        params: list[Any] = []
+        if year_month:
+            sql += " WHERE substr(start_ts, 1, 7) = ?"
+            params.append(year_month)
+        sql += " ORDER BY start_ts DESC LIMIT ?"
+        params.append(limit)
+
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+
+        return [
+            {
+                "sessionId": row["session_id"],
+                "source": row["source"],
+                "startTime": row["start_ts"],
+                "endTime": row["end_ts"],
+                "durationMin": row["duration_min"],
+                "energyKwh": row["energy_kwh"],
+                "chargeType": row["charge_type"],
+                "stationName": row["station_name"],
+                "amount": row["amount"],
+                "amountSource": row["amount_source"],
+            }
+            for row in rows
+        ]
+
+    def session_months(self) -> list[dict[str, Any]]:
+        """按月聚合（月份倒序），供月份选择器与趋势图使用。
+
+        口径：`kwh` 是**该月所有流水之和**，与官方 App「充电记录」页的
+        `sumPower` 一致；`dcCount`/`acCount` 按 `charge_type` 计。
+        缺 `energy_kwh` 的记录不参与求和（`SUM` 天然跳过 NULL），
+        但仍计入 `count` —— 「充了几次」和「充了多少度」是两件事。
+
+        `minutes` / `avgMinutes` 供趋势图的第二根轴用：
+        电量只能看出"这个月充了多少"，看不出"每次充了多久"，
+        而慢充一充一整夜、快充二十分钟，差的就是这个数。
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT substr(start_ts, 1, 7)              AS ym,
+                       COUNT(*)                            AS cnt,
+                       COALESCE(SUM(energy_kwh), 0)        AS kwh,
+                       COALESCE(SUM(duration_min), 0)      AS mins,
+                       SUM(CASE WHEN charge_type = 'dc' THEN 1 ELSE 0 END) AS dc,
+                       SUM(CASE WHEN charge_type = 'ac' THEN 1 ELSE 0 END) AS ac
+                FROM charge_sessions
+                WHERE start_ts IS NOT NULL AND start_ts <> ''
+                GROUP BY ym
+                ORDER BY ym DESC
+                """
+            ).fetchall()
+
+        out = []
+        for row in rows:
+            if not row["ym"]:
+                continue
+            count = int(row["cnt"] or 0)
+            minutes = round(float(row["mins"] or 0))
+            out.append(
+                {
+                    "yearMonth": row["ym"],
+                    "count": count,
+                    "kwh": round(float(row["kwh"] or 0), 1),
+                    "minutes": minutes,
+                    "avgMinutes": round(minutes / count) if count else None,
+                    "dcCount": int(row["dc"] or 0),
+                    "acCount": int(row["ac"] or 0),
+                }
+            )
+        return out
+
+    def count_sessions(self) -> int:
+        with self._connect() as conn:
+            row = conn.execute("SELECT COUNT(*) AS n FROM charge_sessions").fetchone()
+        return int(row["n"] or 0)
+
+    def clear_sessions(self) -> int:
+        """清空充电流水（跟随退出登录的数据清理，见 AppStore 侧约定）。"""
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM charge_sessions")
+            return cursor.rowcount
+
+    # MARK: - 金额证据（截图识别 / 手工录入）
+
+    def save_payments(self, payments: list[dict[str, Any]]) -> dict[str, int]:
+        """写入支付证据（按 `payment_id` 幂等）。
+
+        用 `INSERT OR IGNORE` 而不是 upsert：`payment_id` 本身就是内容指纹
+        （图片 hash + 金额 + 时间），同一条重跑应当**什么都不做**，
+        而不是把用户后来改过的金额又覆盖回模型识别的原值。
+        """
+        if not payments:
+            return {"inserted": 0, "skipped": 0}
+
+        rows = [
+            (
+                str(p.get("paymentId")),
+                str(p.get("source") or "ocr"),
+                p.get("paidAt"),
+                float(p.get("amount") or 0),
+                p.get("energyKwh"),
+                p.get("stationName"),
+                p.get("orderTail"),
+                p.get("confidence"),
+                str(p.get("status") or "pending"),
+                p.get("note"),
+                p.get("imageSha"),
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            )
+            for p in payments
+            if p.get("paymentId") and isinstance(p.get("amount"), (int, float))
+        ]
+        if not rows:
+            return {"inserted": 0, "skipped": 0}
+
+        with self._connect() as conn:
+            before = conn.total_changes
+            conn.executemany(
+                """
+                INSERT OR IGNORE INTO charge_payments
+                    (payment_id, source, paid_at, amount, energy_kwh, station_name,
+                     order_tail, confidence, status, note, image_sha, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+            inserted = conn.total_changes - before
+        return {"inserted": inserted, "skipped": len(rows) - inserted}
+
+    def list_payments(
+        self, status: str | None = None, limit: int = 200
+    ) -> list[dict[str, Any]]:
+        # 带上绑定关系：界面要能显示"这笔钱挂在哪次充电上"，并给一个解绑入口 ——
+        # 绑错了却撤不回来，比当初不自动绑还难受。
+        sql = (
+            "SELECT p.*, m.session_id FROM charge_payments p "
+            "LEFT JOIN charge_matches m ON m.payment_id = p.payment_id"
+        )
+        params: list[Any] = []
+        if status:
+            sql += " WHERE p.status = ?"
+            params.append(status)
+        sql += " ORDER BY p.paid_at DESC, p.created_at DESC LIMIT ?"
+        params.append(limit)
+
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+
+        return [
+            {
+                "paymentId": row["payment_id"],
+                "sessionId": row["session_id"],
+                "source": row["source"],
+                "paidAt": row["paid_at"],
+                "amount": row["amount"],
+                "energyKwh": row["energy_kwh"],
+                "stationName": row["station_name"],
+                "orderTail": row["order_tail"],
+                "confidence": row["confidence"],
+                "status": row["status"],
+                "note": row["note"],
+                "imageSha": row["image_sha"],
+            }
+            for row in rows
+        ]
+
+    def get_payment(self, payment_id: str) -> dict[str, Any] | None:
+        for item in self.list_payments(limit=1000):
+            if item["paymentId"] == payment_id:
+                return item
+        return None
+
+    def link_payment(
+        self,
+        session_id: str,
+        payment_id: str,
+        kind: str = "manual",
+        confidence: str = "high",
+    ) -> None:
+        """把一笔支付绑到一次充电上，并回写 session 的金额/来源/站点名。
+
+        三件事必须在**同一事务**里：
+          1. 这笔 payment 原来若绑在别的 session 上，要先把那边解绑；
+          2. `charge_matches` 里 session / payment 都是唯一键，重复绑要先删；
+          3. `charge_sessions.amount` 是汇总口径的唯一真值来源。
+        """
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        with self._connect() as conn:
+            payment = conn.execute(
+                "SELECT amount, source, station_name FROM charge_payments WHERE payment_id = ?",
+                (payment_id,),
+            ).fetchone()
+            if payment is None:
+                raise KeyError(f"payment not found: {payment_id}")
+
+            # ① 这笔支付原来绑过的 session，先解绑
+            old = conn.execute(
+                "SELECT session_id FROM charge_matches WHERE payment_id = ?", (payment_id,)
+            ).fetchone()
+            if old is not None and old["session_id"] != session_id:
+                self._detach(conn, old["session_id"])
+
+            # ② 目标 session 上若已有别的支付，也解绑对方的 payment
+            existing = conn.execute(
+                "SELECT payment_id FROM charge_matches WHERE session_id = ?", (session_id,)
+            ).fetchone()
+            if existing is not None:
+                conn.execute(
+                    "UPDATE charge_payments SET status = 'pending' WHERE payment_id = ?",
+                    (existing["payment_id"],),
+                )
+                conn.execute("DELETE FROM charge_matches WHERE session_id = ?", (session_id,))
+
+            conn.execute(
+                """
+                INSERT INTO charge_matches (session_id, payment_id, kind, confidence, matched_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    payment_id = excluded.payment_id,
+                    kind = excluded.kind,
+                    confidence = excluded.confidence,
+                    matched_at = excluded.matched_at
+                """,
+                (session_id, payment_id, kind, confidence, now),
+            )
+
+            conn.execute(
+                """
+                UPDATE charge_sessions SET
+                    amount = ?,
+                    amount_source = ?,
+                    -- 站点名只可能来自 OCR，已有值不覆盖
+                    station_name = COALESCE(station_name, ?)
+                WHERE session_id = ?
+                """,
+                (float(payment["amount"]), payment["source"], payment["station_name"], session_id),
+            )
+            conn.execute(
+                "UPDATE charge_payments SET status = 'matched' WHERE payment_id = ?",
+                (payment_id,),
+            )
+
+    @staticmethod
+    def _detach(conn: sqlite3.Connection, session_id: str) -> None:
+        """解除某次充电的金额绑定，并把支付退回待确认。"""
+        row = conn.execute(
+            "SELECT payment_id FROM charge_matches WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        if row is not None:
+            conn.execute(
+                "UPDATE charge_payments SET status = 'pending' WHERE payment_id = ?",
+                (row["payment_id"],),
+            )
+        conn.execute("DELETE FROM charge_matches WHERE session_id = ?", (session_id,))
+        conn.execute(
+            "UPDATE charge_sessions SET amount = NULL, amount_source = NULL WHERE session_id = ?",
+            (session_id,),
+        )
+
+    def unlink_session(self, session_id: str) -> bool:
+        with self._connect() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM charge_matches WHERE session_id = ?", (session_id,)
+            ).fetchone()
+            if exists is None:
+                return False
+            self._detach(conn, session_id)
+        return True
+
+    def session_for_payment(self, payment_id: str) -> str | None:
+        """这笔支付当前绑在哪次充电上（没绑返回 None）。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT session_id FROM charge_matches WHERE payment_id = ?", (payment_id,)
+            ).fetchone()
+        return row["session_id"] if row is not None else None
+
+    def session_ids_without_amount(self) -> list[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT session_id FROM charge_sessions WHERE amount IS NULL ORDER BY start_ts DESC"
+            ).fetchall()
+        return [row["session_id"] for row in rows]
+
+    def payment_counts(self, year_month: str | None = None) -> dict[str, int]:
+        """按状态统计支付笔数（界面上的「待确认 N 笔」用它）。"""
+        sql = "SELECT status, COUNT(*) AS n FROM charge_payments"
+        params: list[Any] = []
+        if year_month:
+            sql += " WHERE substr(paid_at, 1, 7) = ?"
+            params.append(year_month)
+        sql += " GROUP BY status"
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return {row["status"]: int(row["n"]) for row in rows}
+
+    def set_payment_status(self, payment_id: str, status: str, note: str | None = None) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE charge_payments SET status = ?, note = COALESCE(?, note) WHERE payment_id = ?",
+                (status, note, payment_id),
+            )
+
+    def clear_payments(self) -> int:
+        with self._connect() as conn:
+            cleared = conn.execute("DELETE FROM charge_payments").rowcount
+            conn.execute("DELETE FROM charge_matches")
+            conn.execute("UPDATE charge_sessions SET amount = NULL, amount_source = NULL")
+        return cleared
 
     # MARK: - 行程
 

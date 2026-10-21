@@ -234,6 +234,17 @@ struct EnergyMonths: Codable {
     var monthEnergyKwh: Double?
 }
 
+/// 月份选择器的通用选项（行程页与充电页共用同一个滚轮弹窗）。
+///
+/// 只有两个字段：`yearMonth`（`currentMonth` 或 `2026-09`）与展示用的 `label`。
+/// 两个页面的月份来源不同（行程来自官方接口、充电来自本地库），
+/// 但"选哪个月"这件事完全一样，没必要各写一套滚轮。
+struct MonthOption: Codable, Hashable, Identifiable {
+    var id: String { yearMonth }
+    var yearMonth: String
+    var label: String
+}
+
 // MARK: - 充电消费
 
 /// 充电服务商
@@ -360,6 +371,203 @@ struct ChargeProviderStat: Codable, Identifiable {
     var displayName: String { provider?.displayName ?? "其他" }
 }
 
+// MARK: - 充入电量（charge_sessions）
+
+/// 一条充电流水（官方「充电记录」）。
+///
+/// `startTime` 用字符串而不是 `Date`：服务端按本地时间字符串存储与分组，
+/// 转 `Date` 再转回来会引入时区偏移，月份切分就对不上了。
+/// 界面只需要"哪天几点"，格式化交给 `ChargeSession` 自己的展示属性。
+struct ChargeSession: Codable, Identifiable {
+    var id: String { sessionId ?? UUID().uuidString }
+
+    var sessionId: String?
+    var startTime: String?
+    var endTime: String?
+    var durationMin: Double?
+    var energyKwh: Double?
+    /// `dc` / `ac` / `unknown`；上游有时给空名，别猜
+    var chargeType: String?
+    var stationName: String?
+    var amount: Double?
+    var amountSource: String?
+
+    var isDC: Bool { chargeType == "dc" }
+    var isAC: Bool { chargeType == "ac" }
+
+    /// 官方记录里没有站点名，所以标题位写「直流快充 / 交流慢充」；
+    /// 将来 OCR 补上站点名后这里会自动换成站点名。
+    var kindText: String {
+        if isDC { return "直流快充" }
+        if isAC { return "交流慢充" }
+        return "充电"
+    }
+
+    var titleText: String {
+        if let stationName, !stationName.isEmpty { return "\(stationName) · \(kindText)" }
+        return kindText
+    }
+
+    /// 单笔平均功率（kW）：总电量 ÷ 时长。
+    /// 比"充了多久"更能说明桩的快慢 —— 同样 50 度，20 分钟和 3 小时是两个世界。
+    var powerKw: Double? {
+        guard let energyKwh, let durationMin, durationMin > 0 else { return nil }
+        return energyKwh / (durationMin / 60)
+    }
+
+    /// 展示用时间：`2026-10-16 22:12:00` → `10-16 22:12`
+    var shortTimeText: String {
+        guard let startTime else { return "--" }
+        let parts = startTime.split(separator: " ")
+        guard parts.count >= 2 else { return startTime }
+        let date = parts[0].split(separator: "-")
+        let clock = parts[1].split(separator: ":")
+        if date.count >= 3, clock.count >= 2 {
+            return "\(date[1])-\(date[2]) \(clock[0]):\(clock[1])"
+        }
+        return startTime
+    }
+}
+
+/// 单月汇总（与后端 `_summarize_month` 同一口径）。
+///
+/// 全部可选：真实侧任何一项都可能缺失（电量缺失、时长缺失、功率算不出来），
+/// 做成非可选会让整页解码失败 —— 那不是"少一个数字"，而是整页空白。
+struct ChargeMonthStat: Codable {
+    var yearMonth: String?
+    var label: String?
+    /// 笔数，**含电量缺失的记录**（充了几次和充了多少度是两件事）
+    var count: Int?
+    var totalKwh: Double?
+    var dcCount: Int?
+    var dcKwh: Double?
+    var acCount: Int?
+    var acKwh: Double?
+    var totalMinutes: Double?
+    var avgKwh: Double?
+    var avgMinutes: Double?
+    var avgPowerKw: Double?
+
+    // ── 金额：只统计有来源的真值，估算单独记，绝不混算 ──
+    var amountTotal: Double?
+    var amountCount: Int?
+    var pricedKwh: Double?
+    var unitPrice: Double?
+    var unpricedCount: Int?
+    var unpricedKwh: Double?
+    var estimatedTotal: Double?
+    var estimatedCount: Int?
+    /// 配不上流水 / 有多条候选的金额笔数（待确认队列）
+    var pendingPayments: Int?
+    var unmatchedPayments: Int?
+
+    var records: [ChargeSession]?
+}
+
+/// 月份清单里的一项（`GET /api/charges/months`）。
+///
+/// `avgMinutes` 是趋势图的第二根轴；没有流水的月份为 nil，
+/// 折线在那里断开 —— 画成 0 会读成"这个月充得特别快"。
+struct ChargeMonthOption: Codable, Identifiable {
+    var id: String { yearMonth ?? UUID().uuidString }
+    var yearMonth: String?
+    var label: String?
+    var count: Int?
+    var kwh: Double?
+    var avgMinutes: Double?
+    var dcCount: Int?
+    var acCount: Int?
+}
+
+struct ChargeMonthsPayload: Codable {
+    var months: [ChargeMonthOption]?
+    var totalCount: Int?
+    var totalKwh: Double?
+    var hasData: Bool?
+}
+
+struct ChargeSyncResult: Codable {
+    var fetched: Int?
+    var inserted: Int?
+    var updated: Int?
+    var total: Int?
+    /// 模拟数据源下为 false：演示数据不落库（落了会污染真实数据）
+    var persisted: Bool?
+}
+
+// MARK: - 充电金额补录（截图识别 / 手工）
+
+/// 截图识别是否可用（服务端有没有配 DEEPSEEK_API_KEY）。
+struct OcrStatus: Codable {
+    var configured: Bool?
+    var model: String?
+}
+
+/// 识别出来的一行金额。**不直接入库** —— 先给用户核对。
+struct OcrRow: Codable, Identifiable {
+    var id: String { "\(startAt ?? "")-\(amount.map { String(format: "%.2f", $0) } ?? "")-\(UUID().uuidString)" }
+
+    var amount: Double?
+    var energyKwh: Double?
+    var startAt: String?
+    var endAt: String?
+    var durationMin: Double?
+    var stationName: String?
+    var confidence: Double?
+    /// 本地防幻觉校验没过（金额离谱、时间倒挂等）
+    var needsReview: Bool?
+    var reviewNote: String?
+    var candidates: [OcrCandidate]?
+}
+
+/// 一笔金额可能对应的充电流水。
+struct OcrCandidate: Codable, Identifiable {
+    var id: String { sessionId ?? UUID().uuidString }
+    var sessionId: String?
+    var startTime: String?
+    var energyKwh: Double?
+    /// `strong`（电量 ±5% 且时间 ±10 分钟）/ `weak`（时间落在窗口内）
+    var kind: String?
+    var confidence: String?
+    var deltaMin: Double?
+
+    var kindText: String {
+        switch kind {
+        case "strong": return "电量与时间都对得上"
+        case "weak":   return "时间接近"
+        default:       return "候选"
+        }
+    }
+}
+
+struct OcrPayload: Codable {
+    var type: String?
+    var imageSha8: String?
+    var rows: [OcrRow]?
+}
+
+/// 一笔金额证据（截图识别或手工录入的产物）。
+struct ChargePayment: Codable, Identifiable {
+    var id: String { paymentId ?? UUID().uuidString }
+    var paymentId: String?
+    var source: String?
+    var paidAt: String?
+    var amount: Double?
+    var energyKwh: Double?
+    var stationName: String?
+    var status: String?          // matched / pending / unmatched
+    /// 已绑定的充电流水（store 侧 LEFT JOIN 带出，界面据此给「解绑」入口）
+    var sessionId: String?
+    var candidates: [OcrCandidate]?
+
+    var isMatched: Bool { status == "matched" }
+}
+
+struct ChargePaymentsPayload: Codable {
+    var payments: [ChargePayment]?
+    var counts: [String: Int]?
+}
+
 // MARK: - 附近充电站
 
 /// 附近充电站列表（`GET /api/stations/nearby` 的 `data`）
@@ -375,6 +583,17 @@ struct NearbyStations: Codable {
     /// 视野内的站点总数（可能大于 `stations.count` —— 后者是取过价的前 N 个）
     var total: Int? = nil
     var count: Int? = nil
+    /// 下一页该从哪个游标开始。
+    ///
+    /// **必须用服务端给的值**，不能用 `stations.count` 推算：带价格类筛选时，
+    /// 中间被扫描掉、不符合条件的候选不返回，游标会大于已加载条数，
+    /// 自己推算就会重复请求同一段。
+    var nextOffset: Int? = nil
+    /// 服务端明确告知还有没有下一页（比 `count < total` 可靠）
+    var hasMore: Bool? = nil
+    /// 用了"必须先取价才能判断"的筛选（停车免费）—— 此时 `total` 只是候选数，
+    /// 不是匹配总数，界面不能拿它当分母。
+    var priceFilterApplied: Bool? = nil
     /// 第三方价格服务是否可用
     var priceAvailable: Bool? = nil
     var stations: [ChargingStation]? = nil
@@ -412,11 +631,9 @@ struct VehicleLocation: Codable {
 
     var hasCoordinate: Bool { available == true && lat != nil && lng != nil }
 
-    /// 坐标文本，如 `30.123456, 120.123456`
-    var coordinateText: String? {
-        guard let lat, let lng else { return nil }
-        return String(format: "%.6f, %.6f", lat, lng)
-    }
+    // 曾有 `coordinateText`（"30.123456, 120.123456"）供位置卡展示，已删除：
+    // 经纬度对人没有信息量，判断"车在哪"只能靠地址与地图，
+    // 把精确坐标摆在屏幕上属于多余暴露。坐标本身仍由 lat/lng 提供给地图。
 
     /// 卡片主文案：优先「好认的地名」，再退回标准地址。
     ///

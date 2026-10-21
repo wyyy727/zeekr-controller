@@ -27,7 +27,7 @@ struct SettingsView: View {
             ScreenContainer(modeText: store.modeBadgeText) {
                 // 顺序对齐 preview/index.html：
                 //   车辆权限 → 服务连接 → 车辆控制 → 关于当前数据 → 待配置项 → 账号与凭据
-                // iOS 独有的「数据刷新」「诊断」放在后面，不与网页抢前面的位置。
+                // iOS 独有的「诊断」放在后面，不与网页抢前面的位置。
                 capabilitySection
                 connectionSection
                 commandSection
@@ -44,7 +44,6 @@ struct SettingsView: View {
                     accountSection
                 }
 
-                pollingSection
                 diagnosticsSection
                 aboutSection
             }
@@ -373,37 +372,6 @@ struct SettingsView: View {
         !model.isSending && model.phone.count == 11 && model.phone.allSatisfy(\.isNumber)
     }
 
-    // MARK: - 轮询
-
-    private var pollingSection: some View {
-        SettingsCard(title: "数据刷新") {
-            VStack(spacing: 10) {
-                HStack {
-                    Text("轮询间隔")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textSecondary(scheme))
-                    Spacer()
-                    Text("\(Int(settings.pollIntervalMinutes)) 分钟")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.textPrimary(scheme))
-                        .monospacedDigit()
-                }
-
-                Slider(
-                    value: Bindable(settings).pollIntervalMinutes,
-                    in: 1...30,
-                    step: 1
-                )
-                .tint(Theme.accent(scheme))
-
-                Text("充电中会自动缩短到 60 秒，及时反映充电进度")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textTertiary(scheme))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
     // MARK: - 车控
 
     private var commandSection: some View {
@@ -712,6 +680,11 @@ private struct SMSCodeSheet: View {
                             // 首页才从「去登录」切回真实数据。
                             await store.refresh()
                             dismiss()
+                            // 登录的目的就是看车况 —— 停在设置页等用户自己点 tab
+                            // 是没必要的额外一步（此前就是这样，登录完像"什么都没发生"）。
+                            // 放在 dismiss 之后：先让 sheet 收起来，再切页面，
+                            // 否则设置页在 sheet 展开时被销毁，弹窗会硬闪一下。
+                            store.selectedTab = .dashboard
                         }
                     }
                 } label: {

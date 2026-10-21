@@ -226,6 +226,56 @@ class MockZeekrClient(ZeekrClient):
         trips.sort(key=lambda t: t["startTime"], reverse=True)
         return trips
 
+    async def get_charge_sessions(self, vin: str | None = None) -> list[dict[str, Any]]:
+        """模拟官方「充电记录」（约 10 个月，形状与真实接口归一化后一致）。
+
+        刻意让数据带上真实世界的几个特征，否则演示页看不出问题：
+          · 当月次数少于历史月（月初/月中视角）；
+          · 直流占绝大多数，交流零星几笔（家充上报本来就少）；
+          · 单次电量差异大（20~90 度），免得平均值看起来像"每次一样多"。
+        站点名与金额**留空** —— 真实接口就没有这两个字段，
+        演示数据如果编出来，上线后用户会以为"本来有、后来丢了"。
+        """
+        now = datetime.now()
+        sessions: list[dict[str, Any]] = []
+
+        for month_offset in range(10):
+            anchor = (now.replace(day=1) - timedelta(days=month_offset * 28)).replace(day=1)
+            year, month = anchor.year, anchor.month
+            last_day = calendar.monthrange(year, month)[1]
+            # 当月只到"今天"为止，历史月给满
+            upper = now.day if month_offset == 0 else last_day
+            rng = _seeded_rng(f"charge-{year}{month:02d}")
+
+            count = rng.randint(3, 6) if month_offset else max(1, min(4, now.day // 8 + 1))
+            for i in range(count):
+                day = rng.randint(1, max(1, upper))
+                start = datetime(
+                    year, month, day,
+                    rng.choice([7, 12, 18, 21, 22]), rng.choice([3, 15, 28, 41, 55]), 0,
+                )
+                is_ac = rng.random() < 0.12
+                power = round(rng.uniform(18, 32) if is_ac else rng.uniform(38, 88), 1)
+                duration = round(power / (rng.uniform(6.5, 7.2) if is_ac else rng.uniform(60, 95)) * 60)
+
+                sessions.append(
+                    {
+                        "sessionId": f"zeekr:mock-{year}{month:02d}-{i}",
+                        "source": "zeekr",
+                        "startTime": start.strftime("%Y-%m-%d %H:%M:%S"),
+                        "endTime": (start + timedelta(minutes=duration)).strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        ),
+                        "durationMin": float(duration),
+                        "energyKwh": power,
+                        "chargeType": "ac" if is_ac else "dc",
+                        "chargeTypeName": "交流" if is_ac else "直流",
+                    }
+                )
+
+        sessions.sort(key=lambda s: s["startTime"], reverse=True)
+        return sessions
+
     async def get_daily_energy(
         self,
         vin: str | None = None,
@@ -387,6 +437,26 @@ class MockZeekrClient(ZeekrClient):
             ("极氪超充·演示站 D", 2.10, 3, 4, 0, 4, True),
             ("演示站 E · 写字楼", 2.60, 0, 6, 6, 0, False),
             ("演示站 F · 客运站", 3.20, 9, 10, 0, 10, False),
+            # 下面这批是为了让**分页真的能翻**：首屏 10 条，
+            # 只有 6 个站的话界面上永远只有一页，"滚动分页"无从验证。
+            ("演示站 G · 小区门口", 3.80, 1, 4, 4, 0, False),
+            ("极氪超充·演示站 H", 4.30, 8, 12, 0, 12, True),
+            ("演示站 I · 医院停车场", 4.90, 4, 8, 8, 0, False),
+            ("演示站 J · 酒店地库", 5.40, 6, 8, 4, 4, False),
+            ("演示站 K · 物流园", 6.10, 8, 12, 0, 12, False),
+            ("演示站 L · 学校对面", 6.70, 2, 6, 6, 0, False),
+            ("极氪超充·演示站 M", 7.30, 5, 8, 0, 8, True),
+            ("演示站 N · 商场 B2", 7.90, 10, 16, 8, 8, False),
+            ("演示站 O · 体育馆", 8.60, 7, 10, 0, 10, False),
+            ("演示站 P · 科技园", 9.20, 3, 6, 0, 6, False),
+            ("演示站 Q · 加油站旁", 9.90, 5, 6, 0, 6, False),
+            ("演示站 R · 农贸市场", 10.50, 2, 4, 4, 0, False),
+            ("极氪超充·演示站 S", 11.30, 6, 10, 0, 10, True),
+            ("演示站 T · 度假村", 12.10, 4, 8, 8, 0, False),
+            ("演示站 U · 汽车城", 12.90, 9, 12, 4, 8, False),
+            ("演示站 V · 火车站", 13.80, 12, 20, 10, 10, False),
+            ("演示站 W · 产业园区", 14.60, 5, 8, 0, 8, False),
+            ("极氪超充·演示站 X", 15.40, 7, 12, 0, 12, True),
         ]
         # 分时电价：(电费, 服务费) 序列，长度 1 = 全天一口价，>1 = 尖峰平谷
         plans: list[list[tuple[float, float]]] = [

@@ -2,7 +2,7 @@
 //  AppStore.swift
 //  ZeekrDash
 //
-//  全局状态：车辆状态、加载、错误、上次刷新；可配置轮询（充电中 60s）
+//  全局状态：车辆状态、加载、错误、上次刷新；轮询固定 5 分钟（充电中 60 秒，与网页一致）
 //
 //  数据来源（DataMode）：
 //
@@ -360,9 +360,13 @@ final class AppStore {
         pollTask = nil
     }
 
-    /// 当前轮询间隔：充电中 60 秒，否则按设置（分钟）
+    /// 当前轮询间隔：充电中 60 秒，否则 5 分钟。
+    ///
+    /// **写死、不做设置项**（原"数据刷新"那栏已去掉）：
+    /// 与网页 `schedulePoll()` 的 `isCharging ? 60000 : 300000` 保持一致 ——
+    /// 两端各有一套可调间隔，只会让人说不清"为什么网页 5 分钟、App 是 20 分钟"。
     private func currentInterval() -> TimeInterval {
-        isCharging ? 60 : settings.pollIntervalMinutes * 60
+        isCharging ? 60 : 300
     }
 
     /// 下发车控指令（供车控面板调用）

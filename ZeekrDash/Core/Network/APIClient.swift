@@ -210,6 +210,12 @@ final class APIClient {
         var request = request
         applyAuth(to: &request)
 
+        // 顶部进度条：四个请求方法最终都走这里，所以一处挂钩就覆盖全部页面。
+        // `defer` 保证**抛错也会收** —— 收不掉的话光带会一直扫，
+        // 那比完全没有指示还糟（看着像卡死）。
+        NetworkActivity.shared.begin()
+        defer { NetworkActivity.shared.end() }
+
         let data: Data
         let response: URLResponse
         do {

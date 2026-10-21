@@ -262,10 +262,114 @@ def test_nearby_endpoint_shape(client):
     assert resp.status_code == 200
 
     data = resp.json()["data"]
-    assert set(data) == {"location", "total", "offset", "count", "priceAvailable", "stations"}
+    assert set(data) == {
+        "location", "total", "offset", "nextOffset", "hasMore",
+        "count", "priceAvailable", "priceFilterApplied", "stations",
+    }
     assert data["count"] == len(data["stations"])
     assert data["total"] >= data["count"]
     assert data["offset"] == 0
+    # 没有筛选时两个游标一致
+    assert data["nextOffset"] == data["count"]
+    assert data["priceFilterApplied"] is False
+
+
+def test_nearby_endpoint_filters_by_connector(client):
+    """只看快充/慢充：在切片**之前**过滤，所以 total 也是筛选后的数。"""
+    base = {"lat": 30.1234, "lng": 120.1234, "limit": 50}
+
+    dc = client.get("/api/stations/nearby", params={**base, "connector": "dc"}).json()["data"]
+    assert dc["stations"], "演示数据里应当有直流站"
+    assert all((s.get("dcCount") or 0) > 0 for s in dc["stations"])
+    assert dc["total"] == len(dc["stations"])
+
+    ac = client.get("/api/stations/nearby", params={**base, "connector": "ac"}).json()["data"]
+    assert ac["stations"], "演示数据里应当有交流站"
+    assert all((s.get("acCount") or 0) > 0 for s in ac["stations"])
+
+    # 不限时的结果里应包含两个子集（演示数据里有"交直流都有"的站，故允许重叠）
+    all_ids = {s["stationId"] for s in client.get("/api/stations/nearby", params=base)
+               .json()["data"]["stations"]}
+    assert {s["stationId"] for s in dc["stations"]} <= all_ids
+    assert {s["stationId"] for s in ac["stations"]} <= all_ids
+
+
+def test_nearby_endpoint_filters_self_operate(client):
+    """只看极氪自营。"""
+    resp = client.get(
+        "/api/stations/nearby",
+        params={"lat": 30.1234, "lng": 120.1234, "limit": 50, "self_only": "true"},
+    )
+    data = resp.json()["data"]
+
+    assert data["stations"]
+    assert all(s.get("selfOperate") is True for s in data["stations"])
+
+
+def test_nearby_endpoint_filters_by_max_price(client):
+    """电价上限：需要先取价才能判断，故标记 priceFilterApplied。
+
+    阈值不写死：演示电价随"当前时段"变化（尖峰平谷），
+    写死就会出现"上午跑过、晚上挂"的测试。改为用未筛选结果的中位价当阈值。
+    """
+    base = {"lat": 30.1234, "lng": 120.1234, "limit": 50}
+    all_stations = client.get("/api/stations/nearby", params=base).json()["data"]["stations"]
+    prices = sorted(
+        (s.get("price") or {}).get("totalPrice")
+        for s in all_stations
+        if isinstance((s.get("price") or {}).get("totalPrice"), (int, float))
+    )
+    assert prices, "演示数据里应当有电价"
+    cap = prices[len(prices) // 2]          # 中位价：至少一半的站应通过
+
+    data = client.get(
+        "/api/stations/nearby", params={**base, "max_price": cap}
+    ).json()["data"]
+
+    assert data["priceFilterApplied"] is True
+    assert data["stations"], "阈值取中位价时不该把结果筛空"
+    for station in data["stations"]:
+        price = (station.get("price") or {}).get("totalPrice")
+        assert isinstance(price, (int, float)), "价格被筛掉的站不该出现在结果里"
+        assert price <= cap
+
+
+def test_nearby_endpoint_strict_price_filter_returns_empty_not_unfiltered(client):
+    """极端严格的价格上限应返回空列表，而不是"筛不到就不筛了"。
+
+    这样写是因为一个很容易犯的错：筛空了就退回未筛选结果，
+    用户会看到一堆高于上限的站，还以为筛选生效了。
+    """
+    resp = client.get(
+        "/api/stations/nearby",
+        params={"lat": 30.1234, "lng": 120.1234, "limit": 50, "max_price": 0.01},
+    )
+    data = resp.json()["data"]
+
+    assert data["priceFilterApplied"] is True
+    assert data["stations"] == []
+    assert data["count"] == 0
+
+
+def test_nearby_endpoint_filters_park_free(client):
+    """停车免费。"""
+    resp = client.get(
+        "/api/stations/nearby",
+        params={"lat": 30.1234, "lng": 120.1234, "limit": 50, "park_free": "true"},
+    )
+    data = resp.json()["data"]
+
+    assert data["stations"]
+    assert all((s.get("price") or {}).get("parkFree") is True for s in data["stations"])
+
+
+def test_nearby_endpoint_rejects_bad_connector(client):
+    """connector 只接受 dc / ac，别的一律 422（不静默当成"不限"）。"""
+    resp = client.get(
+        "/api/stations/nearby",
+        params={"lat": 30.1234, "lng": 120.1234, "connector": "fast"},
+    )
+    assert resp.status_code == 422
 
 
 def test_nearby_endpoint_sorts_by_distance(client):
@@ -303,11 +407,31 @@ def test_nearby_endpoint_pages_by_offset(client):
         assert second["stations"][0]["distanceKm"] >= first["stations"][-1]["distanceKm"]
 
 
+def test_nearby_endpoint_next_offset_has_no_gaps(client):
+    """用服务端给的 `nextOffset` 翻页，跨页既不重复也不漏。
+
+    前端只认这个字段 —— 带价格筛选时它会**大于** `offset + count`
+    （中间扫描掉的候选不返回），自己拿 count 推算就会重复请求同一段。
+    """
+    base = {"lat": 30.1234, "lng": 120.1234, "limit": 2}
+    seen: list[str] = []
+    offset = 0
+
+    for _ in range(6):
+        data = client.get("/api/stations/nearby", params={**base, "offset": offset}).json()["data"]
+        seen.extend(s["stationId"] for s in data["stations"])
+        if not data["hasMore"]:
+            break
+        assert data["nextOffset"] > offset, "nextOffset 不前进会导致无限翻页"
+        offset = data["nextOffset"]
+
+    assert len(seen) == len(set(seen)), f"翻页出现重复站点：{seen}"
+
+
 def test_nearby_endpoint_offset_beyond_end_returns_empty(client):
     """offset 超出总数时返回空列表，而不是报错或回到第一页。
 
-    前端就是靠 `offset + count < total` 判断"没有下一页"的，
-    这里若回退成第一页，会变成无限加载。
+    前端靠 `hasMore` 判断"没有下一页"；这里若回退成第一页，会变成无限加载。
     """
     resp = client.get("/api/stations/nearby",
                       params={"lat": 30.1234, "lng": 120.1234, "offset": 9999})
@@ -316,6 +440,7 @@ def test_nearby_endpoint_offset_beyond_end_returns_empty(client):
     data = resp.json()["data"]
     assert data["stations"] == []
     assert data["count"] == 0
+    assert data["hasMore"] is False
 
 
 def test_nearby_endpoint_rejects_invalid_coordinates(client):

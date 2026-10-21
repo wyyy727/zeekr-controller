@@ -367,13 +367,47 @@ body.is-scrolled .topbar::before {
   font-size: 13.5px; font-weight: 500; line-height: 1.45;
   margin-bottom: 4px; word-break: break-word;
 }
-.loc-sub {
-  font-size: 11px; color: var(--text-3); line-height: 1.6;
-  font-variant-numeric: tabular-nums;
-}
 .loc-note {
   font-size: 11px; color: var(--text-3); margin-top: 7px; line-height: 1.55;
 }
+
+/* ─────────── 加载指示 ─────────── */
+/* 全局请求进度条：任何接口在飞就显示，全部结束就淡出。
+   不挂在 render() 里 —— render 会重建整棵 DOM，每次请求都重绘会让卡片闪；
+   这里直接操作一个固定元素，零重绘。 */
+.net-bar {
+  position: fixed; top: 0; left: 0; right: 0; height: 2px;
+  z-index: 999; pointer-events: none; opacity: 0;
+  transition: opacity .2s ease;
+  background: linear-gradient(90deg,
+    transparent 0%, var(--dian-qing) 45%, var(--dian-qing) 55%, transparent 100%);
+  background-size: 40% 100%; background-repeat: no-repeat;
+  animation: netSweep 1.1s linear infinite;
+}
+.net-bar.on { opacity: 1; }
+@keyframes netSweep {
+  from { background-position: -45% 0; }
+  to   { background-position: 145% 0; }
+}
+
+/* 骨架屏：只在"首次加载、还没有任何数据"时用。
+   已经有一屏数据时不要换成骨架 —— 那会让整块内容闪一下再回来。 */
+.st-skel { display: flex; flex-direction: column; gap: 8px; margin-top: 9px; }
+.skel-row {
+  border-radius: 11px; padding: 12px;
+  background: var(--glass-inner-2);
+  display: flex; flex-direction: column; gap: 7px;
+}
+.skel-line {
+  height: 10px; border-radius: 6px; background: var(--separator);
+  animation: skelPulse 1.2s ease-in-out infinite;
+}
+.skel-line.w70 { width: 70%; }
+.skel-line.w35 { width: 35%; }
+@keyframes skelPulse { 0%, 100% { opacity: .40; } 50% { opacity: .85; } }
+
+/* 已有数据时的刷新：整体压暗 + 暂停交互，比整块清空再重建要稳得多 */
+.st-list.is-busy { opacity: .45; pointer-events: none; transition: opacity .15s; }
 
 /* ─────────── 主卡：电量环形 ─────────── */
 .hero { display: flex; gap: 20px; align-items: center; }
@@ -564,16 +598,6 @@ body.is-scrolled .topbar::before {
     font-size: 10.5px; color: var(--text-3); margin-top: 2px;
   }
 
-/* ─────────── 预约充电卡 ─────────── */
-.plan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
-.plan-item {
-  background: var(--glass-inner-2); border-radius: 11px; padding: 10px 12px;
-}
-  .plan-item .k { font-size: 11px; color: var(--text-3); }
-  .plan-item .v { font-size: 15px; font-weight: 600; margin-top: 2px; }
-  .plan-item .v small { font-size: 11px; font-weight: 400; color: var(--text-3); margin-left: 2px; }
-  .plan-item.off .v { color: var(--text-3); font-weight: 400; }
-
 /* ─────────── 附近充电站 ───────────
    一行一站：左侧站名 + 元信息，右侧当前电价。
    价格刻意用靛青（--dian-qing，本项目"电"的语义色），与消费卡的
@@ -582,7 +606,43 @@ body.is-scrolled .topbar::before {
   display: flex; align-items: center; justify-content: space-between;
   gap: 10px; margin-top: 10px;
 }
-.st-list { display: flex; flex-direction: column; gap: 8px; margin-top: 9px; }
+/* 列表固定高度、自己滚。
+   **卡片本身不动**：手指在列表上滑就翻站点，滑到非列表区域才是翻整页 ——
+   这样"附近有哪些站"始终钉在同一块地方，下面的「充入电量」「充电记录」
+   也不用先滚过一长串站点才能看到。 */
+.st-list {
+  display: flex; flex-direction: column; gap: 8px; margin-top: 9px;
+  max-height: 384px;
+  overflow-y: auto;
+  /* 滚到底不会"惯性穿透"把整页带走 */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+.st-list::-webkit-scrollbar { width: 3px; }
+.st-list::-webkit-scrollbar-thumb {
+  background: var(--separator); border-radius: 3px;
+}
+/* 筛选条：一行横向可滚的 chip。
+   刻意不复用排序的 .seg —— 排序是"多选一"，筛选是"两组互斥 + 两个开关"，
+   混用一个控件会让"点一下是换排序还是加筛选"变得没法解释。 */
+.st-filter {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 8px; overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  padding-bottom: 2px;
+}
+.st-filter::-webkit-scrollbar { display: none; }
+.st-chip {
+  flex: none; border: none; font: inherit; font-size: 11.5px; cursor: pointer;
+  padding: 6px 11px; border-radius: 999px; white-space: nowrap;
+  background: var(--glass-inner-2); color: var(--text-2);
+  transition: background .15s, color .15s;
+}
+.st-chip.on { background: rgba(30,127,194,.14); color: var(--dian-qing); font-weight: 600; }
+.st-chip:active { opacity: .72; }
+.st-chip.reset { color: var(--text-3); }
 .st {
   background: var(--glass-inner-2); border-radius: 11px;
   padding: 11px 12px; cursor: pointer;
@@ -632,6 +692,18 @@ body.is-scrolled .topbar::before {
   color: var(--text-3);
   letter-spacing: .02em;
 }
+/* 展开态：列表自己滚，不再把整页撑长。
+   `overscroll-behavior: contain` 很关键 —— 否则滚到底会"惯性穿透"到页面，
+   手指一滑整页就跳走了。 */
+/* 加载更多 —— 次要操作，用玻璃内层而不是强调色 */
+.st-fold {
+  display: block; width: 100%; margin-top: 9px;
+  border: none; font: inherit; font-size: 11.5px; cursor: pointer;
+  padding: 9px 0; border-radius: 9px;
+  background: var(--glass-inner-2); color: var(--text-2);
+}
+.st-fold:active { opacity: .72; }
+.st-fold .n { color: var(--text-3); margin-left: 4px; }
 .st-actions { display: flex; gap: 8px; margin-top: 9px; }
 .st-btn {
   flex: 1; border: none; font: inherit; font-size: 12px; cursor: pointer;
@@ -965,6 +1037,16 @@ body.is-scrolled .topbar::before {
   display: inline-block; width: 7px; height: 7px; border-radius: 50%;
   margin-right: 6px; vertical-align: middle;
 }
+/* 趋势图的两行说明：图例 + 直流/交流电量拆分。
+   都只是给图补一句，单独成卡太碎，压成一行贴在图上/图下。 */
+.ch-legend {
+  display: flex; flex-wrap: wrap; gap: 4px 14px;
+  margin: 13px 0 2px; font-size: 11px; color: var(--text-3);
+}
+.ch-split {
+  margin-top: 9px; font-size: 11.5px; color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
 /* 月份筛选行：左侧标签 + 原生 select（样式贴近玻璃卡片） */
 .en-month-row { gap: 8px; }
 .en-month-label { display: inline-flex; align-items: center; gap: 5px; }
@@ -975,6 +1057,19 @@ body.is-scrolled .topbar::before {
   padding: 5px 8px 5px 10px; border-radius: 8px; cursor: pointer;
 }
 .en-month-btn svg { width: 12px; height: 12px; opacity: .55; }
+
+/* 充入电量：月份按钮与「同步」并排放在标题行右侧。
+   同步是"打官方网关"的动作，必须能看见、能点，但又不该抢占月份筛选的视觉权重，
+   所以做成同一个尺寸的次要按钮。 */
+.ch-actions { display: inline-flex; align-items: center; gap: 7px; }
+.ch-sync {
+  display: inline-flex; align-items: center;
+  border: none; background: var(--glass-inner-2);
+  color: var(--text-2); font-family: inherit; font-size: 11.5px; font-weight: 500;
+  padding: 5px 10px; border-radius: 8px; cursor: pointer;
+  transition: opacity .15s;
+}
+.ch-sync:disabled { opacity: .55; cursor: default; }
 
 /* ── iOS 风格底部弹层（月份选择）──
    参照 iOS ActionSheet：遮罩 + 圆角面板 + 居中列表 + 独立「取消」 */
@@ -1042,6 +1137,80 @@ body.is-scrolled .topbar::before {
   font-style: normal; margin-left: 6px; padding: 1px 6px; border-radius: 6px;
   background: var(--glass-inner-2); color: var(--text-3); font-size: 10px;
 }
+
+/* ── 金额补录弹层（截图识别核对 / 手工录入 / 待确认配对）──
+   复用 .sheet-root 的遮罩与出场动画，但内容比月份选择高得多（输入框 + 候选列表），
+   所以中间那块必须自己滚 —— 不滚的话超过 5 条就顶破屏幕，底部按钮点不到。 */
+.ocr-body {
+  max-height: min(58vh, 430px); overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 4px 2px 2px;
+}
+.ocr-row {
+  border: 1px solid var(--separator); border-radius: 12px;
+  padding: 10px; margin-bottom: 10px; background: var(--glass-inner-2);
+}
+.ocr-row-top {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12px; color: var(--text-2); margin-bottom: 7px; gap: 8px;
+}
+.ocr-row-top b { color: var(--text-1); font-size: 13px; }
+/* 「需核对」是**黄**不是红：模型读错很常见，但还没到"失败"的程度，
+   用红色会让人以为这条不能要了。 */
+.ocr-warn {
+  font-size: 11.5px; line-height: 1.45; margin-bottom: 8px; padding: 6px 8px;
+  border-radius: 8px; background: rgba(242, 153, 74, .16); color: #A8791A;
+}
+.ocr-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ocr-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ocr-field label { font-size: 10.5px; color: var(--text-3); padding-left: 2px; }
+.ocr-field.wide { grid-column: 1 / -1; }
+.ocr-input {
+  height: 38px; width: 100%; min-width: 0;
+  border: 1px solid var(--separator); border-radius: 9px;
+  background: var(--surface); color: var(--text-1);
+  font-family: inherit; font-size: 14px; padding: 0 9px;
+}
+.ocr-sec { font-size: 11px; color: var(--text-3); margin: 10px 0 6px; }
+.ocr-cands { display: flex; flex-direction: column; gap: 6px; }
+.ocr-cand {
+  text-align: left; min-height: 38px; padding: 6px 9px; cursor: pointer;
+  border: 1px solid var(--separator); border-radius: 9px;
+  background: var(--surface); color: var(--text-1);
+  font-family: inherit; font-size: 12.5px;
+}
+.ocr-cand.on {
+  border-color: var(--accent); color: var(--accent); font-weight: 600;
+  background: rgba(46, 139, 192, .10);
+}
+.ocr-actions { display: flex; gap: 8px; }
+.ocr-actions .sheet-cancel { flex: 1; margin-top: 8px; }
+.ocr-primary {
+  flex: 1; min-height: 48px; margin-top: 8px; border: none; border-radius: 12px;
+  cursor: pointer; background: var(--accent); color: #fff;
+  font-family: inherit; font-size: 15px; font-weight: 600;
+}
+.ocr-primary[disabled] { opacity: .5; cursor: default; }
+@media (prefers-color-scheme: dark) {
+  .ocr-warn { background: rgba(242, 153, 74, .18); color: #F0B95E; }
+}
+
+/* ── 费用卡：已补录的三件套 + 三个补录入口 ── */
+.cost-sub { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 4px 0 2px; }
+.cost-sub .v { font-size: 17px; font-weight: 650; color: var(--text-1); }
+.cost-sub .v small { font-size: 11px; font-weight: 500; color: var(--text-3); margin-left: 2px; }
+.cost-sub .k { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+.cost-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.cost-btn {
+  flex: 1 1 96px; min-height: 42px; padding: 0 10px; cursor: pointer;
+  border: 1px solid var(--separator); border-radius: 11px;
+  background: var(--glass-inner-2); color: var(--text-1);
+  font-family: inherit; font-size: 13px; font-weight: 600;
+}
+.cost-btn.primary { background: var(--accent); border-color: transparent; color: #fff; }
+.cost-btn[disabled] { opacity: .45; cursor: default; }
+/* 落在渐变大卡上时换成半透明白底：那里正文是白字，
+   沿用中性底 + 灰字会直接看不见（行程页的徽标在浅色行里，不受影响）。 */
+.summary-hero .en-demo { background: rgba(255,255,255,.22); color: #fff; }
 canvas { display: block; width: 100%; }
 
 /* ─────────── 行程 / 消费列表 ─────────── */
@@ -1072,16 +1241,6 @@ canvas { display: block; width: 100%; }
 .tag.a { background: rgba(23,124,176,.14); color: var(--dian-qing); }
 .tag.w { background: rgba(240,194,57,.20); color: #A8791A; }
 
-/* ─────────── 服务商分布条 ─────────── */
-.pbar { display: flex; flex-direction: column; gap: 11px; }
-.pbar-row { display: flex; flex-direction: column; gap: 5px; }
-.pbar-head { display: flex; justify-content: space-between; font-size: 12.5px; }
-.pbar-name { color: var(--text-2); }
-.pbar-amt { font-weight: 600; font-variant-numeric: tabular-nums; }
-.pbar-track { height: 7px; background: var(--glass-inner-2); border-radius: 4px; overflow: hidden; }
-.pbar-fill { height: 100%; border-radius: 4px; transition: width .7s cubic-bezier(.4,0,.2,1); }
-.pbar-sub { font-size: 10.5px; color: var(--text-3); }
-
 /* ─────────── 汇总大卡 ─────────── */
 .summary-hero {
   /* 清爽天蓝渐变：天青·深 → 天青 → 靛青，统一蓝色系，干净通透 */
@@ -1101,6 +1260,7 @@ canvas { display: block; width: 100%; }
   padding-top: 13px; border-top: 1px solid rgba(255,255,255,.20);
 }
 .summary-sub .v { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.summary-sub .v small { font-size: 10px; font-weight: 400; opacity: .8; margin-left: 2px; }
 .summary-sub .k { font-size: 10.5px; opacity: .78; margin-top: 2px; }
 
 /* ─────────── 空态 / 占位 ─────────── */
@@ -1339,6 +1499,9 @@ canvas { display: block; width: 100%; }
 </style>
 </head>
 <body>
+
+<!-- 全局请求进度条（有接口在飞才显示） -->
+<div id="netBar" class="net-bar" aria-hidden="true"></div>
 
 <!-- ⚠️ 页面主体结构与样式与 preview/index.html **完全一致**。
      调试台的全部界面都在右下角悬浮面板里 —— 不占页面布局、
@@ -1604,8 +1767,32 @@ const state = {
      'currentMonth' = 本月；其余形如 '2026-09' */
   months: [],
   yearMonth: 'currentMonth',
-  summary: null,
-  records: [],
+  /* ── 充入电量（官方「充电记录」）──
+     数据源 `GET /api/charges/sessions`：只有电量 / 时长 / 交直流。
+     **没有金额、没有站点名** —— 车不知道电价，站点也不在这条链路上，
+     所以这里一个金额数字都不显示（只在需要时标明"待补录"）。
+     金额要等截图识别接入，见 docs/REPORT-charge-bill-import.md。 */
+  charge: null,
+  chargeMonths: [],
+  chargeMonth: 'currentMonth',
+  /* 本地库里有没有任何流水。空 ⇒ loadCharges() 会自动同步一次，
+     之后靠卡片上的「同步」按钮按需刷新（不每次进页面都打网关）。 */
+  chargeHasData: false,
+  chargeAutoSynced: false,
+  chargeSyncing: false,
+  chargeLoading: false,
+  /* ── 金额补录 ──
+     官方只有电量没有金额，金额靠「截图识别（主线）/ 手工录入（零依赖）」补。
+     三条约定：
+       1. 识别结果**先给人看再入库**（模型会把服务费原价当金额）；
+       2. 配不上的支付**绝不丢**，停在 pending / unmatched 等人点一下；
+       3. 截图只在内存里走一趟（base64 → 上游），不落盘、不进日志。 */
+  ocrConfigured: null,   // null=还不知道；false=后端没配 DEEPSEEK_API_KEY
+  ocrBusy: false,
+  ocrRows: null,         // 待核对的识别结果
+  ocrImageSha: '',
+  ocrPick: {},           // 行序号 → 指定的充电流水 sessionId
+  payments: [],          // 待确认 / 未配对的支付证据（GET /api/charges/payments）
   days: 7,
   health: null,
   /* 登录状态（GET /api/auth/status）。
@@ -1622,8 +1809,6 @@ const state = {
      permissions 是**原始凭据**，供设置页如实展示"这台车开通了什么" ——
      没有它，"某个按钮为什么不见了"就没法解释。 */
   permissions: null,
-  /* 预约充电 / 出行计划（/ms-charge-manage/api/v1.0/charge/getChargingPlanNew） */
-  chargePlan: null,
   /* ── 车辆位置（GET /api/vehicle/location）──
      这是**最后一次上报的位置**，不是实时位置：车静止时网关不更新坐标，
      `reportedAt` 可能滞后几十分钟（实测抓到过滞后 39 分钟的）。
@@ -1641,17 +1826,42 @@ const state = {
      用户坐标发给第三方（服务端只把 stationId 转出去）。 */
   stations: null,
   /* 滑动分页状态。
-     `stationsOffset` 是已加载条数，`stationsHasMore` 由
-     `已加载 < total` 推导；`stationsLoadingMore` 只防重复触发。
-     分页在服务端做切片（极氪气泡接口本身不分页，一次给全视野）。 */
+     `stationsNextOffset` 是**服务端给的**下一页游标，不要自己用
+     `已加载条数` 推算：带电价筛选时，中间扫描掉但不符合条件的候选不会返回，
+     于是 nextOffset > 已加载条数 —— 自己推算会重复请求同一段。
+     `stationsHasMore` 也用服务端字段，不再用 `count < total` 猜。 */
   stationsOffset: 0,
+  stationsNextOffset: 0,
   stationsHasMore: false,
   stationsLoadingMore: false,
+  /* 请求序号。每次重新查询 +1，`await` 回来后只有**序号仍然最新**的那次才允许写状态。
+     为什么必须有：取价是按站请求第三方网关的，一页要 2–4 秒，
+     用户连点两个筛选 chip 必然出现两个并发请求。没有序号时，
+     "慢的那个"（更早发出、条件更旧）后到，会把新筛选的结果覆盖掉 ——
+     页面上的 chip 是「快充 + 自营」，列表却是「只有快充」的数据。 */
+  stationsSeq: 0,
+  /* 筛选条件。**筛选在服务端做**（在切片之前），所以改条件必须重新请求，
+     不能只在前端过滤已加载的这 10 条 —— 否则"筛出 2 个"会被误读成附近只有 2 个。
+     枪型 / 自营：零成本，服务端在切片前过滤，total 是真实条数；
+     电价 / 停车免费：必须先取价，服务端受扫描上限约束，
+     此时 total 只是候选数，故用 `stationsPriceFiltered` 区分文案。 */
+  stationFilter: { connector: '', maxPrice: null, selfOnly: false, parkFree: false },
+  stationsPriceFiltered: false,
+  /* 列表不再折叠：卡片高度固定、列表自己滚（CSS `.st-list`）。
+     "展开全部"已去掉 —— 卡片一进来就是最终高度，下面的内容不会因翻页被推走。 */
   /* `priceAvailable=false` 表示**价格服务整体不可用**，不是"这些站都免费"。
      两者在界面上必须能区分 —— 把缺价格显示成 0 元是安全事故级误导。 */
   stationsPriceOk: true,
   stationsTotal: 0,
   stationsLoading: false,
+  /* 各页面的"首次加载中"标志。
+     为什么要单独有：`state.status` 为 null 有两种含义 —— "正在请求" 和 "请求完了没数据"。
+     早先把两者当成一回事，于是首次进入时会看到「尚未获取到车辆数据，
+     请确认 Python 服务已启动」，明明后端好好的。
+     注意：这些只用于**内容区**的文案，跨页面的通用反馈靠顶部那条 `#netBar`。 */
+  statusLoading: false,
+  chargeLoading: false,
+  energyLoading: false,
   /* 定位状态机：idle → locating → ok / denied / unsupported / error */
   locStatus: 'idle',
   locError: '',
@@ -1701,6 +1911,153 @@ function mockEnergy(n) {
     fastChargeCount: Math.max(1, Math.round(n / 5)),
     slowChargeCount: 0,
     series,
+  };
+}
+
+/* ── 演示用的充电流水（10 个月）──
+
+   刻意与真实接口保持**同一个缺口**：没有金额、没有站点名。
+   演示数据如果编出金额，接上真后端后用户会以为"功能丢了"。
+   数值是确定性的（不随机），这样每次打开同一月份的图都一样，便于对照样式。
+
+   统计口径由 `summarizeCharge` 统一计算，与后端 `_summarize_month` 一一对应 ——
+   两处口径不一致的话，最典型的表现就是"演示和真机的次数对不上"。 */
+function mockCharge() {
+  const pad = (v) => String(v).padStart(2, '0');
+  const now = new Date();
+  const kwhPool = [61.9, 42.3, 78.4, 30.6, 55.2, 88.1, 24.9, 67.5, 36.4, 52.8];
+  const sessions = [];
+
+  for (let m = 0; m < 10; m += 1) {
+    const anchor = new Date(now.getFullYear(), now.getMonth() - m, 1);
+    const year = anchor.getFullYear();
+    const mon = anchor.getMonth() + 1;
+    const lastDay = new Date(year, mon, 0).getDate();
+    // 当月只回溯到"昨天"：演示数据里不该出现还没发生的充电
+    const upper = m === 0 ? Math.max(1, now.getDate() - 1) : lastDay;
+    const count = m === 0 ? Math.max(1, Math.min(4, Math.floor(now.getDate() / 8) + 1)) : 3 + ((m * 2) % 3);
+
+    for (let i = 0; i < count; i += 1) {
+      const kwh = kwhPool[(m * 3 + i) % kwhPool.length];
+      const isAc = (m + i) % 11 === 4;
+      // 直流按 ~75 kW、交流按 ~7 kW 反推时长，保证"平均功率"这一列看起来合理
+      const minutes = Math.round((kwh / (isAc ? 7 : 75)) * 60);
+      const day = Math.max(1, Math.min(upper, 1 + ((m * 7 + i * 5) % upper)));
+      const hour = [7, 12, 18, 21, 22][(m + i) % 5];
+      const minute = [3, 15, 28, 41, 55][(m * 2 + i) % 5];
+
+      sessions.push({
+        sessionId: `mock-${year}${pad(mon)}-${i}`,
+        startTime: `${year}-${pad(mon)}-${pad(day)} ${pad(hour)}:${pad(minute)}:00`,
+        durationMin: minutes,
+        energyKwh: kwh,
+        chargeType: isAc ? 'ac' : 'dc',
+        stationName: null,
+        amount: null,
+        amountSource: null,
+      });
+    }
+  }
+  sessions.sort((a, b) => (a.startTime < b.startTime ? 1 : -1));
+
+  /* 月份清单：把"当月"换成 currentMonth，与接口保持一致 */
+  const currentYm = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+  const seen = [...new Set(sessions.map((s) => s.startTime.slice(0, 7)))].sort().reverse();
+  const months = seen.map((ym) => {
+    const st = summarizeCharge(ym, sessions);
+    return {
+      yearMonth: ym === currentYm ? 'currentMonth' : ym,
+      label: ym === currentYm ? '本月' : `${ym.slice(0, 4)}年${Number(ym.slice(5, 7))}月`,
+      count: st.count,
+      kwh: st.totalKwh,
+      avgMinutes: st.avgMinutes,
+      dcCount: st.dcCount,
+      acCount: st.acCount,
+    };
+  });
+
+  return { sessions, months };
+}
+
+/* 按月汇总（与后端 `_summarize_month` 同一口径）。
+   `count` 含"电量缺失"的记录 —— 充了几次和充了多少度是两件事。 */
+function summarizeCharge(ym, sessions) {
+  const rows = sessions.filter((s) => String(s.startTime).slice(0, 7) === ym);
+  let totalKwh = 0;
+  let totalMinutes = 0;
+  let dcCount = 0;
+  let dcKwh = 0;
+  let acCount = 0;
+  let acKwh = 0;
+
+  rows.forEach((r) => {
+    const kwh = Number(r.energyKwh) || 0;
+    totalKwh += kwh;
+    totalMinutes += Number(r.durationMin) || 0;
+    if (r.chargeType === 'dc') { dcCount += 1; dcKwh += kwh; }
+    if (r.chargeType === 'ac') { acCount += 1; acKwh += kwh; }
+  });
+
+  return {
+    yearMonth: ym,
+    label: `${ym.slice(0, 4)}年${Number(ym.slice(5, 7))}月`,
+    count: rows.length,
+    totalKwh: +totalKwh.toFixed(1),
+    dcCount,
+    dcKwh: +dcKwh.toFixed(1),
+    acCount,
+    acKwh: +acKwh.toFixed(1),
+    totalMinutes: Math.round(totalMinutes),
+    avgKwh: rows.length ? +(totalKwh / rows.length).toFixed(1) : 0,
+    avgMinutes: rows.length ? Math.round(totalMinutes / rows.length) : 0,
+    avgPowerKw: totalMinutes > 0 ? +(totalKwh / (totalMinutes / 60)).toFixed(1) : null,
+    amountCount: 0,
+    amountTotal: null,
+    // 估算金额与真值分开记：混算会让"每度多少钱"变成第三种数字
+    estimatedCount: 0,
+    estimatedTotal: null,
+    records: rows,
+  };
+}
+
+/* 生成一条演示站点。
+   存在的意义：只有 4 个站时，界面上「折叠 6 条 / 展开全部 / 内层滚动 / 分页」
+   全都看不出来 —— 没数据就没法验证交互。所以把演示数据扩到能翻三页的量。
+   字段结构照抄真实接口：`price: null` 用来表现"取不到价格 ≠ 免费"。 */
+function demoStation(index, name, distanceKm, opt) {
+  const bearing = ((index * 47) % 360) * Math.PI / 180;
+  const latOffset = (distanceKm / 111) * Math.cos(bearing);
+  const lngOffset = (distanceKm / (111 * Math.cos(31.23 * Math.PI / 180))) * Math.sin(bearing);
+  const electric = Math.round(opt.price * 0.6 * 100) / 100;
+  const service = Math.round((opt.price - electric) * 100) / 100;
+
+  return {
+    stationId: `mock-station-${index}`,
+    name,
+    address: `演示路 ${index} 号`,
+    lat: Number((31.2304 + latOffset).toFixed(6)),
+    lng: Number((121.4737 + lngOffset).toFixed(6)),
+    distanceKm,
+    availableCount: opt.available,
+    totalCount: opt.total,
+    ableDcCount: Math.min(opt.available, opt.dc),
+    dcCount: opt.dc,
+    ableAcCount: Math.max(0, opt.available - Math.min(opt.available, opt.dc)),
+    acCount: opt.ac,
+    selfOperate: !!opt.self,
+    score: opt.score == null ? 4.0 : opt.score,
+    tags: ['演示数据'],
+    price: opt.price == null ? null : {
+      totalPrice: opt.price,
+      feeElectric: electric,
+      serviceFee: service,
+      currentPeriod: '00:00-23:59',
+      periods: [{ timeFrame: '00:00-23:59', electric, service, total: opt.price }],
+      parkingFee: opt.parkFree ? '充电期间免费' : '按停车场标准收费',
+      parkFree: !!opt.parkFree,
+      holdFee: false,
+      feeDesc: '演示数据：全天一口价',
+    },
   };
 }
 
@@ -1789,14 +2146,6 @@ const MOCK = {
   })(),
   energy: mockEnergy(new Date().getDate()),   // 汇总卡：本月 1 日至今
   energyWindow: mockEnergy(7),                // 每日图表：默认近 7 天
-  /* 预约充电计划样例 */
-  chargePlan: {
-    enabled: true,
-    startTime: '23:30',
-    endTime: '06:30',
-    targetSoc: 90,
-    mode: '谷电优先',
-  },
   /* 车辆位置样例：结构**与 /api/vehicle/location 的返回逐字段一致**。
      地址一律带「演示」字样 —— 模拟数据不该长得像真实地点。
      `mapAvailable` 刻意是 false：演示模式不联网，也就不该去请求地图图片。 */
@@ -1874,6 +2223,29 @@ const MOCK = {
       selfOperate: false, score: 4.9, tags: ['演示数据'],
       price: null,
     },
+    /* 以下 10 个是为"能看出分页"而补的演示站：
+       折叠只露 6 条 → 「展开全部（还有 8 站）」→ 展开后内层滚动 → 连后端时才分页。
+       字段刻意拉开差异（快/慢充、自营、电价、停车），筛选一开就能看出效果。 */
+    demoStation(5, '演示站 E · 写字楼', 0.48,
+      { available: 3, total: 6, ac: 6, dc: 0, self: false, price: 1.20, parkFree: true, score: 4.2 }),
+    demoStation(6, '演示站 F · 高速服务区', 0.62,
+      { available: 12, total: 16, ac: 0, dc: 16, self: true, price: 1.35, parkFree: true, score: 4.5 }),
+    demoStation(7, '演示站 G · 小区门口', 0.95,
+      { available: 1, total: 4, ac: 4, dc: 0, self: false, price: 0.95, parkFree: true, score: 3.9 }),
+    demoStation(8, '演示站 H · 加油站旁', 1.15,
+      { available: 5, total: 6, ac: 0, dc: 6, self: false, price: 1.72, parkFree: false, score: 4.0 }),
+    demoStation(9, '演示站 I · 医院停车场', 1.62,
+      { available: 4, total: 8, ac: 8, dc: 0, self: false, price: 1.58, parkFree: false, score: 4.3 }),
+    demoStation(10, '演示站 J · 酒店地库', 1.88,
+      { available: 6, total: 8, ac: 4, dc: 4, self: false, price: 1.88, parkFree: false, score: 4.4 }),
+    demoStation(11, '演示站 K · 物流园', 2.40,
+      { available: 8, total: 12, ac: 0, dc: 12, self: true, price: 1.12, parkFree: true, score: 4.1 }),
+    demoStation(12, '演示站 L · 学校对面', 2.75,
+      { available: 2, total: 6, ac: 6, dc: 0, self: false, price: 1.05, parkFree: false, score: 3.7 }),
+    demoStation(13, '演示站 M · 商场 B2', 3.60,
+      { available: 10, total: 16, ac: 8, dc: 8, self: false, price: 2.05, parkFree: false, score: 4.6 }),
+    demoStation(14, '演示站 N · 体育馆', 5.20,
+      { available: 7, total: 10, ac: 0, dc: 10, self: false, price: 2.20, parkFree: false, score: 4.0 }),
   ],
   trips: [
     { startTime: '2026-09-17 08:15', startPlace: '家 · 锦绣江南', endPlace: '公司 · 张江高科', distanceKm: 12.4, energyKwh: 2.10, consumption: 16.9, durationMinutes: 28,
@@ -1923,42 +2295,9 @@ const MOCK = {
     { date: '2026-09-16', consumption: 16.3, distanceKm: 25.0, energyKwh: 4.08 },
     { date: '2026-09-17', consumption: 15.7, distanceKm: 13.5, energyKwh: 2.12 },
   ],
-  summary: {
-    totalAmount: 1286.50,
-    totalCount: 47,
-    totalEnergyKwh: 786.4,
-    avgUnitPrice: 1.64,
-    byProvider: [
-      { provider: 'teld', providerName: '特来电', amount: 354.20, count: 14 },
-      { provider: 'zeekr', providerName: '极氪极充', amount: 286.40, count: 8 },
-      { provider: 'starCharge', providerName: '星星充电', amount: 241.80, count: 11 },
-      { provider: 'stateGrid', providerName: '国家电网', amount: 198.50, count: 7 },
-      { provider: 'eCharging', providerName: '小桔充电', amount: 132.10, count: 5 },
-      { provider: 'other', providerName: '其他', amount: 73.50, count: 2 },
-    ],
-    monthly: [
-      { month: '2026-04', amount: 198.30 },
-      { month: '2026-05', amount: 226.50 },
-      { month: '2026-06', amount: 254.10 },
-      { month: '2026-07', amount: 201.80 },
-      { month: '2026-08', amount: 242.60 },
-      { month: '2026-09', amount: 163.20 },
-    ],
-  },
-  records: [
-    { timestamp: '2026-09-16 21:30', amount: 38.50, merchant: '特来电-浦东世纪公园站', provider: 'teld', providerName: '特来电', channel: 'wechat' },
-    { timestamp: '2026-09-14 19:42', amount: 32.10, merchant: '极氪极充-万象城', provider: 'zeekr', providerName: '极氪极充', channel: 'alipay' },
-    { timestamp: '2026-09-12 15:20', amount: 45.80, merchant: '星星充电-青浦奥特莱斯', provider: 'starCharge', providerName: '星星充电', channel: 'wechat' },
-    { timestamp: '2026-09-09 20:15', amount: 28.40, merchant: '小桔充电-虹桥枢纽', provider: 'eCharging', providerName: '小桔充电', channel: 'alipay' },
-    { timestamp: '2026-09-07 18:55', amount: 33.20, merchant: '国家电网-e充电(静安)', provider: 'stateGrid', providerName: '国家电网', channel: 'wechat' },
-    { timestamp: '2026-09-05 22:10', amount: 41.60, merchant: '特来电-张江高科', provider: 'teld', providerName: '特来电', channel: 'alipay' },
-    { timestamp: '2026-09-02 19:30', amount: 36.90, merchant: '极氪极充-大宁', provider: 'zeekr', providerName: '极氪极充', channel: 'wechat' },
-    { timestamp: '2026-08-30 20:45', amount: 29.70, merchant: '星星充电-中山公园', provider: 'starCharge', providerName: '星星充电', channel: 'alipay' },
-    { timestamp: '2026-08-27 21:05', amount: 31.20, merchant: '特来电-陆家嘴', provider: 'teld', providerName: '特来电', channel: 'wechat' },
-    { timestamp: '2026-08-24 18:30', amount: 27.40, merchant: '小桔充电-徐家汇', provider: 'eCharging', providerName: '小桔充电', channel: 'alipay' },
-    { timestamp: '2026-08-21 19:50', amount: 34.80, merchant: '国家电网-e充电(浦东)', provider: 'stateGrid', providerName: '国家电网', channel: 'wechat' },
-    { timestamp: '2026-08-18 20:20', amount: 38.10, merchant: '极氪极充-前滩', provider: 'zeekr', providerName: '极氪极充', channel: 'alipay' },
-  ],
+  /* 充入电量（演示）：`sessions` 是逐笔流水，`months` 是月份清单。
+     与真实接口同一个缺口 —— 没有金额、没有站点名。 */
+  charge: mockCharge(),
   health: { mode: 'mock', configured: true, allowCommands: true, missingKeys: [] },
 };
 
@@ -2061,7 +2400,36 @@ function authedUrl(path) {
   return url + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(QUERY_TOKEN);
 }
 
+/* ── 全局请求指示器 ──
+   任何接口开始 → 计数 +1，结束 → −1；计数 > 0 就点亮页面顶部那条 2px 进度条。
+   放在 api() 这一层，车况 / 行程 / 充电 / 设置**全都自动有反馈**，
+   不用每个页面各写一份 loading 状态（写多了必然漏，比如筛选时就没有）。 */
+let NET_INFLIGHT = 0;
+function netBegin() {
+  NET_INFLIGHT += 1;
+  const el = document.getElementById('netBar');
+  if (el) el.classList.add('on');
+}
+function netEnd() {
+  NET_INFLIGHT = Math.max(0, NET_INFLIGHT - 1);
+  if (NET_INFLIGHT > 0) return;   // 还有请求在飞，别提前收
+  const el = document.getElementById('netBar');
+  if (el) el.classList.remove('on');
+}
+
+/* 对外只有一个 api()，真正的实现在 apiInner()。
+   这样包一层 try/finally 就能保证**抛异常也会收掉进度条** ——
+   失败路径上忘了收，进度条会一直转，比没有更糟。 */
 async function api(path, opts) {
+  netBegin();
+  try {
+    return await apiInner(path, opts);
+  } finally {
+    netEnd();
+  }
+}
+
+async function apiInner(path, opts) {
   // 模拟数据模式：不发起任何网络请求（调试台默认为 false）
   // 未登录前不调任何数据接口。live 模式下服务端要求登录态，调了只会失败，
   // 还会把服务端日志刷满无意义的报错 —— 登录相关的几个接口走 apiNoMock()，
@@ -2192,7 +2560,11 @@ function drawLineChart(canvas, points, opts = {}) {
        fillTop     面积渐变起始色
        decimals    数值保留位数
        showValue   是否在点上标数值（默认关，开了会给顶部留出空间）
-       xLabelStep  每隔几个点标一个日期（不传则自动，最多约 7 个） */
+       xLabelStep  每隔几个点标一个日期（不传则自动，最多约 7 个）
+       highlight   高亮第几个点（其余降到 34% 透明度）——
+                   图里有全部月份、上方数字只有所选月份时，用它对齐"看的是哪根"
+       series2     第二根轴：{ values, color, decimals }。与主系列共用横轴、
+                   独立纵轴（在右侧），用来叠一条量纲不同的折线（如"单次时长"） */
   const dpr = window.devicePixelRatio || 1;
   const showValue = opts.showValue === true;
   const cssH = opts.height || 160;
@@ -2215,7 +2587,9 @@ function drawLineChart(canvas, points, opts = {}) {
   const ctx = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
 
-  const padL = 34, padR = 12;
+  /* 第二根轴的刻度要占右侧一列，否则右轴数字会被裁掉 */
+  const padL = 34;
+  const padR = opts.series2 ? 46 : 12;
   const padT = showValue ? 26 : 14;
   const padB = 26;
   const w = cssW - padL - padR;
@@ -2290,6 +2664,10 @@ function drawLineChart(canvas, points, opts = {}) {
       barGrad.addColorStop(0, stroke);
       barGrad.addColorStop(1, opts.fillTop || 'rgba(124,92,252,.28)');
 
+      /* 非高亮月份压暗：图里画的是全部月份，上方大数只有所选月份，
+         不标出来会让人以为大数对应的是最右边那根。 */
+      if (opts.highlight != null) ctx.globalAlpha = opts.highlight === i ? 1 : 0.34;
+
       ctx.beginPath();
       ctx.moveTo(px, baseline);
       ctx.lineTo(px, top + radius);
@@ -2300,6 +2678,7 @@ function drawLineChart(canvas, points, opts = {}) {
       ctx.closePath();
       ctx.fillStyle = barGrad;
       ctx.fill();
+      if (opts.highlight != null) ctx.globalAlpha = 1;
     });
   } else {
     // 面积渐变（颜色跟随折线，两张图各自成一套色）
@@ -2329,6 +2708,54 @@ function drawLineChart(canvas, points, opts = {}) {
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     ctx.stroke();
+  }
+
+  /* ── 第二系列（右轴）─────────────────────────────
+     量纲不同 ⇒ 必须两套刻度，硬套左轴会把这条线压成一条贴底的直线。
+     顶端留 35% 余量：主系列柱顶的数值标注在 ~91% 高度，
+     这条线的峰值落在 ~74%，两组数字才不会叠在一起。
+     `null` 处断开（MoveTo 重开一段）—— 画成 0 会读成"这个月充得特别快"。 */
+  const s2 = opts.series2;
+  if (s2 && Array.isArray(s2.values) && s2.values.length === points.length) {
+    const nums = s2.values.filter((v) => v !== null && !Number.isNaN(v));
+    if (nums.length) {
+      ctx.save();
+      const max2 = Math.max(...nums, 1) * 1.35;
+      const y2 = (v) => padT + h - (v / max2) * h;
+      const color2 = s2.color || '#E8A33D';
+
+      ctx.strokeStyle = color2;
+      ctx.lineWidth = 1.8;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      let started = false;
+      s2.values.forEach((v, i) => {
+        if (v === null || Number.isNaN(v)) { started = false; return; }
+        if (started) ctx.lineTo(x(i), y2(v));
+        else { ctx.moveTo(x(i), y2(v)); started = true; }
+      });
+      ctx.stroke();
+
+      ctx.fillStyle = color2;
+      s2.values.forEach((v, i) => {
+        if (v === null || Number.isNaN(v)) return;
+        ctx.beginPath();
+        ctx.arc(x(i), y2(v), 2.6, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // 右轴刻度：与左轴共用同一组网格线，读数才对得上
+      ctx.font = '10px -apple-system, sans-serif';
+      ctx.fillStyle = color2;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      for (let i = 0; i <= 3; i += 1) {
+        const gy = padT + (h / 3) * i;
+        ctx.fillText(((max2 / 3) * (3 - i)).toFixed(s2.decimals ?? 1), padL + w + 6, gy);
+      }
+      ctx.restore();
+    }
   }
 
   // 数值标注（柱顶 / 点上方共用）
@@ -2414,16 +2841,9 @@ const SVG = {
   pin:    '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-5.6 7-11a7 7 0 1 0-14 0c0 5.4 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg>',
   check:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   chevron:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 10l4 4 4-4"/></svg>',
+  // 截图识别：取景框四角 + ¥
+  scan:   '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8V5.5A1.5 1.5 0 0 1 4.5 4H8M16 4h3.5A1.5 1.5 0 0 1 21 5.5V8M21 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 21H4.5A1.5 1.5 0 0 1 3 19.5V16"/><path d="M9.6 15.2V9.6h5.6M12.4 9.6v5.6"/></svg>',
 };
-const PROVIDER_COLORS = {
-  zeekr: '#1E7FC2',
-  teld: '#2E8BC0',
-  starCharge: '#F2994A',
-  stateGrid: '#4C8DAE',
-  eCharging: '#16B89A',
-  other: '#94A3B2',
-};
-
 /* ═══════════════════════════════════════════════
    视图：车况
    ═══════════════════════════════════════════════ */
@@ -2431,9 +2851,11 @@ const PROVIDER_COLORS = {
    三条底线：
    1. **位置不是实时的**：车静止时网关不更新坐标（实测 15 条快照只有 3 个位置点），
       标题右侧必须写出上报时间，否则会被当成"车现在就在这"。
-   2. **没配地图 key ≠ 没有位置**：照常显示坐标，只是没有地址与地图，
+   2. **没配地图 key ≠ 没有位置**：照常显示上报时间与提示，只是没有地址与地图，
       不要整块消失，也不要拿一句"服务异常"糊过去。
-   3. 地图图片取不到就隐藏（onerror），地址与坐标仍然可读 —— 位置卡的价值在文字。 */
+   3. 地图图片取不到就隐藏（onerror），地址仍然可读 —— 位置卡的价值在文字。
+   ⚠️ 经纬度不展示：`31.2035, 121.5858` 这类数字对人没有信息量，
+      判断"车在哪"只能靠地址与地图；精确坐标摆在屏幕上是多余暴露。 */
 function vehicleLocationCard() {
   const loc = state.location;
 
@@ -2455,7 +2877,8 @@ function vehicleLocationCard() {
   /* 优先用 recommend：它是「中钢国际广场」这种好认的描述，
      标准地址（省市区路门牌）放在下面一行补充。 */
   const title = addr ? (addr.recommend || addr.address) : null;
-  const coord = Number(loc.lat).toFixed(6) + ', ' + Number(loc.lng).toFixed(6);
+  /* 经纬度**不展示**：31.2035, 121.5858 这种数字对人没有任何信息量，
+     想判断"车在哪"只能靠地址与地图；反而把精确坐标摆在屏幕上是多余的暴露。 */
 
   /* 只有服务端确认"有 key"且当前是真实数据模式才请求图片：
      演示模式不联网，也不该白蹭一次配额。 */
@@ -2474,13 +2897,12 @@ function vehicleLocationCard() {
              onerror="this.style.display='none'">`
       : ''}
     <div class="loc-addr">${title ? esc(title) : (loc.mapAvailable === true ? '地址暂时取不到' : '未配置地图服务')}</div>
-    <div class="loc-sub">${esc(coord)}</div>
     ${addr && addr.address && addr.recommend && addr.recommend !== addr.address
       ? `<div class="loc-note">${esc(addr.address)}</div>` : ''}
     ${!addr
       ? `<div class="loc-note">${loc.mapAvailable === true
             ? '地图服务已配置，但这次没取到地址（可能是第三方额度用完或网络问题）。稍后会自动重试。'
-            : '尚未配置腾讯地图 key，仅显示坐标。在服务端 <code>.env</code> 填入 <code>TENCENT_MAP_KEY</code> 并重启，即可显示地址与地图图。'}</div>`
+            : '尚未配置腾讯地图 key，只显示「最后上报」时间。在服务端 <code>.env</code> 填入 <code>TENCENT_MAP_KEY</code> 并重启，即可显示地址与地图图。'}</div>`
       : ''}
     <div class="loc-note">位置取自车辆最后一次上报，车辆移动后可能不会立即更新。</div>
   </div>`;
@@ -2489,6 +2911,14 @@ function vehicleLocationCard() {
 function renderDashboard() {
   const s = state.status;
   if (!s) {
+    /* 加载中 ≠ 没数据。首次进入时后端明明是好的，却显示「请确认服务已启动」
+       —— 那是在把"还没回来"说成"坏了"。 */
+    if (state.statusLoading) {
+      return `<div class="empty">
+        <div class="ico">${SVG.car}</div>
+        <div>正在读取车辆数据…</div>
+      </div>`;
+    }
     return `<div class="empty">
       <div class="ico">${SVG.car}</div>
       <div>尚未获取到车辆数据</div>
@@ -2838,6 +3268,13 @@ function renderTrips() {
   const isCurrent = !state.yearMonth || state.yearMonth === 'currentMonth';
 
   if (!month || !windowStats) {
+    // 同车况页：加载中不要显示成"暂无数据"
+    if (state.energyLoading) {
+      return `<div class="empty">
+        <div class="ico">${SVG.chart}</div>
+        <div>正在加载能耗数据…</div>
+      </div>`;
+    }
     return `<div class="empty">
       <div class="ico">${SVG.chart}</div>
       <div>暂无能耗数据</div>
@@ -2900,8 +3337,17 @@ function renderTrips() {
 
 /* ── 月份选择：iOS 风格底部弹层 ──
    用按钮 + 弹层而不是 <select>：原生下拉在移动端观感与 iOS 相差太远。
-   弹层挂在 body 上（不随视图重绘销毁），选择后重新取数并整页渲染。 */
-function openMonthSheet() {
+   弹层挂在 body 上（不随视图重绘销毁），选择后重新取数并整页渲染。
+
+   参数化是必须的：行程页与充电页各有一套月份清单和选中项，
+   共用同一个弹层但不能共用一个 state —— 否则在充电页选月份会把行程页也带走。 */
+function openMonthSheet(cfg) {
+  const months = (cfg && cfg.months && cfg.months.length)
+    ? cfg.months
+    : [{ yearMonth: 'currentMonth', label: '本月' }];
+  const current = (cfg && cfg.current) || 'currentMonth';
+  const title = (cfg && cfg.title) || '选择月份';
+
   let root = document.getElementById('sheetRoot');
   if (!root) {
     root = document.createElement('div');
@@ -2911,9 +3357,8 @@ function openMonthSheet() {
   }
 
   /* 官方给的是「本月 + 各个月份」，这里拆成年份与月份两段：
-     年份横排、月份按 4 列网格；没有数据的月份置灰不可点。 */
+     年份竖排、月份按 3 列网格；没有数据的月份置灰不可点。 */
   const now = new Date();
-  const months = state.months.length ? state.months : [{ yearMonth: 'currentMonth', label: '本月' }];
   // 键统一成 "YYYY-MM"（两位月份）—— 接口返回的是 2026-09，
   // 自己拼成 2026-9 会永远匹配不上，整月列表就会全部置灰
   const pad2 = (v) => String(v).padStart(2, '0');
@@ -2929,9 +3374,9 @@ function openMonthSheet() {
   const years = Array.from(new Set(Object.keys(map).map((k) => Number(k.split('-')[0]))))
     .sort((a, b) => b - a);
 
-  const currentKey = state.yearMonth === 'currentMonth'
+  const currentKey = current === 'currentMonth'
     ? `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`
-    : state.yearMonth;
+    : current;
   let pickYear = Number(currentKey.split('-')[0]) || now.getFullYear();
 
   const body = () => {
@@ -2943,13 +3388,13 @@ function openMonthSheet() {
       .map((m) => {
         const key = `${pickYear}-${pad2(m)}`;
         const value = map[key];
-        const active = value && value === state.yearMonth;
+        const active = value && value === current;
         return `<button class="sheet-mon${active ? ' on' : ''}" data-mon="${m}"${value ? '' : ' disabled'}>${m}</button>`;
       })
       .join('');
 
     return `
-      <div class="sheet-title">选择月份</div>
+      <div class="sheet-title">${esc(title)}</div>
       <div class="sheet-cols">
         <div class="sheet-col">
           <div class="sheet-sec">年份</div>
@@ -2978,7 +3423,7 @@ function openMonthSheet() {
     });
   };
 
-  root.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-label="选择月份">${body()}</div>`;
+  root.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}">${body()}</div>`;
   root.classList.remove('hidden');
   requestAnimationFrame(() => {
     root.classList.add('show');
@@ -3002,9 +3447,8 @@ function openMonthSheet() {
     if (monthBtn && !monthBtn.disabled) {
       const value = map[`${pickYear}-${pad2(Number(monthBtn.dataset.mon))}`];
       if (!value) return;
-      state.yearMonth = value;
       closeMonthSheet();
-      loadTrips().then(render);
+      cfg.onPick(value);
     }
   };
 }
@@ -3043,100 +3487,664 @@ function tripItem(t) {
    视图：充电
    ═══════════════════════════════════════════════ */
 function renderCharges() {
-  const sum = state.summary;
-  const records = state.records;
-  /* 附近充电站与消费账单是**两块独立的数据**（前者实时、后者是导入的历史），
-     所以它必须在空态判断**之外**渲染 —— 没导入过账单，不代表看不到
-     "附近哪能充、现在多少钱"，而那恰恰是充电页最有用的信息。 */
+  /* 附近充电站与充入电量是**两块完全独立的数据**：
+     前者实时（要定位、要逐站取价），后者是本地历史（按月、不联网）。
+     所以附近站放在"有没有充电记录"的判断之外 ——
+     「附近哪能充」跟「我上个月充了几次」没有任何关系。 */
   const nearby = nearbyStationsCard();
+  const c = state.charge;
+  const months = state.chargeMonths.length
+    ? state.chargeMonths
+    : [{ yearMonth: 'currentMonth', label: '本月' }];
+  const selected = months.find((m) => m.yearMonth === state.chargeMonth) || months[0];
+  const isCurrent = state.chargeMonth === 'currentMonth';
+  const monthLabel = isCurrent ? '本月' : (selected.label || state.chargeMonth);
 
-  if (!sum || !sum.totalCount) {
-    return `
-      ${nearby}
-      <div class="empty">
-        <div class="ico">${SVG.bolt}</div>
-        <div>还没有充电消费记录</div>
-        <div style="margin-top:8px;font-size:11.5px">
-          导入支付宝 / 微信账单后，这里会自动归集各服务商的充电消费
+  const monthRow = `<div class="en-range en-month-row">
+      <span class="en-month-label">${SVG.clock} 统计月份${state.chargeLoading ? ' · 更新中' : ''}</span>
+      <span class="ch-actions">
+        <button class="en-month-btn" id="chargeMonthBtn">
+          ${esc(monthLabel)}${SVG.chevron}
+        </button>
+        <button class="ch-sync" id="chargeSyncBtn"${state.chargeSyncing ? ' disabled' : ''}>
+          ${state.chargeSyncing ? '同步中…' : '同步'}
+        </button>
+      </span>
+    </div>`;
+
+  /* 还没有任何数据：**只在真的一次都没查到时**显示骨架。
+     已有数据时刷新不走这里（换成骨架会让内容闪一下再回来，比不动更难受）。 */
+  if (!c) {
+    return `${nearby}${monthRow}
+      <div class="card">
+        <div class="card-title"><span>充入电量</span><span class="cap-badge">加载中</span></div>
+        <div class="st-skel">
+          ${'<div class="skel-row"><div class="skel-line w70"></div><div class="skel-line w35"></div></div>'
+            .repeat(3)}
         </div>
-      </div>
-      ${chargePlanCard()}
-      ${soonCard()}`;
+        <div class="st-note">正在读取充电流水…</div>
+      </div>`;
   }
 
-  const maxAmt = Math.max(...(sum.byProvider || []).map((p) => p.amount || 0), 1);
+  const demo = state.mode !== 'live';
 
-  return `
-    <div class="summary-hero">
-      <div class="lbl">累计充电消费</div>
-      <div class="big">${fmt(sum.totalAmount, 2)}<span class="u">元</span></div>
+  if (!c.count) {
+    return `${nearby}${monthRow}
+      <div class="card">
+        <div class="card-title">
+          <span>充入电量</span>
+          <span class="cap-badge">${esc(monthLabel)}</span>
+        </div>
+        <div class="empty" style="padding:24px 12px 20px">
+          <div class="ico">${SVG.plug}</div>
+          <div>${esc(monthLabel)}没有充电记录</div>
+          <div style="margin-top:8px;font-size:11.5px">
+            换个月份看看，或点右上角「同步」重新拉取流水
+          </div>
+        </div>
+        ${chargeMonthChartBlock()}
+      </div>`;
+  }
+
+  /* ── 充入电量：一张卡 ────────────────────────────
+     原来是「本月大数」+「月度柱状图」两张卡，但它们是同一笔账的两个切面：
+     分开摆，最右边那根柱子和上面的大数看着像两个数。
+     合进一张卡后，把所选月份那根柱子高亮，其余压暗 ——
+     "大数对应哪根"不用再靠月份标签去对。
+
+     三个副数字同框的理由：只给总量，"这个月充得多"到底是
+     单次充得满、还是充得勤，看不出来。 */
+  const hero = `<div class="summary-hero">
+      <div class="lbl">${esc(monthLabel)} · 共 ${c.count} 次${demo ? '<em class="en-demo">演示数据</em>' : ''}</div>
+      <div class="big">${fmt(c.totalKwh, 1)}<span class="u">度</span></div>
       <div class="summary-sub">
-        <div>
-          <div class="v">${sum.totalCount}</div>
-          <div class="k">笔数</div>
-        </div>
-        <div>
-          <div class="v">${sum.totalEnergyKwh ? fmt(sum.totalEnergyKwh, 1) : '--'}</div>
-          <div class="k">总电量 kWh</div>
-        </div>
-        <div>
-          <div class="v">${sum.avgUnitPrice ? fmt(sum.avgUnitPrice, 2) : '--'}</div>
-          <div class="k">均价 元/kWh</div>
-        </div>
+        <div><div class="v">${fmt(c.avgKwh, 1)}<small>度</small></div><div class="k">平均单次</div></div>
+        <div><div class="v">${fmtDuration(c.totalMinutes)}</div><div class="k">总时长</div></div>
+        <div><div class="v">${c.avgPowerKw == null ? '--' : fmt(c.avgPowerKw, 1)}<small>kW</small></div>
+            <div class="k">平均功率</div></div>
       </div>
-    </div>
+    </div>`;
 
-    ${nearby}
+  /* 直流 / 交流只留电量，不再各列一次「几次」：
+     快充几次 + 慢充几次 = 上面那个「共 N 次」，换个说法重复一遍而已。
+     但"快充充了多少度、慢充充了多少度"是新信息，压成一行贴在图下面。 */
+  const split = (c.dcKwh || c.acKwh)
+    ? `<div class="ch-split">直流快充 ${fmt(c.dcKwh, 1)} 度 · 交流慢充 ${fmt(c.acKwh, 1)} 度</div>`
+    : '';
 
-    ${chargePlanCard()}
+  const list = `<div class="card-title" style="padding:4px 2px 0">充电记录</div>
+    <div class="list">${c.records.map(chargeSessionItem).join('')}</div>`;
 
+  return `${nearby}${monthRow}
     <div class="card">
-      <div class="card-title">服务商分布</div>
-      <div class="pbar">
-        ${(sum.byProvider || []).map((p) => {
-          const color = PROVIDER_COLORS[p.provider] || PROVIDER_COLORS.other;
-          const pct = ((p.amount || 0) / maxAmt) * 100;
-          return `<div class="pbar-row">
-            <div class="pbar-head">
-              <span class="pbar-name">${esc(p.providerName || p.provider || '其他')}</span>
-              <span class="pbar-amt">${fmt(p.amount, 2)} 元</span>
-            </div>
-            <div class="pbar-track">
-              <div class="pbar-fill" style="width:${pct}%;background:${color}"></div>
-            </div>
-            <div class="pbar-sub">${p.count} 笔</div>
-          </div>`;
-        }).join('')}
+      <div class="card-title">
+        <span>充入电量</span>
+        <span class="cap-badge">${esc(monthLabel)}</span>
       </div>
+      ${hero}${chargeMonthChartBlock()}${split}
     </div>
-
-    <div class="chart-box">
-      <div class="card-title">月度消费趋势</div>
-      <canvas id="monthChart"></canvas>
-    </div>
-
-    <div class="card-title" style="padding:4px 2px 0">消费明细</div>
-    <div class="list">
-      ${records.slice(0, 40).map(chargeItem).join('')}
-    </div>
-
-    ${soonCard()}`;
+    ${list}${costCard(c)}`;
 }
 
-function chargeItem(r) {
-  const color = PROVIDER_COLORS[r.provider] || PROVIDER_COLORS.other;
+/* ── 充电费用卡 ──
+   这张卡的立场：**一个编出来的数字都不显示**。
+   官方接口只给电量（车不知道电价），金额只能来自截图识别 / 手工录入；
+   在拿到真值之前显示估算值，会被当成"我花的钱" —— 比留空更糟。
+
+   所以这里是「现状 + 三条补录入口」，而不是「一个金额 + 一句解释」：
+     1. 截图识别（主线）：App「补能订单」页截图 → 识别 → 人工核对 → 入库；
+     2. 手工录入（零依赖）：金额 + 时间就能兜底，不需要任何 key；
+     3. 待确认队列：识别出来但配不上流水 / 有多条候选的，一条都不丢，等人点一下。 */
+function costCard(c) {
+  const writable = canWriteCharges();
+  const priced = c.amountCount || 0;
+  const unpriced = c.unpricedCount || 0;
+
+  const badge = !priced
+    ? '金额未记录'
+    : (unpriced ? `已补录 ${priced}/${priced + unpriced} 笔` : '已补全');
+
+  /* 已补录的三件套：金额 / 笔数 / 每度单价。
+     单价的分母只用**已补录金额对应的电量**（pricedKwh），
+     拿总电量去除会把没补录的那些算进去，单价凭空变低。 */
+  const sub = priced
+    ? `<div class="cost-sub">
+        <div><div class="v">¥${fmt(c.amountTotal, 2)}</div><div class="k">已补录金额</div></div>
+        <div><div class="v">${priced}<small>笔</small></div><div class="k">有金额记录</div></div>
+        <div><div class="v">${c.unitPrice == null ? '--' : fmt(c.unitPrice, 2)}<small>元/度</small></div>
+            <div class="k">每度单价</div></div>
+      </div>`
+    : '';
+
+  const notes = [];
+  if (!priced) {
+    notes.push('极氪只提供电量，不提供金额 —— 车不知道电价，站点也不在充电记录里。'
+      + '金额要自己补：截图识别（App「补能订单」页）或手工录入。');
+  } else if (unpriced) {
+    notes.push(`还有 ${unpriced} 笔（${fmt(c.unpricedKwh, 1)} 度）没补金额，单价只按已补录的算。`);
+  }
+  if (c.estimatedCount) {
+    notes.push(`另有 ${c.estimatedCount} 笔为电价估算，未计入合计与单价。`);
+  }
+  const pending = (c.pendingPayments || 0) + (c.unmatchedPayments || 0);
+  if (pending) {
+    notes.push(`有 ${pending} 笔金额配不上充电流水，在「待确认」里等你指定。`);
+  }
+  if (!writable) {
+    notes.push('当前是演示/离线数据，补录入口不可用（没有真实流水可配对）。');
+  } else if (state.ocrConfigured === false) {
+    notes.push('截图识别未开启：服务端 .env 填 DEEPSEEK_API_KEY 并重启后可用；'
+      + '在那之前先用手写录入。');
+  }
+
+  /* 三个入口。
+     「截图识别」不是"识别完就完事"：识别结果会弹出核对框，
+     金额 / 电量 / 归属哪次充电都能改 —— 模型把服务费原价当金额是常事。 */
+  const actions = `<div class="cost-actions">
+      <button class="cost-btn primary" id="ocrPickBtn"${writable && !state.ocrBusy ? '' : ' disabled'}>
+        ${state.ocrBusy ? '识别中…' : `${SVG.scan} 截图识别`}
+      </button>
+      <button class="cost-btn" id="manualPayBtn"${writable ? '' : ' disabled'}>${SVG.money} 手写录入</button>
+      ${pending
+        ? `<button class="cost-btn" id="pendingPayBtn"${writable ? '' : ' disabled'}>待确认 ${pending}</button>`
+        : ''}
+    </div>`;
+
+  return `<div class="card">
+      <div class="card-title">
+        <span>充电费用</span>
+        <span class="cap-badge">${badge}</span>
+      </div>
+      ${sub}
+      ${notes.length ? `<div class="st-note">${notes.map(esc).join('<br>')}</div>` : ''}
+      ${actions}
+    </div>`;
+}
+
+/* 能不能写金额：只有真实数据源才有"可配对的充电流水"。
+   模拟/离线模式下后端会返回 503，与其让用户点一个必然失败的按钮，不如直接置灰。 */
+function canWriteCharges() {
+  return state.mode === 'live' && isLoggedIn();
+}
+
+/* 月度趋势图：柱 = 当月电量（左轴），折线 = 每次充电时长（右轴）。
+   横轴是**全部**可查月份，不受上方月份筛选影响 ——
+   这张图的作用就是"看出哪个月充得多"，跟着筛选变它每次只会剩一根柱子。
+
+   为什么把时长叠进来：同样充 40 度，快充二十分钟、慢充一整夜，
+   光看电量两根柱子一模一样。时长是第二根轴（量纲完全不同），
+   不能硬套左轴，否则会被压成一条贴底的直线。 */
+function chargeMonthChartBlock() {
+  return `<div class="ch-legend">
+      <span><i class="en-dot" style="background:#2E8BC0"></i>月度电量 · 度</span>
+      <span><i class="en-dot" style="background:#E8A33D"></i>每次充电时长 · 小时</span>
+    </div>
+    <div class="chart-scroll"><canvas id="chargeMonthChart"></canvas></div>`;
+}
+
+/* 一条充电流水。
+   官方记录里没有站点名，所以标题位写"直流快充 / 交流慢充"；
+   将来 OCR 补上站点名后，这里会自动换成站点名（`stationName` 有值就用）。 */
+function chargeSessionItem(r) {
+  const isDc = r.chargeType === 'dc';
+  const isAc = r.chargeType === 'ac';
+  const kind = isDc ? '直流快充' : (isAc ? '交流慢充' : '充电');
+  const title = r.stationName ? `${esc(r.stationName)} · ${kind}` : kind;
+
+  /* 平均功率按单笔算：总电量 ÷ 时长。它比"充了多久"更能说明桩的快慢 ——
+     同样 50 度，20 分钟和 3 小时是两个世界。 */
+  const power = (r.energyKwh && r.durationMin)
+    ? (r.energyKwh / (r.durationMin / 60))
+    : null;
+
   return `
     <div class="item">
       <div class="item-top">
-        <span class="item-time">${fmtTime(r.timestamp)}</span>
-        <span class="item-amt" style="color:${color}">${fmt(r.amount, 2)} 元</span>
+        <span class="item-time">${fmtTime(r.startTime)}</span>
+        <span class="item-amt">${fmt(r.energyKwh, 1)} 度</span>
       </div>
-      <div class="item-main">${esc(r.merchant || '未知商户')}</div>
+      <div class="item-main">${title}</div>
       <div class="item-tags">
-        <span class="tag p">${esc(r.providerName || r.provider || '其他')}</span>
-        ${r.channel ? `<span class="tag">${r.channel === 'alipay' ? '支付宝' : r.channel === 'wechat' ? '微信' : r.channel}</span>` : ''}
+        ${r.durationMin ? `<span class="tag">${fmtDuration(r.durationMin)}</span>` : ''}
+        ${power ? `<span class="tag w">均 ${fmt(power, 0)} kW</span>` : ''}
+        ${r.amount != null
+          ? `<span class="tag p">¥${fmt(r.amount, 2)}${r.amountSource === 'estimate' ? ' 估算' : ''}</span>`
+          : ''}
       </div>
     </div>`;
+}
+
+/* ═══════════════════════════════════════════════
+   金额补录：截图识别（主线） / 手写录入（零依赖） / 待确认配对
+   ───────────────────────────────────────────────
+   为什么非要截图这条路：极氪车端报文与充电记录接口里都没有任何 `fee/cost/amount`
+   叶子字段，官方 App 的「补能订单」金额在第三方（浩汉）网关后面，
+   极氪 token 在那儿不通用 ⇒ 金额**不可自动化**，只剩"人给一张图"。
+
+   三条红线（改这里之前先读）：
+     1. **识别结果不直接入库** —— 先弹核对框，人改完再 commit；
+     2. **配不上的不丢** —— 零命中落 unmatched，多命中落 pending，等人点；
+     3. **图片不落盘** —— 只走 FormData → 后端内存 → base64 → 上游，前端也不存。
+   ═══════════════════════════════════════════════ */
+
+/* 弹层容器：与月份选择共用 .sheet-root 的样式，但**不能共用一个节点** ——
+   否则打开核对框会把月份弹层的内容冲掉（反之亦然）。 */
+function ocrRootEl() {
+  let root = document.getElementById('ocrRoot');
+  if (!root) {
+    root = document.createElement('div');
+    root.id = 'ocrRoot';
+    root.className = 'sheet-root hidden';
+    document.body.appendChild(root);
+  }
+  return root;
+}
+
+function openSheetRoot(root, html) {
+  root.innerHTML = `<div class="sheet" role="dialog" aria-modal="true">${html}</div>`;
+  root.classList.remove('hidden');
+  requestAnimationFrame(() => root.classList.add('show'));
+}
+
+function closeSheetRoot(root) {
+  if (!root) return;
+  root.classList.remove('show');
+  setTimeout(() => root.classList.add('hidden'), 180);
+}
+
+/* ── ① 截图识别 ── */
+
+function pickReceiptImage() {
+  if (!canWriteCharges()) {
+    toast('当前是演示/离线数据，不能补录金额');
+    return;
+  }
+  let input = document.getElementById('ocrFileInput');
+  if (!input) {
+    input = document.createElement('input');
+    input.type = 'file';
+    input.id = 'ocrFileInput';
+    input.accept = 'image/*';
+    input.style.display = 'none';
+    document.body.appendChild(input);
+    // 清空 value 才能连续选同一张图（否则第二次 change 不触发）
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      input.value = '';
+      if (file) runReceiptOcr(file);
+    });
+  }
+  input.click();
+}
+
+async function runReceiptOcr(file) {
+  if (state.ocrBusy) return;
+  state.ocrBusy = true;
+  render();
+  try {
+    const form = new FormData();
+    form.append('file', file, file.name || 'receipt.png');
+    const data = await api('/api/charges/receipts/ocr', { method: 'POST', body: form });
+    const rows = (data && data.rows) || [];
+    if (!rows.length) {
+      toast('没从这张图里读到金额，换一张带金额的订单截图试试');
+      return;
+    }
+    state.ocrRows = rows;
+    state.ocrImageSha = data.imageSha8 || '';
+    /* 默认归属：只有**唯一候选**时才预选；
+       多候选一律留空让人挑 —— 替用户拍板的那一次，往往就是错的那一次。 */
+    state.ocrPick = {};
+    rows.forEach((r, i) => {
+      const cands = r.candidates || [];
+      if (cands.length === 1) state.ocrPick[i] = cands[0].sessionId;
+    });
+    openOcrSheet();
+  } catch (e) {
+    toast((e && e.message) ? e.message : '截图识别失败');
+  } finally {
+    state.ocrBusy = false;
+    render();
+  }
+}
+
+const CAND_KIND = { strong: '电量对得上', weak: '仅时间接近' };
+
+function ocrRowHtml(row, i) {
+  const cands = row.candidates || [];
+  const picked = state.ocrPick[i] || '';
+  const when = row.startAt || row.paidAt || '';
+
+  const candBtns = cands.map((c) => `
+    <button class="ocr-cand${c.sessionId === picked ? ' on' : ''}" data-cand="${esc(c.sessionId)}">
+      ${fmtTime(c.startTime)} · ${fmt(c.energyKwh, 1)} 度 · ${CAND_KIND[c.kind] || c.kind}
+    </button>`).join('');
+
+  return `<div class="ocr-row" data-idx="${i}">
+      <div class="ocr-row-top">
+        <span>第 ${i + 1} 笔${row.payStatus ? ` · ${esc(row.payStatus)}` : ''}</span>
+        <b>${row.stationName ? esc(row.stationName) : '未识别到站点'}</b>
+      </div>
+      ${row.needsReview
+        ? `<div class="ocr-warn">需要核对：${esc(row.reviewNote || '这一项读得不准')}。
+             金额请按「实付」填，别填服务费原价。</div>`
+        : ''}
+      <div class="ocr-fields">
+        <div class="ocr-field">
+          <label>实付金额（元）</label>
+          <input class="ocr-input" data-f="amount" type="number" inputmode="decimal" step="0.01"
+                 value="${row.amount == null ? '' : fmt(row.amount, 2)}">
+        </div>
+        <div class="ocr-field">
+          <label>电量（度）</label>
+          <input class="ocr-input" data-f="energyKwh" type="number" inputmode="decimal" step="0.001"
+                 value="${row.energyKwh == null ? '' : fmt(row.energyKwh, 3)}">
+        </div>
+        <div class="ocr-field">
+          <label>开始时间</label>
+          <input class="ocr-input" data-f="startAt" value="${esc(when)}" placeholder="2026-10-16 22:10">
+        </div>
+        <div class="ocr-field">
+          <label>站点（可改）</label>
+          <input class="ocr-input" data-f="stationName" value="${esc(row.stationName || '')}" placeholder="选填">
+        </div>
+      </div>
+      <div class="ocr-sec">${cands.length ? '对应哪次充电' : '没有时间窗内的充电流水'}</div>
+      <div class="ocr-cands">
+        ${candBtns}
+        <button class="ocr-cand${cands.length && !picked ? ' on' : ''}" data-cand="">
+          ${cands.length ? '暂不绑定（放进待确认）' : '仍要保存这笔金额'}
+        </button>
+      </div>
+    </div>`;
+}
+
+function openOcrSheet() {
+  const rows = state.ocrRows || [];
+  const root = ocrRootEl();
+  openSheetRoot(root, `
+    <div class="sheet-title">核对识别结果 · ${rows.length} 笔</div>
+    <div class="ocr-body">${rows.map(ocrRowHtml).join('')}</div>
+    <div class="ocr-actions">
+      <button class="sheet-cancel" data-ocr-close>取消</button>
+      <button class="ocr-primary" id="ocrCommitBtn">确认补录</button>
+    </div>`);
+
+  root.onclick = (e) => {
+    if (e.target === root || e.target.closest('[data-ocr-close]')) { closeOcrSheet(); return; }
+
+    const cand = e.target.closest('[data-cand]');
+    if (cand) {
+      const rowEl = cand.closest('.ocr-row');
+      if (!rowEl) return;
+      state.ocrPick[Number(rowEl.dataset.idx)] = cand.dataset.cand || '';
+      // 只重绘候选区的选择态 —— 整块重绘会让正在输入的金额被清掉
+      rowEl.querySelectorAll('.ocr-cand').forEach((b) => {
+        b.classList.toggle('on', (b.dataset.cand || '') === (cand.dataset.cand || ''));
+      });
+      return;
+    }
+
+    if (e.target.closest('#ocrCommitBtn')) commitOcr();
+  };
+}
+
+function closeOcrSheet() {
+  closeSheetRoot(document.getElementById('ocrRoot'));
+  state.ocrRows = null;
+  state.ocrPick = {};
+  state.ocrImageSha = '';
+}
+
+/* 从核对框里读回用户改过的数。
+   **金额为空的行直接跳过**：那多半是模型把标题行当成了记录，
+   存一条 0 元的支付进去只会污染待确认列表。 */
+function collectOcrRows() {
+  const root = document.getElementById('ocrRoot');
+  return (state.ocrRows || []).map((row, i) => {
+    const el = root && root.querySelector(`.ocr-row[data-idx="${i}"]`);
+    const val = (f) => {
+      const node = el && el.querySelector(`[data-f="${f}"]`);
+      return node ? String(node.value || '').trim() : '';
+    };
+    const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+    return {
+      amount: num(val('amount')),
+      energyKwh: num(val('energyKwh')),
+      startAt: val('startAt') || null,
+      stationName: val('stationName') || null,
+      // 空字符串表示"不绑定"，后端会放进待确认而不是丢掉
+      sessionId: state.ocrPick[i] || '',
+      confidence: row.confidence,
+    };
+  }).filter((r) => r.amount && r.amount > 0);
+}
+
+async function commitOcr() {
+  const rows = collectOcrRows();
+  if (!rows.length) { toast('至少填一笔金额'); return; }
+
+  const btn = document.getElementById('ocrCommitBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '补录中…'; }
+
+  try {
+    const data = await api('/api/charges/receipts/commit', {
+      method: 'POST',
+      body: JSON.stringify({ imageSha8: state.ocrImageSha, rows }),
+    });
+    closeOcrSheet();
+    toast(ocrResultText(data));
+    await refreshChargeBills();
+    render();
+  } catch (e) {
+    toast((e && e.message) ? e.message : '补录失败');
+    if (btn) { btn.disabled = false; btn.textContent = '确认补录'; }
+  }
+}
+
+function ocrResultText(d) {
+  const parts = [];
+  if (d.linked) parts.push(`已绑定 ${d.linked} 笔`);
+  if (d.pending) parts.push(`${d.pending} 笔待确认`);
+  if (d.unmatched) parts.push(`${d.unmatched} 笔未配对`);
+  if (d.skipped) parts.push(`${d.skipped} 笔重复已跳过`);
+  return parts.length ? parts.join(' · ') : '没有需要补录的新记录';
+}
+
+/* ── ② 手写录入（零依赖兜底）── */
+
+function openManualSheet() {
+  if (!canWriteCharges()) { toast('当前是演示/离线数据，不能补录金额'); return; }
+  const now = new Date();
+  const pad = (v) => String(v).padStart(2, '0');
+  const defAt = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} `
+    + `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+  const root = ocrRootEl();
+  openSheetRoot(root, `
+    <div class="sheet-title">手写录入一笔金额</div>
+    <div class="ocr-body">
+      <div class="ocr-row">
+        <div class="ocr-fields">
+          <div class="ocr-field">
+            <label>实付金额（元）</label>
+            <input class="ocr-input" id="mpAmount" type="number" inputmode="decimal" step="0.01" placeholder="28.85">
+          </div>
+          <div class="ocr-field">
+            <label>电量（度，选填）</label>
+            <input class="ocr-input" id="mpKwh" type="number" inputmode="decimal" step="0.001" placeholder="80.1">
+          </div>
+          <div class="ocr-field wide">
+            <label>支付时间（用来配对充电流水）</label>
+            <input class="ocr-input" id="mpAt" value="${defAt}" placeholder="2026-10-16 22:10">
+          </div>
+          <div class="ocr-field wide">
+            <label>站点（选填）</label>
+            <input class="ocr-input" id="mpStation" placeholder="如：极充站">
+          </div>
+        </div>
+      </div>
+      <div class="st-note">填上电量能自动配对到那次充电；只填金额 + 时间也能存，
+        配不上的会进「待确认」，不会被丢掉。</div>
+    </div>
+    <div class="ocr-actions">
+      <button class="sheet-cancel" data-ocr-close>取消</button>
+      <button class="ocr-primary" id="mpSaveBtn">保存</button>
+    </div>`);
+
+  root.onclick = (e) => {
+    if (e.target === root || e.target.closest('[data-ocr-close]')) {
+      closeSheetRoot(root);
+      return;
+    }
+    if (e.target.closest('#mpSaveBtn')) submitManualPayment();
+  };
+}
+
+async function submitManualPayment() {
+  const amount = parseFloat((document.getElementById('mpAmount') || {}).value || '');
+  if (!Number.isFinite(amount) || amount <= 0) { toast('金额必须是正数'); return; }
+
+  const kwhRaw = parseFloat((document.getElementById('mpKwh') || {}).value || '');
+  const paidAt = ((document.getElementById('mpAt') || {}).value || '').trim();
+  const station = ((document.getElementById('mpStation') || {}).value || '').trim();
+  if (!paidAt) { toast('请填支付时间'); return; }
+
+  const btn = document.getElementById('mpSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '保存中…'; }
+
+  try {
+    const data = await api('/api/charges/payments/manual', {
+      method: 'POST',
+      body: JSON.stringify({
+        amount,
+        energyKwh: Number.isFinite(kwhRaw) ? kwhRaw : null,
+        paidAt,
+        stationName: station || null,
+      }),
+    });
+    closeSheetRoot(document.getElementById('ocrRoot'));
+    toast(ocrResultText(data));
+    await refreshChargeBills();
+    render();
+  } catch (e) {
+    toast((e && e.message) ? e.message : '保存失败');
+    if (btn) { btn.disabled = false; btn.textContent = '保存'; }
+  }
+}
+
+/* ── ③ 待确认 / 未配对的支付 ──
+   这些钱**已经花了**，只是不知道该挂到哪次充电上。
+   全部列出来让人点一下 —— 删掉它们等于把支出抹了。 */
+
+async function loadPayments() {
+  try {
+    const data = await api('/api/charges/payments');
+    /* **不筛掉已绑定的**：绑错了要能撤。只留"待处理"的话，
+       用户改不了自己刚点错的那一笔。 */
+    state.payments = (data && data.payments) || [];
+  } catch (e) {
+    console.warn('待确认支付加载失败', e);
+    state.payments = [];
+  }
+}
+
+function openPaymentsSheet() {
+  const list = state.payments || [];
+  const todo = list.filter((p) => p.status !== 'matched').length;
+  const root = ocrRootEl();
+  const body = list.length
+    ? list.map(paymentRowHtml).join('')
+    : '<div class="st-note">还没有补录过金额。</div>';
+
+  openSheetRoot(root, `
+    <div class="sheet-title">金额记录 · ${todo ? `待确认 ${todo} 笔` : '全部已绑定'}</div>
+    <div class="ocr-body">${body}</div>
+    <div class="ocr-actions">
+      <button class="sheet-cancel" data-ocr-close>关闭</button>
+    </div>`);
+
+  root.onclick = async (e) => {
+    if (e.target === root || e.target.closest('[data-ocr-close]')) { closeSheetRoot(root); return; }
+
+    const cand = e.target.closest('[data-bind]');
+    if (cand) {
+      const pid = cand.dataset.pid;
+      const sid = cand.dataset.bind;
+      cand.disabled = true;
+      try {
+        await api(`/api/charges/payments/${encodeURIComponent(pid)}/link`, {
+          method: 'POST', body: JSON.stringify({ sessionId: sid }),
+        });
+        toast('已绑定到那次充电');
+        await refreshChargeBills();
+        openPaymentsSheet();     // 重开：列表短了一行，顺便刷新候选
+        render();
+      } catch (err) {
+        toast((err && err.message) ? err.message : '绑定失败');
+        cand.disabled = false;
+      }
+      return;
+    }
+
+    const drop = e.target.closest('[data-unbind]');
+    if (drop) {
+      drop.disabled = true;
+      try {
+        await api(`/api/charges/payments/${encodeURIComponent(drop.dataset.unbind)}/link`,
+          { method: 'DELETE' });
+        toast('已解绑，金额退回待确认');
+        await refreshChargeBills();
+        openPaymentsSheet();
+        render();
+      } catch (err) {
+        toast((err && err.message) ? err.message : '解绑失败');
+        drop.disabled = false;
+      }
+    }
+  };
+}
+
+const PAY_STATUS = { matched: '已绑定', pending: '待确认', unmatched: '未配对' };
+
+function paymentRowHtml(p) {
+  /* 已绑定的只给**解绑**：绑错了要能撤回来。
+     解绑不删证据 —— 金额退回待确认，充电流水的金额清空。 */
+  if (p.status === 'matched') {
+    return `<div class="ocr-row">
+      <div class="ocr-row-top">
+        <span>¥${fmt(p.amount, 2)} · ${esc(p.paidAt || '时间未知')}</span>
+        <b>已绑定</b>
+      </div>
+      <div class="ocr-cands">
+        <button class="ocr-cand" data-unbind="${esc(p.paymentId)}">解绑（绑错了就撤回来）</button>
+      </div>
+    </div>`;
+  }
+
+  const cands = p.candidates || [];
+  const statusText = p.status === 'unmatched' ? '没找到对应充电' : '有多条候选';
+  return `<div class="ocr-row">
+      <div class="ocr-row-top">
+        <span>¥${fmt(p.amount, 2)} · ${esc(p.paidAt || '时间未知')}</span>
+        <b>${p.stationName ? esc(p.stationName) : (PAY_STATUS[p.status] || statusText)}</b>
+      </div>
+      <div class="ocr-sec">${statusText} —— 指定它属于哪次充电</div>
+      <div class="ocr-cands">
+        ${cands.map((c) => `
+          <button class="ocr-cand" data-bind="${esc(c.sessionId)}" data-pid="${esc(p.paymentId)}">
+            ${fmtTime(c.startTime)} · ${fmt(c.energyKwh, 1)} 度 · ${CAND_KIND[c.kind] || c.kind}
+          </button>`).join('')}
+        ${cands.length ? '' : '<div class="st-note">时间附近没有充电流水，'
+          + '可能是停车费 / 占位费，或这笔是别人付的。先留着，别删。</div>'}
+      </div>
+    </div>`;
+}
+
+/* 补录完 / 配对完都要重新读这三样：
+   月份统计（金额的合计与单价会变）、支付队列、识别能力状态。 */
+async function refreshChargeBills() {
+  await Promise.all([loadChargeSessions(), loadPayments(), loadOcrStatus()]);
 }
 
 /* ═══════════════════════════════════════════════
@@ -3277,28 +4285,80 @@ function nearbyStationsCard() {
     </div>`;
   }
 
-  // ③ 已定位但没拿到站点
+  // ③ 已定位但还没拿到站点
   const list = state.stations || [];
-  if (!list.length) {
+
+  /* 首次加载：骨架屏。
+     **只在一条数据都没有时用** —— 已经有列表时换成骨架，会让内容闪一下再回来，
+     那种"闪"比不动还难受；有数据时走下面的 `is-busy` 压暗方案。 */
+  if (!list.length && state.stationsLoading) {
     return `<div class="card">
-      ${title(state.stationsLoading ? '加载中' : '无数据')}
-      <div class="st-note">${state.stationsLoading
-        ? '正在查找附近充电站…'
+      ${title('加载中')}
+      <div class="st-skel">
+        ${'<div class="skel-row"><div class="skel-line w70"></div><div class="skel-line w35"></div></div>'
+          .repeat(3)}
+      </div>
+      <div class="st-note">正在查找附近充电站…</div>
+    </div>`;
+  }
+
+  if (!list.length) {
+    /* 有筛选时的空结果**不能**说成"附近没有充电站" —— 那是在撒谎：
+       站是有的，只是不符合条件。必须给「清除筛选」，否则用户会以为这地方荒无人烟。 */
+    const activeFilter = hasStationFilter();
+    return `<div class="card">
+      ${title('无数据')}
+      <div class="st-note">${activeFilter
+        ? '附近没有符合当前筛选条件的站。放宽条件或清除筛选再看看。'
         : (state.locError ? esc(state.locError) : '附近没有查到充电站。')}</div>
       <div class="st-actions">
-        <button class="st-btn ghost" onclick="locate(true)">重新定位</button>
+        ${activeFilter
+          ? '<button class="st-btn" id="stFilterReset">清除筛选</button>'
+          : '<button class="st-btn ghost" onclick="locate(true)">重新定位</button>'}
       </div>
     </div>`;
   }
 
   const sorted = sortStations(list);
   /* 头部写「已加载 / 总数」而不是只写总数 ——
-     否则「50 站」配着 10 条列表，会被当成"剩下的没加载出来"。 */
-  const countText = state.stationsHasMore || state.stations.length < state.stationsTotal
-    ? `${state.stations.length} / ${state.stationsTotal} 站`
-    : `${state.stationsTotal} 站`;
+     否则「50 站」配着 10 条列表，会被当成"剩下的没加载出来"。
+     用价格类条件（停车费）筛时**不能**写分母：那种筛选要先取价才知道结果，
+     服务端只扫固定范围，total 是候选数而不是匹配总数。
+     ⚠️ 文案不要写「按电价筛选」—— 现在唯一的价格类筛选入口是「停车免费」。 */
+  const countText = state.stationsPriceFiltered
+    ? `${state.stations.length} 站 · 已筛选`
+    : (state.stationsHasMore || state.stations.length < state.stationsTotal
+        ? `${state.stations.length} / ${state.stationsTotal} 站`
+        : `${state.stationsTotal} 站`);
+
+  /* 筛选 chip。两组互斥（枪型 / 电价上限）用"点已选中的即取消"实现，
+     不加「不限」按钮 —— 少一个按钮就少一次误点。 */
+  const f = state.stationFilter || {};
+  const chip = (label, on, attr) =>
+    `<button class="st-chip${on ? ' on' : ''}" ${attr}>${label}</button>`;
+  const filterRow = `<div class="st-filter">
+    ${chip('快充', f.connector === 'dc', 'data-f="connector" data-v="dc"')}
+    ${chip('极氪自营', !!f.selfOnly, 'data-f="selfOnly"')}
+    ${chip('停车免费', !!f.parkFree, 'data-f="parkFree"')}
+    ${hasStationFilter() ? '<button class="st-chip reset" id="stFilterReset">清除</button>' : ''}
+  </div>`;
+
+  /* 列表固定高度、自己滚（见 CSS `.st-list`）。
+     没有"展开全部"——卡片高度一开始就是最终高度，位置不再跳。
+     分页由**内层列表**滚到底触发（见文件末尾），页面滚动不参与。 */
+  const moreLabel = state.stationsPriceFiltered
+    // 价格类筛选时 total 是候选数，写「x / y」会把"还有这么多"夸大
+    ? '加载更多'
+    : `加载更多<span class="n">${state.stations.length} / ${state.stationsTotal}</span>`;
+
+  const innerMore = state.stationsLoadingMore
+    ? '<div class="st-more">正在加载更多…</div>'
+    : (state.stationsHasMore
+        ? `<button class="st-fold" id="stMoreBtn">${moreLabel}</button>`
+        : (sorted.length ? '<div class="st-more">已全部显示</div>' : ''));
+
   return `<div class="card">
-    ${title(countText)}
+    ${title(state.stationsLoading ? '更新中' : countText)}
     ${state.stationsPriceOk ? '' : `<div class="st-note">价格服务暂时不可用，以下仅显示距离与枪数。</div>`}
     <div class="st-bar">
       <span class="cap-badge">点卡片看分时电价</span>
@@ -3307,12 +4367,8 @@ function nearbyStationsCard() {
         <button class="${state.stationSort === 'price' ? 'on' : ''}" data-sort="price">价格</button>
       </div>
     </div>
-    <div class="st-list">${sorted.map(stationRow).join('')}</div>
-    ${state.stationsHasMore
-      ? `<div id="stationsSentinel" class="st-more">${state.stationsLoadingMore
-          ? '正在加载更多…'
-          : '继续下滑加载更多'}</div>`
-      : `<div class="st-more">已全部显示</div>`}
+    ${filterRow}
+    <div class="st-list${state.stationsLoading ? ' is-busy' : ''}" id="stList">${sorted.map(stationRow).join('')}${innerMore}</div>
     <div class="st-note">位置仅用于本次查询，不落盘、不发给第三方。</div>
   </div>`;
 }
@@ -3402,114 +4458,172 @@ function useManualLoc() {
    而用户通常只看最前面几个，剩下的滑到再取更划算。 */
 const STATIONS_PAGE_SIZE = 10;
 
+/* 是否启用了任一筛选 */
+function hasStationFilter() {
+  const f = state.stationFilter || {};
+  return !!(f.connector || f.maxPrice != null || f.selfOnly || f.parkFree);
+}
+
+/* 筛选条件 → query 串（未设置的不拼）。
+   **筛选由服务端执行**，因为它必须在切片之前生效：
+   只在前端过滤已加载的 10 条，会把"筛出 2 个"说成"附近只有 2 个"。 */
+function stationFilterQuery() {
+  const f = state.stationFilter || {};
+  let query = '';
+  if (f.connector) query += `&connector=${encodeURIComponent(f.connector)}`;
+  if (f.maxPrice != null) query += `&max_price=${encodeURIComponent(f.maxPrice)}`;
+  if (f.selfOnly) query += '&self_only=true';
+  if (f.parkFree) query += '&park_free=true';
+  return query;
+}
+
+/* 切换某个筛选项。
+   「快充」是单选：再点一次＝取消（不额外加「不限」按钮，少一个控件少一次误点）。
+   自营 / 停车免费直接取反。
+   ⚠️ `maxPrice` 字段仍然保留在 state 与后端参数里，只是**界面上不再给入口** ——
+      三个电价档位 chip 长得太占地方。要恢复只需在 `filterRow` 里加回 chip。 */
+function toggleStationFilter(field, value) {
+  const f = { ...(state.stationFilter || {}) };
+  if (field === 'connector') {
+    f.connector = f.connector === value ? '' : value;
+  } else {
+    f[field] = !f[field];
+  }
+  state.stationFilter = f;
+  // 条件变了就从头查：接着用旧 offset 会把上一组条件的结果混进来
+  loadStations();
+}
+
+/* 演示 / 离线模式下没有后端可查，筛选只能在本地对 MOCK 全量做。
+   规则**必须与后端一致**（枪型/自营看气泡字段，电价/停车看 price），
+   否则会出现"演示里能筛、真机筛不了"的假象。 */
+function applyMockStationFilters() {
+  const f = state.stationFilter || {};
+  const filtered = (MOCK.stations || []).filter((s) => {
+    if (f.connector === 'dc' && !(s.dcCount > 0)) return false;
+    if (f.connector === 'ac' && !(s.acCount > 0)) return false;
+    if (f.selfOnly && s.selfOperate !== true) return false;
+    if (f.maxPrice != null) {
+      const price = s.price && s.price.totalPrice;
+      // 没价格不算"低于 X 元" —— 与后端同一条原则：拿不到就不猜
+      if (typeof price !== 'number' || price > f.maxPrice) return false;
+    }
+    if (f.parkFree && !(s.price && s.price.parkFree === true)) return false;
+    return true;
+  });
+
+  state.stations = filtered;
+  state.stationsTotal = filtered.length;
+  state.stationsOffset = filtered.length;
+  state.stationsNextOffset = filtered.length;
+  state.stationsHasMore = false;
+  state.stationsPriceFiltered = f.maxPrice != null || f.parkFree === true;
+}
+
 async function loadStations() {
   if (!state.loc) return false;
+  if (state.mode === 'mock' || state.mode === 'offline') {
+    // 也要推进序号：切换到演示数据时，把还在飞的真实请求作废掉
+    state.stationsSeq += 1;
+    applyMockStationFilters();
+    render();
+    return true;
+  }
+  /* 先占序号，再发请求。`await` 之后凡是"序号已经不是最新"的响应一律丢弃。 */
+  state.stationsSeq += 1;
+  const seq = state.stationsSeq;
   state.stationsLoading = true;
   state.stationsOffset = 0;
+  state.stationsNextOffset = 0;
   state.stationsHasMore = false;
   render();
   try {
     const data = await api(
       `/api/stations/nearby?lat=${state.loc.lat}&lng=${state.loc.lng}`
-      + `&limit=${STATIONS_PAGE_SIZE}&offset=0`);
+      + `&limit=${STATIONS_PAGE_SIZE}&offset=0` + stationFilterQuery());
+    if (seq !== state.stationsSeq) return false;   // 有更新的查询在飞，本次结果作废
     state.stations = data.stations || [];
     state.stationsTotal = data.total == null ? state.stations.length : data.total;
     state.stationsOffset = state.stations.length;
-    state.stationsHasMore = state.stations.length < state.stationsTotal;
+    /* 分页游标与"还有没有下一页"都用**服务端字段**。
+       带电价筛选时 nextOffset 会大于已加载条数（中间扫描掉、不符合条件的候选不返回），
+       自己拿 count 推算会重复请求同一段，表现就是"翻页翻不动"。 */
+    state.stationsNextOffset =
+      data.nextOffset == null ? state.stations.length : data.nextOffset;
+    state.stationsHasMore =
+      data.hasMore == null
+        ? state.stations.length < state.stationsTotal
+        : data.hasMore === true;
+    // 带电价筛选时 total 只是候选数，不能当"匹配总数"显示
+    state.stationsPriceFiltered = data.priceFilterApplied === true;
     // 显式判 `!== false`：后端不返回该字段时按"有价格"处理，避免误报不可用
     state.stationsPriceOk = data.priceAvailable !== false;
     state.locError = '';
     return true;
   } catch (e) {
+    if (seq !== state.stationsSeq) return false;   // 过期请求的失败不该清屏
     console.warn('附近充电站加载失败', e);
     state.stations = [];
     state.stationsPriceOk = false;
     state.locError = e.message;
     return false;
   } finally {
-    state.stationsLoading = false;
+    // 只有最新那次才有权收掉"更新中" —— 否则先完成的旧请求会让指示提前消失，
+    // 而此时新请求还在飞。
+    if (seq === state.stationsSeq) state.stationsLoading = false;
   }
 }
 
-/* 滑到列表底部时追加下一页。由 window scroll 监听触发（见文件末尾）。 */
+/* 取下一页。触发点是**内层列表**滚到底（见文件末尾），
+   或用户点列表底部的「加载更多」——不再由页面滚动触发。 */
 async function loadMoreStations() {
   if (!state.loc || state.stationsLoadingMore || !state.stationsHasMore) return;
 
+  // 记下这一页属于哪次查询：翻页途中若改了筛选，这批数据就属于旧条件，不能追加
+  const seq = state.stationsSeq;
   state.stationsLoadingMore = true;
   render();
   try {
     const data = await api(
       `/api/stations/nearby?lat=${state.loc.lat}&lng=${state.loc.lng}`
-      + `&limit=${STATIONS_PAGE_SIZE}&offset=${state.stationsOffset}`);
+      + `&limit=${STATIONS_PAGE_SIZE}&offset=${state.stationsNextOffset}`
+      + stationFilterQuery());
     const more = data.stations || [];
+    // 条件已变：这一页属于旧筛选，追加进去就是"筛选结果里混进不符合条件的站"
+    if (seq !== state.stationsSeq) return;
 
     /* 按 stationId 去重再追加。
        正常切片不会重复，但距离相同的站点排序可能抖动（服务端 sort 不保证稳定），
        真重了会在列表里出现两行同一个站 —— 这条保险很便宜。 */
     const seen = new Set((state.stations || []).map((s) => s.stationId));
-    state.stations = (state.stations || []).concat(more.filter((s) => !seen.has(s.stationId)));
+    const fresh = more.filter((s) => !seen.has(s.stationId));
+    state.stations = (state.stations || []).concat(fresh);
 
     state.stationsTotal = data.total == null ? state.stations.length : data.total;
     state.stationsOffset += more.length;
-    state.stationsHasMore = more.length > 0 && state.stations.length < state.stationsTotal;
+    state.stationsNextOffset =
+      data.nextOffset == null ? state.stationsOffset : data.nextOffset;
+    /* 是否还有下一页以服务端为准，再叠加一条兜底：本页一条新的都没进来就停。
+       上游若忽略 offset 反复回同一页，去重会让 stations.length 永远不增长，
+       「已加载 < total」恒成立 ⇒ 无限翻页 —— 这正是此前"一直渲染"的直接原因。 */
+    const serverHasMore =
+      data.hasMore == null
+        ? state.stations.length < state.stationsTotal
+        : data.hasMore === true;
+    state.stationsHasMore = serverHasMore && fresh.length > 0 && more.length > 0;
+    state.stationsPriceFiltered = data.priceFilterApplied === true;
     state.stationsPriceOk = state.stationsPriceOk && data.priceAvailable !== false;
   } catch (e) {
+    if (seq !== state.stationsSeq) return;
     console.warn('加载更多充电站失败', e);
     // 失败就停在当前页，别让滚动监听反复重试打接口
     state.stationsHasMore = false;
   } finally {
+    // 这个标志必须**无条件**清：它是个全局锁，留着会让之后的翻页永远进不来。
+    // 但只有仍属于当前查询时才重绘（过期渲染会把新结果冲掉）。
     state.stationsLoadingMore = false;
-    render();
+    if (seq === state.stationsSeq) render();
   }
-}
-
-/* 预约充电卡。
-   数据来自官方 /ms-charge-manage 系列（ZeekrDash 完全没做）：
-     v1.0: getChargingPlanNew / setChargingPlan、getLatestTravelPlanNew / setTravelPlan
-     v2.0: getBookingCharge / setBookingCharge、getTravelPlan / setTravelPlan
-   峰谷电价省钱的实用功能，且官方接口完整开放。 */
-function chargePlanCard() {
-  if (!cap('chargingPlan')) return '';
-  const p = state.chargePlan;
-  if (!p) return '';
-  const on = p.enabled === true;
-  return `
-    <div class="card">
-      <div class="card-title">
-        <span>预约充电</span>
-        <span class="cap-badge">${on ? '已启用' + (p.mode ? ' · ' + esc(p.mode) : '') : '未启用'}</span>
-      </div>
-      <div class="plan-grid">
-        <div class="plan-item${on ? '' : ' off'}">
-          <div class="k">开始时间</div>
-          <div class="v">${esc(p.startTime || '--')}</div>
-        </div>
-        <div class="plan-item${on ? '' : ' off'}">
-          <div class="k">结束时间</div>
-          <div class="v">${esc(p.endTime || '--')}</div>
-        </div>
-        <div class="plan-item${on ? '' : ' off'}">
-          <div class="k">目标电量</div>
-          <div class="v">${p.targetSoc != null ? p.targetSoc : '--'}<small>%</small></div>
-        </div>
-        <div class="plan-item">
-          <div class="k">当前电量</div>
-          <div class="v">${fmt(state.status && state.status.soc, 0)}<small>%</small></div>
-        </div>
-      </div>
-    </div>`;
-}
-
-function soonCard() {
-  return `
-    <div class="soon">
-      <span class="ico">${SVG.money}</span>
-      <div>
-        <div class="t">电费测算</div>
-        <div class="d">动态电价 · 智能充电 · 费用预算</div>
-      </div>
-      <span class="soon-badge">即将上线</span>
-    </div>`;
 }
 
 /* ═══════════════════════════════════════════════
@@ -3598,19 +4712,24 @@ function capabilityCard() {
    服务端，必须真的请求，否则 debug 页拿不到登录态。
    所以 apiNoMock() 跳过那层判断，只用于登录相关接口。 */
 async function apiNoMock(path, opts) {
-  const res = await fetch(API_SOURCE + path, withAuth(Object.assign({
-    headers: { 'Content-Type': 'application/json' },
-  }, opts || {})));
+  netBegin();   // 登录/诊断也要有反馈：那几步恰恰是用户盯着看的时候
+  try {
+    const res = await fetch(API_SOURCE + path, withAuth(Object.assign({
+      headers: { 'Content-Type': 'application/json' },
+    }, opts || {})));
 
-  let json = null;
-  try { json = await res.json(); } catch (_) { /* 可能没有响应体 */ }
+    let json = null;
+    try { json = await res.json(); } catch (_) { /* 可能没有响应体 */ }
 
-  if (!res.ok) {
-    const detail = (json && (json.detail || json.error)) || ('HTTP ' + res.status);
-    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+    if (!res.ok) {
+      const detail = (json && (json.detail || json.error)) || ('HTTP ' + res.status);
+      throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+    }
+    if (json && json.success === false) throw new Error(json.error || '服务端返回失败');
+    return json && typeof json === 'object' && 'data' in json ? json.data : json;
+  } finally {
+    netEnd();
   }
-  if (json && json.success === false) throw new Error(json.error || '服务端返回失败');
-  return json && typeof json === 'object' && 'data' in json ? json.data : json;
 }
 
 async function loadAuth() {
@@ -3667,7 +4786,9 @@ async function authLogin() {
     });
     toast('登录成功');
     await loadAuth();
-    await loadAll();          // 登录之后才开始加载数据
+    // 换了账号/刚登录：之前的"已加载"记录作废；只拉当前 tab 需要的数据
+    clearLoadedKeys();
+    await ensureTabData(state.tab);
   } catch (err) {
     toast('登录失败：' + err.message);
   } finally {
@@ -3685,14 +4806,19 @@ async function authLogout() {
     toast('已退出登录');
     // 退出后清掉已加载的数据 —— 否则页面上还留着上一位用户的车辆信息
     state.status = null; state.trips = []; state.trend = [];
-    state.summary = null; state.records = []; state.health = null;
-    state.capabilities = null; state.permissions = null; state.chargePlan = null;
+    state.charge = null; state.chargeMonths = []; state.chargeMonth = 'currentMonth'; state.health = null;
+    /* 补录的金额与核对中的截图同样是个人数据，退出即清 */
+    state.payments = []; state.ocrRows = null; state.ocrPick = {}; state.ocrImageSha = '';
+    state.chargeHasData = false; state.chargeAutoSynced = false;
+    state.capabilities = null; state.permissions = null;
     /* 车辆位置同样是个人数据，退出即清 —— 不能让下一位登录者看到上一位的车停在哪 */
     state.location = null;
     /* 充电站与**坐标**一并清掉：坐标属于个人位置数据，不该跨会话留存，
        而且它只对"这一次查询"有意义。 */
     state.stations = null; state.stationsTotal = 0; state.stationsPriceOk = true;
     state.loc = null; state.locStatus = 'idle'; state.locError = ''; state.stationOpen = '';
+    // "已加载"记录也要清：否则重登后会被判定成"这页已经取过了"，页面永远空着
+    clearLoadedKeys();
     await loadAuth();
     state.mode = 'needLogin';
     render();
@@ -3887,7 +5013,18 @@ function render() {
     settings: renderSettings,
   }[state.tab]();
 
+  // 内层列表的滚动位置要在重建 DOM 前记下来。
+  // 展开态的站点列表靠"滚到底"翻页，而翻页会 render() 一次 ——
+  // 不还原的话新一页一到，列表就弹回顶部，用户等于被打回起点。
+  const prevList = document.getElementById('stList');
+  const prevListTop = prevList ? prevList.scrollTop : 0;
+
   view.innerHTML = html;
+
+  if (prevListTop > 0) {
+    const nextList = document.getElementById('stList');
+    if (nextList) nextList.scrollTop = prevListTop;
+  }
 
   // 图表延后绘制（需等布局完成）
   requestAnimationFrame(() => {
@@ -3937,12 +5074,36 @@ function render() {
       }
     }
     if (state.tab === 'charges') {
-      const c = $('#monthChart');
-      if (c && state.summary && state.summary.monthly) {
-        const m = [...state.summary.monthly].reverse();
+      /* 月度充入电量：柱状图，横轴是**全部**可查月份（与上方筛选无关）。
+         月份清单是倒序的（本月在最前），这里反转成时间正序，否则图会从右往左读。 */
+      const c = $('#chargeMonthChart');
+      const months = state.chargeMonths || [];
+      if (c && months.length) {
+        const ordered = [...months].reverse();
+        const now = new Date();
+        /* 高亮所选月份那根柱子：上方大数只属于一个月，
+           图上却有全部月份 —— 不标出来就得靠月份标签去对。 */
+        const curIdx = ordered.findIndex((m) => m.yearMonth === state.chargeMonth);
         drawLineChart(c,
-          m.map((x) => ({ v: x.amount, label: fmtMonth(x.month) })),
-          { height: 168, decimals: 0, fillTop: 'rgba(46,139,192,.28)' });
+          ordered.map((m) => ({
+            v: m.kwh,
+            label: m.yearMonth === 'currentMonth'
+              ? `${now.getMonth() + 1}月`
+              : fmtMonth(m.yearMonth),
+          })),
+          { height: 176, decimals: 0, showValue: true, scrollable: true,
+            xLabelStep: 1, minPointWidth: 52, niceMax: true, bar: true,
+            color: '#2E8BC0', fillTop: 'rgba(46,139,192,.24)',
+            highlight: curIdx >= 0 ? curIdx : null,
+            series2: {
+              values: ordered.map((m) => {
+                const v = Number(m.avgMinutes);
+                // 没有流水的月份给 null（折线断开）—— 画成 0 会读成"充得特别快"
+                return m.count && !Number.isNaN(v) ? +(v / 60).toFixed(2) : null;
+              }),
+              color: '#E8A33D',
+              decimals: 1,
+            } });
       }
     }
   });
@@ -3983,7 +5144,7 @@ function syncModeBadge() {
   }
 }
 
-/* 各加载器返回是否成功，供 loadAll 统一判定后端可用性 */
+/* 各加载器返回是否成功，供 `ensureTabData` 判定后端可用性 */
 async function loadHealth() {
   try {
     state.health = await api('/api/health');
@@ -3995,6 +5156,7 @@ async function loadHealth() {
 }
 
 async function loadStatus() {
+  state.statusLoading = true;
   try {
     state.status = await api('/api/vehicle/status');
     const d = new Date();
@@ -4004,6 +5166,8 @@ async function loadStatus() {
   } catch (e) {
     console.warn('状态加载失败', e);
     return false;
+  } finally {
+    state.statusLoading = false;
   }
 }
 
@@ -4028,6 +5192,7 @@ async function loadTrips() {
   const isCurrent = !state.yearMonth || state.yearMonth === 'currentMonth';
   const monthQuery = isCurrent ? '' : '&yearMonth=' + encodeURIComponent(state.yearMonth);
 
+  state.energyLoading = true;
   try {
     state.energy = await api('/api/trips/energy?scope=month' + monthQuery);
     if (isCurrent) {
@@ -4043,6 +5208,8 @@ async function loadTrips() {
     state.energy = null;
     state.energyWindow = null;
     return false;
+  } finally {
+    state.energyLoading = false;
   }
 }
 
@@ -4054,24 +5221,142 @@ async function loadEnergyMonths() {
     if (state.months.length && !state.months.some((m) => m.yearMonth === state.yearMonth)) {
       state.yearMonth = 'currentMonth';
     }
+    return true;
   } catch (e) {
     state.months = [];
+    // 显式返回失败：按需加载靠这个决定"下次进这个 tab 要不要重试"
+    return false;
+  }
+}
+
+/* ── 充入电量：官方「充电记录」 ──
+   三层状态刻意分开：
+     · 月份清单（决定按钮与趋势图）
+     · 选中月份的统计（决定卡片与列表）
+     · 同步动作（决定要不要打官方网关）
+   这样切月份只是"读本地库"，永远不联网。 */
+async function loadChargeMonths() {
+  try {
+    const data = await api('/api/charges/months');
+    state.chargeMonths = data.months || [];
+    state.chargeHasData = data.hasData === true;
+    // 跨月后原来选中的月份可能已经不在清单里，退回本月
+    if (state.chargeMonths.length
+        && !state.chargeMonths.some((m) => m.yearMonth === state.chargeMonth)) {
+      state.chargeMonth = 'currentMonth';
+    }
+    return true;
+  } catch (e) {
+    console.warn('充电月份加载失败', e);
+    state.chargeMonths = [];
+    return false;
+  }
+}
+
+/* 截图识别能不能用（服务端有没有配 DEEPSEEK_API_KEY）。
+   失败也不影响页面 —— 只是把识别按钮降级；手写录入那条路永远开着。 */
+async function loadOcrStatus() {
+  try {
+    const data = await api('/api/charges/receipts/status');
+    state.ocrConfigured = data.configured === true;
+  } catch (e) {
+    console.warn('截图识别状态加载失败', e);
+    state.ocrConfigured = null;
+  }
+}
+
+async function loadChargeSessions() {
+  try {
+    const q = state.chargeMonth === 'currentMonth'
+      ? ''
+      : '?yearMonth=' + encodeURIComponent(state.chargeMonth);
+    state.charge = await api('/api/charges/sessions' + q);
+    return true;
+  } catch (e) {
+    console.warn('充电流水加载失败', e);
+    return false;
+  }
+}
+
+/* 同步充电流水（打官方网关，幂等）。
+   `silent` 用于"本地库是空的、自动补一次"的场景 —— 那时不该弹 toast，
+   成功失败都只是把页面填上或保持空态。 */
+async function runChargeSync(opts = {}) {
+  if (state.chargeSyncing) return false;
+  state.chargeSyncing = true;
+  render();
+  try {
+    const data = await api('/api/charges/sync', { method: 'POST' });
+    await loadChargeMonths();
+    await loadChargeSessions();
+    if (!opts.silent) {
+      toast(data && data.fetched
+        ? `已同步 ${data.fetched} 笔充电记录`
+        : '已是最新，没有新增充电记录');
+    }
+    return true;
+  } catch (e) {
+    const msg = (e && e.message) ? e.message : '同步失败';
+    if (opts.silent) console.warn('自动同步充电记录失败', e);
+    else toast(msg);
+    return false;
+  } finally {
+    state.chargeSyncing = false;
+    render();
   }
 }
 
 async function loadCharges() {
-  try {
-    const [summary, records] = await Promise.all([
-      api('/api/charges/summary?months=6'),
-      api('/api/charges/records?limit=50'),
-    ]);
-    state.summary = summary;
-    state.records = records || [];
+  // 演示 / 离线：用内置数据，一个请求都不发
+  if (state.mode === 'mock' || state.mode === 'offline') {
+    applyMockCharges();
     return true;
+  }
+
+  state.chargeLoading = true;
+  render();
+  try {
+    /* OCR 可用性与待确认队列**不阻塞首屏**：
+       拿不到也只是识别按钮置灰 / 队列为空，不该让整页等着。 */
+    loadOcrStatus();
+    await loadChargeMonths();
+
+    /* 本地库空 ⇒ 自动同步一次。
+       为什么只在这一种情况下自动打网关：官方接口一次给两年全量，
+       而用户多数时候只是"看一眼上个月"，每次进页面都拉一遍纯属浪费，
+       也更容易触发风控。之后靠卡片上的「同步」按钮按需刷新。 */
+    if (!state.chargeHasData && !state.chargeAutoSynced) {
+      state.chargeAutoSynced = true;
+      // 同步内部已经把月份与流水都重新读了一遍，成功就直接返回，
+      // 免得同一份本地数据再查一次
+      if (await runChargeSync({ silent: true })) return true;
+    }
+
+    return await loadChargeSessions();
   } catch (e) {
     console.warn('充电数据加载失败', e);
     return false;
+  } finally {
+    state.chargeLoading = false;
   }
+}
+
+/* 演示数据的月份切换：后端没有请求可发，就在本地按同一口径现算 */
+function applyMockCharges() {
+  state.chargeMonths = MOCK.charge.months;
+  state.chargeHasData = true;
+
+  // 先校验选中项还在不在清单里，再算数据 —— 顺序反了会先按不存在的月份算一遍，
+  // 再把 state 改回本月，页面显示的就是"本月标题 + 空数据"
+  if (!state.chargeMonths.some((m) => m.yearMonth === state.chargeMonth)) {
+    state.chargeMonth = 'currentMonth';
+  }
+
+  const now = new Date();
+  const ym = state.chargeMonth === 'currentMonth'
+    ? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    : state.chargeMonth;
+  state.charge = summarizeCharge(ym, MOCK.charge.sessions);
 }
 
 function seedMock() {
@@ -4084,20 +5369,20 @@ function seedMock() {
   state.months = MOCK.months;
   state.yearMonth = 'currentMonth';
   state.energyWindow = MOCK.energyWindow;
-  state.summary = MOCK.summary;
-  state.records = MOCK.records;
+  /* 充入电量：演示数据与真实接口同一个缺口（没有金额、没有站点名） */
+  state.chargeMonths = MOCK.charge.months;
+  state.chargeMonth = 'currentMonth';
+  state.chargeHasData = true;
+  applyMockCharges();
   state.health = MOCK.health;
   state.capabilities = MOCK.capabilities;
   state.permissions = MOCK.permissions;
-  state.chargePlan = MOCK.chargePlan;
   state.location = MOCK.location;
-  state.stations = MOCK.stations;
-  state.stationsTotal = MOCK.stations.length;
-  // 演示数据一次给完，不做分页（也不该让用户滑出"加载更多"的假动作）
-  state.stationsOffset = MOCK.stations.length;
-  state.stationsHasMore = false;
-  state.stationsLoadingMore = false;
+  // 演示数据一次给完，不做分页（也不该让用户滑出"加载更多"的假动作）；
+  // 若此时已经选了筛选条件，一并按同一套规则过滤掉
   state.stationsPriceOk = true;
+  applyMockStationFilters();
+  state.stationsLoadingMore = false;
   /* 预览兜底数据的位置：与 MOCK.stations 里各站的距离基准一致（上海市中心）。
      直接给值而不是走定位 —— 预览页的本职是"看设计"，
      不该一打开就弹权限框。 */
@@ -4121,11 +5406,11 @@ async function loadCapabilities() {
     if (data && Array.isArray(data.permissions)) {
       state.permissions = data.permissions;
     }
-    if (data && data.chargePlan) {
-      state.chargePlan = data.chargePlan;
-    }
+    return true;
   } catch {
+    // 失败不清空已有值（可能是上一次成功的），但要让调用方知道该重试
     state.capabilities = state.capabilities || null;
+    return false;
   }
 }
 
@@ -4139,8 +5424,8 @@ function notifyFallback(reason) {
   console.warn('[ZeekrDash] 后端不可达，已回落模拟数据', reason || '');
 }
 
-/* 并发保护：启动与 visibilitychange 可能同时触发，避免重复请求与状态抖动 */
-let loading = false;
+/* 并发保护：启动与 visibilitychange 可能同时触发，避免重复请求与状态抖动。
+   （具体的"同一份数据别重复打"在 `ensureTabData` 的 loadingKeys 里。） */
 
 /* 是否已建立登录会话 —— 所有数据接口的前置条件。 */
 function isLoggedIn() {
@@ -4167,7 +5452,8 @@ async function bootstrap() {
 
   if (a.authenticated) {
     state.mode = 'live';
-    await loadAll();
+    // 只加载当前 tab 需要的数据；其余 tab 等用户点进去再取
+    await ensureTabData(state.tab);
     return;
   }
 
@@ -4181,7 +5467,7 @@ async function bootstrap() {
 
   // 后端在，但还没登录：停在登录引导，不碰任何数据接口
   state.status = null; state.trips = []; state.trend = [];
-  state.summary = null; state.records = []; state.health = null;
+  state.charge = null; state.chargeMonths = []; state.chargeMonth = 'currentMonth'; state.health = null;
   /* 未登录时不定位、也不保留上一会话的站点与坐标 */
   state.stations = null; state.loc = null; state.locStatus = 'idle';
   state.location = null;
@@ -4199,6 +5485,8 @@ function goTab(name) {
      被拒绝后反复弹权限框是骚扰，之后交给用户点「重试定位」。 */
   if (name === 'charges' && state.locStatus === 'idle') locate();
   render();
+  // 切到哪个 tab 才取哪个 tab 的数据（已取过的不会重复打）
+  ensureTabData(name);
 }
 
 /* 未登录时的占位 —— 明确说明"没有请求接口"，免得看起来像页面坏了 */
@@ -4215,38 +5503,98 @@ function renderLoginWall() {
     </div>`;
 }
 
-async function loadAll() {
-  if (loading) return;
-  loading = true;
+/* ── 按需加载：每个 tab 只请求自己需要的接口 ──
+   原来登录后一次把 status / health / location / charges / energy / capabilities
+   全打一遍。可用户多数时候只看一页 —— 全量预取等于把后端和第三方额度
+   花在没人看的数据上（充电站还要逐站取价，最贵）。
+   `loadedKeys` 只记**成功**过的键，失败的下次进该 tab 会自动重试。 */
+const TAB_NEEDS = {
+  dash:     ['health', 'capabilities', 'status', 'location'],
+  trips:    ['energyMonths', 'trips'],
+  // 充电页不再需要能力集：预约充电卡已换成「充入电量」，
+  // 而附近站点只看气泡接口字段，与权限包无关。少一个请求就少一分压力。
+  charges:  ['charges'],
+  settings: ['health', 'capabilities'],
+};
+
+/* 键 → 实际 loader。注意 `loadCapabilities` 会一并带回 permissions。 */
+const DATA_LOADERS = {
+  health: loadHealth,
+  capabilities: loadCapabilities,
+  status: loadStatus,
+  location: loadLocation,
+  trips: loadTrips,
+  energyMonths: loadEnergyMonths,
+  charges: loadCharges,
+};
+
+const loadedKeys = new Set();
+const loadingKeys = new Set();
+
+/* 清空"已加载"记录：登录 / 登出 / 换账号时必须调用，
+   否则下一位用户会看到上一位的缓存判定"已经加载过了"。 */
+function clearLoadedKeys() {
+  loadedKeys.clear();
+  loadingKeys.clear();
+}
+
+async function ensureTabData(tab, force = false) {
+  if (!isLoggedIn()) {
+    if (state.mode !== 'needLogin') { seedMock(); state.mode = 'mock'; }
+    return;
+  }
+
+  const todo = (TAB_NEEDS[tab] || []).filter((k) => force || !loadedKeys.has(k));
+  if (!todo.length) return;
+
+  const keys = new Set(todo);
+  /* 这些标志必须在**第一次 render() 之前**置位 —— 各 loader 内部虽然也会置位，
+     但那是排在 render 之后的，等它们置位时这一帧已经画完了，
+     首屏就会显示「尚未获取到车辆数据 / 请确认服务已启动」，明明后端是好的。 */
   state.loading = true;
+  if (keys.has('status')) state.statusLoading = true;
+  if (keys.has('charges')) state.chargeLoading = true;
+  if (keys.has('trips')) state.energyLoading = true;
   render();
 
+  const failed = new Set();
   try {
-    // ① 地址未配置或指向 localhost：按约定直接展示内置模拟数据，不请求后端
-    // 未登录 / 无后端：不请求数据接口（登录态由 bootstrap 统一处理）
-    if (!isLoggedIn()) {
-      if (state.mode !== 'needLogin') { seedMock(); state.mode = 'mock'; }
-      return;
-    }
-
-    // ② 配置了真实地址：并发请求，全量结果一起等
-    //    以「车辆状态 + 健康检查」是否都拿到作为后端可用的判据，
-    //    任一失败即视为不可达，回落模拟数据
-    const [statusOk, healthOk] = await Promise.all([loadStatus(), loadHealth()]);
-    await Promise.all([loadEnergyMonths(), loadTrips(), loadCharges(), loadCapabilities(), loadAuth(), loadLocation()]);
-
-    if (statusOk && healthOk) {
-      state.mode = 'live';
-      fallbackNotified = false;
-    } else {
-      seedMock();
-      state.mode = 'offline';
-      notifyFallback('后端未响应 /api/vehicle/status 或 /api/health');
-    }
+    await Promise.all(todo.map(async (key) => {
+      // 同一份数据正在加载就别重复打（快速来回切 tab 时会发生）
+      if (loadingKeys.has(key)) return;
+      loadingKeys.add(key);
+      try {
+        const ok = await DATA_LOADERS[key]();
+        if (ok === false) failed.add(key);
+        else loadedKeys.add(key);   // undefined 视为成功：该 loader 自己吞了异常
+      } catch (e) {
+        console.warn('加载失败', key, e);
+        failed.add(key);
+      } finally {
+        loadingKeys.delete(key);
+      }
+    }));
   } finally {
-    syncModeBadge();
     state.loading = false;
-    loading = false;
+    /* 兜住"未登录早退 / 抛错"的分支：早退时各 loader 根本没跑，
+       不清就会永远停在「正在读取…」。 */
+    state.statusLoading = false;
+    state.chargeLoading = false;
+    state.energyLoading = false;
+
+    /* 只有这次真的问了"后端通不通"（车况那批），才做可达性判断 ——
+       其它 tab 不碰 status/health，不该因为自己没问就判后端死了。 */
+    if (keys.has('status') || keys.has('health')) {
+      if (failed.has('status') || failed.has('health')) {
+        seedMock();
+        state.mode = 'offline';
+        notifyFallback('后端未响应 /api/vehicle/status 或 /api/health');
+      } else {
+        state.mode = 'live';
+        fallbackNotified = false;
+      }
+    }
+    syncModeBadge();
     render();
   }
 }
@@ -4286,12 +5634,30 @@ document.addEventListener('click', (e) => {
     render();
     return;
   }
+  // 附近站点筛选 chip
+  const filterChip = e.target.closest('.st-chip[data-f]');
+  if (filterChip) {
+    // 只有「快充」带 data-v；自营 / 停车免费是纯开关
+    toggleStationFilter(filterChip.dataset.f, filterChip.dataset.v);
+    return;
+  }
+  // 清除筛选（列表里和空态里各有一个同 id 按钮，行为一致）
+  if (e.target.closest('#stFilterReset')) {
+    state.stationFilter = { connector: '', maxPrice: null, selfOnly: false, parkFree: false };
+    loadStations();
+    return;
+  }
   // 站点卡片：展开 / 收起分时电价表
   const stCard = e.target.closest('.st');
   if (stCard) {
     const sid = stCard.dataset.sid;
     state.stationOpen = state.stationOpen === sid ? '' : sid;
     render();
+    return;
+  }
+  // 附近站点：手动加载更多（按钮在 `#stList` 内部，所以放在 `.st` 判断之后）
+  if (e.target.closest('#stMoreBtn')) {
+    loadMoreStations();
     return;
   }
   // 车控
@@ -4301,9 +5667,53 @@ document.addEventListener('click', (e) => {
     sendCommand(ctrl);
     return;
   }
-  // 月份选择：弹出 iOS 风格底部弹层（年份 + 月份两段）
+  // 月份选择：弹出 iOS 风格底部弹层（年份 + 月份两段）。
+  // 行程页与充电页各用自己的清单和选中项 —— 共用 state 会让两边互相串。
   if (e.target.closest('#monthBtn')) {
-    openMonthSheet();
+    openMonthSheet({
+      months: state.months,
+      current: state.yearMonth,
+      title: '选择月份',
+      onPick: (v) => { state.yearMonth = v; loadTrips().then(render); },
+    });
+    return;
+  }
+  if (e.target.closest('#chargeMonthBtn')) {
+    openMonthSheet({
+      months: state.chargeMonths,
+      current: state.chargeMonth,
+      title: '选择月份',
+      onPick: (v) => {
+        state.chargeMonth = v;
+        if (state.mode === 'mock' || state.mode === 'offline') {
+          applyMockCharges();
+          render();
+        } else {
+          loadChargeSessions().then(render);
+        }
+      },
+    });
+    return;
+  }
+  // 手动同步充电流水（官方接口幂等，连点有后端 10 秒冷却兜底）
+  if (e.target.closest('#chargeSyncBtn')) {
+    runChargeSync();
+    return;
+  }
+  /* 金额补录三个入口。
+     顺序无所谓，但都要在 `.st` 之类判断之前无所谓 —— 它们不在站点卡里，
+     这里只需要注意别被上面的站点筛选/排序规则误伤（用的是独立 id）。 */
+  if (e.target.closest('#ocrPickBtn')) {
+    pickReceiptImage();
+    return;
+  }
+  if (e.target.closest('#manualPayBtn')) {
+    openManualSheet();
+    return;
+  }
+  if (e.target.closest('#pendingPayBtn')) {
+    // 队列要现拉 —— 别的用户/别的设备刚补录过的话，本地这份就过期了
+    loadPayments().then(() => { openPaymentsSheet(); });
     return;
   }
   // 图表区间切换（限定 data-days：`.seg` 被附近充电站的排序复用了）
@@ -4435,8 +5845,9 @@ const DBG_ENDPOINTS = [
   { m: 'GET',  p: '/api/trips',             d: '行程列表' },
   { m: 'GET',  p: '/api/trips/energy',      d: '官方能耗统计（≤31 天）' },
   { m: 'GET',  p: '/api/energy/trend',      d: '能耗趋势' },
-  { m: 'GET',  p: '/api/charges/summary',   d: '充电消费汇总' },
-  { m: 'GET',  p: '/api/charges/records',   d: '充电消费明细' },
+  { m: 'POST', p: '/api/charges/sync',      d: '同步官方充电流水' },
+  { m: 'GET',  p: '/api/charges/sessions',  d: '充电流水（默认本月）' },
+  { m: 'GET',  p: '/api/charges/months',    d: '可查月份与月度电量' },
   { m: 'GET',  p: '/api/auth/status',       d: '登录状态' },
   { m: 'POST', p: '/api/auth/sendCode',     d: '请求验证码', body: { phone: '' } },
   { m: 'POST', p: '/api/auth/verifyCode',   d: '校验验证码', body: { phone: '', code: '' } },
@@ -4490,7 +5901,7 @@ async function dbgConnect() {
     toast('已连接 ' + API_SOURCE);
   } catch (err) {
     // 不额外弹 toast：状态灯变红 + 请求日志里已写明原因，
-    // 后面 loadAll() 还会再弹一次"已切换为模拟数据"，避免重复打扰
+    // 后面 ensureTabData() 还会再弹一次"已切换为模拟数据"，避免重复打扰
     dbgSetStatus('bad', '连不上');
   }
 
@@ -4502,7 +5913,7 @@ async function dbgConnect() {
   renderDebugPanel();
   renderDebugLog();
   // 未登录时不加载数据 —— 登录态由 bootstrap 统一把关
-  if (isLoggedIn()) await loadAll();
+  if (isLoggedIn()) await ensureTabData(state.tab, true);
 }
 
 /* 单独调用某个接口 —— 结果直接写进请求日志 */
@@ -4687,19 +6098,21 @@ function initDebugUI() {
 initDebugUI();
 bootstrap();     // 先确认登录态，再决定要不要加载数据
 
-/* ── 充电站滑动分页 ──
-   哨兵元素进入视口（提前 240px）就取下一页。
-   用 window scroll 而不是 IntersectionObserver：render() 每次都重建 DOM，
-   observer 得反复重绑；scroll 监听一次就够，且天然能判断"当前在充电页"。 */
-window.addEventListener('scroll', () => {
+/* ── 充电站分页：只认**内层列表**滚到底 ──
+   卡片高度固定、列表自己滚（CSS `.st-list`），所以：
+   · 手指在列表上滑 → 只滚列表，滑到底自动取下一页；
+   · 手指在列表外滑 → 正常翻整页，去下面的「充入电量」「充电记录」。
+   两者用**不同的滚动容器**隔开，就不会再出现"越滑越加载、下面的卡永远看不到"。
+   `scroll` 不冒泡，用 capture 在 document 上收 —— render() 每次重建 DOM，
+   挂在元素上就得反复重绑，挂在 document 上只挂一次。 */
+document.addEventListener('scroll', (e) => {
   if (state.tab !== 'charges') return;
   if (!state.stationsHasMore || state.stationsLoadingMore) return;
-  const sentinel = document.getElementById('stationsSentinel');
-  if (!sentinel) return;
-  if (sentinel.getBoundingClientRect().top < window.innerHeight + 240) {
-    loadMoreStations();
-  }
-}, { passive: true });
+  const list = e.target;
+  if (!list || !list.classList || !list.classList.contains('st-list')) return;
+  const nearBottom = list.scrollTop + list.clientHeight >= list.scrollHeight - 48;
+  if (nearBottom) loadMoreStations();
+}, { passive: true, capture: true });
 
 /* 滚动响应：下滑超过一屏的 6% 时，顶栏玻璃变实
    —— 对应 iOS 26 从 scrollEdge 到 inline 的过渡行为 */
@@ -4733,7 +6146,7 @@ setTimeout(schedulePoll, 5000);
 // 页面回到前台时刷新
 document.addEventListener('visibilitychange', () => {
   // 未登录时不刷新 —— 没有可刷的数据，只会白打接口
-  if (!document.hidden && isLoggedIn()) loadAll();
+  if (!document.hidden && isLoggedIn()) ensureTabData(state.tab, true);
 });
 </script>
 </body>

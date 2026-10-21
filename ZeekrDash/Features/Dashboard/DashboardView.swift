@@ -359,8 +359,11 @@ struct DashboardView: View {
     /// 三条底线（与网页 `vehicleLocationCard()` 一致）：
     /// 1. **位置不是实时的** —— 标题右侧必须写「最后上报 X」，否则会被当成"车现在就在这"；
     ///    车静止时网关不更新坐标（实测 15 条快照只有 3 个位置点）。
-    /// 2. **没配地图 key ≠ 没有位置** —— 照常显示坐标，只是没有地址与地图。
-    /// 3. 地图取不到就只不显示图，地址与坐标照常可读。
+    /// 2. **没配地图 key ≠ 没有位置** —— 照常显示「最后上报」与提示，只是没有地址与地图。
+    /// 3. 地图取不到就只不显示图，地址照常可读。
+    ///
+    /// 经纬度**不展示**：`31.2035, 121.5858` 这种数字对人没有信息量，
+    /// 判断"车在哪"只能靠地址与地图；把精确坐标摆在屏幕上属于多余暴露。
     private func locationCard(_ location: VehicleLocation?) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .firstTextBaseline) {
@@ -395,12 +398,6 @@ struct DashboardView: View {
                                      ? Theme.textSecondary(scheme)
                                      : Theme.textPrimary(scheme))
                     .fixedSize(horizontal: false, vertical: true)
-
-                if let coordinate = location.coordinateText {
-                    Text(coordinate)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Theme.textTertiary(scheme))
-                }
 
                 if let secondary = location.secondaryAddress {
                     Text(secondary)
@@ -455,7 +452,7 @@ struct DashboardView: View {
         if location.mapAvailable == true {
             return "地图服务已配置，但这次没取到地址（可能是第三方额度用完或网络问题）。稍后会自动重试。"
         }
-        return "尚未配置腾讯地图 key，仅显示坐标。在服务端 .env 填入 TENCENT_MAP_KEY 并重启，即可显示地址与地图。"
+        return "尚未配置腾讯地图 key，只能看到「最后上报」时间。在服务端 .env 填入 TENCENT_MAP_KEY 并重启，即可显示地址与地图。"
     }
 
     /// 把服务端透传的 `yyyy-MM-dd HH:mm:ss` 变成「今天 10:48」/「10月19日 10:48」。

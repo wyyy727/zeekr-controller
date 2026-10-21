@@ -149,11 +149,18 @@ python scripts/apk_intel.py <新版.apk> --compare docs/zeekr-apk-intel.json
 | `server/app/adapters/mock_client.py` | 模拟数据（字段形状必须与 live 保持一致 —— 有测试守着） |
 | `server/tests/test_adapter_shape.py` | 防漂移：两个适配器输出形状必须一致 |
 | `server/tests/test_stations.py` | 附近充电站：字段裁剪、降级语义、缓存网格 |
+| `server/app/api/charges.py` | `POST /charges/sync` + `GET /charges/sessions|months` —— **充入电量**（官方 `charge/log/queryGroupMouth`）；以及金额补录：`receipts/ocr|commit`、`payments/*` |
+| `server/app/adapters/vision_ocr.py` | 充电账单截图识别（DeepSeek Vision）。**图片不落盘**，回传前按白名单 + 正则再刮一遍隐私 |
+| `server/app/bills/matching.py` | 金额 ↔ 充电流水配对：电量 ±5% 且时间 ±10 分钟才算强匹配 |
+| `server/tests/test_charge_sessions.py` | 充电流水：口径一致性、幂等同步、不编造金额 |
+| `server/tests/test_charge_receipts.py` | 金额补录：配对口径、不吞钱、隐私过滤 |
 | `preview/index.html` | **单文件设计预览页 + 调试台**（功能改动的唯一落点）。`?debug=1` 调出调试浮层 |
 | `scripts/server.cmd` / `server.sh` | 服务管理（Windows / bash 两版，功能对应，须同步改） |
 | `scripts/logs_tail.py` | 实时跟随服务日志（`server.cmd logs` 调用），并做 UTF-8 → 控制台编码转换 |
 | `ZeekrDash/Features/Charges/NearbyStationsViewModel.swift` | 附近充电站：定位（一次性）→ 取站点 → 排序 |
 | `ZeekrDash/Features/Charges/NearbyStationsView.swift` | 附近充电站卡片 UI |
+| `ZeekrDash/Features/Charges/ChargesViewModel.swift` | 充入电量（月份 / 流水 / 同步）+ 金额补录（OCR / 手工 / 待确认配对） |
+| `ZeekrDash/Features/Charges/ChargesView.swift` | 充电页 UI：充入电量单卡（大数 + 双轴趋势图）、充电记录、充电费用 |
 | `ZeekrDash/Features/Dashboard/DashboardView.swift` | 车况主页：电量 / 胎压 / 车身状态 / **车辆位置** / 车控面板 |
 | `docs/zeekr-apk-reference.md` | 官方接口情报（**先查这里**） |
 | `docs/真机验证清单.md` | 真车逐条核对清单 |
@@ -187,13 +194,136 @@ python scripts/apk_intel.py <新版.apk> --compare docs/zeekr-apk-intel.json
 
 **分页是服务端切片，不是上游分页**：极氪 `getListV2` 一次就把视野内的站点全给了
 （它自己没有分页参数），所以 `limit` / `offset` 是在排好序的列表上切。
-`total` 是切片前的总数，前端靠 `offset + count < total` 判断还有没有下一页。
 首屏取 10 条而不是 20 —— 取价是按站请求的，10 个只要 2 轮、20 个要 4 轮，
 这是"加载慢"的主要来源。
+
+翻页只认服务端字段 **`nextOffset` / `hasMore`**，不要用 `offset + count < total` 推算。
+原因：筛选分两类，"枪型/自营"来自气泡接口（零成本，切片**之前**过滤，
+`total` 是筛选后的真实条数）；"电价上限/停车免费"必须先逐站问浩汉才知道，
+只能在切片后逐批取价再筛，并受 `PRICE_SCAN_MAX`（30）限制扫描范围 ——
+此时中间被扫描掉、不符合条件的候选**不返回**，`nextOffset` 会大于
+`offset + count`，自己推算就会重复请求同一段。响应里的 `priceFilterApplied`
+就是用来告诉前端"此时 total 只是候选数，别当匹配数显示"。
+
+界面上目前只暴露 **快充 / 极氪自营 / 停车免费** 三个 chip：
+电价档位（≤1.0/1.5/2.0 元）与"慢充"试过一版，一行铺 7 个 chip 太占地方，已去掉。
+`max_price` / `connector=ac` 这两个**接口参数保留**（有测试），要恢复只改 `filterRow`。
+
+**卡片固定高度、列表自己滚**：站点卡放在充电页上半部分，若列表不限高且自动翻页，
+用户想去下面的「充入电量」「充电记录」时，每次接近列表底部就会触发下一页，
+卡片一直往下长 —— 表现为"分页停不下来、下面的卡永远看不到"。
+现在的做法（网页与 iOS 一致）：
+- 列表 `max-height: 384px` + `overflow-y: auto`（iOS：`ScrollView { LazyVStack }` 的 `frame(maxHeight:)`）
+- **没有「展开全部/收起」** —— 卡片一进来就是最终高度，位置不跳
+- 分页只由**内层列表**滚到底触发（`document` 上 capture 监听 `.st-list` 的 scroll），
+  页面滚动完全不参与 ⇒ 手指在列表外滑就是正常翻页
+- 列表底部保留「加载更多」兜底：某页条数很少时列表不需要滚动，那条"滚到底"永远等不到
+
+**登录后不要一次性打满全部接口**：网页改成按 tab 懒加载（`TAB_NEEDS` + `ensureTabData`），
+切到哪个 tab 才取哪个 tab 的数据，失败的下次进页面重试（`loadedKeys` 只记成功）。
+iOS 本来就分散：`AppStore.refresh()` 只取车况那批（status/caps/location），
+行程与账单由各自 ViewModel 的 `.task` 触发。
 
 **导航必须带 `callnative=1`**：高德 URI 文档里该参数**默认是 0**，不传就只在浏览器
 打开 H5 网页版（用户报过"跳到浏览器高德"）。另外要用 `navigation` 而不是 `marker`
 —— 后者只标点、不规划路线。iOS 优先走 `iosamap://navi` scheme，失败再退回 H5。
+
+---
+
+## 🔌 充入电量（charge_sessions）：改这块之前先读
+
+**数据源只有一个**，且它是官方 App「充电记录」页的接口：
+
+```
+POST /ms-charge-manage/api/v2.0/charge/log/queryGroupMouth
+body: {"startTimeStart": null, "chargeType": ""}   // 一次给约两年
+```
+
+三个必须记住的点（少一个就失败，且报错会误导人）：
+
+1. 除 GW3 签名头外**必须带** `X-TENANT-ID: ZEEKR` + `X-VEHICLE-BRAND: ZEEKR`，缺一个报 `079001`
+   （看起来像"没权限"，实际是缺头）；
+2. `X-VIN` 必须是**加密后的** VIN，明文报 `079025 Decrypt X-VIN failed.`；
+3. 返回是「年 → 月 → 记录」三层，`power` 是电量（度），`chargedTime` 是**分钟**。
+
+**口径（改 UI 前先对齐这张表）**：
+
+| 展示项 | 算法 | 坑 |
+|---|---|---|
+| 充入电量 | Σ`power` | 单位度 |
+| 充电次数 | 记录条数 | **含电量缺失的记录**；次数与电量是两个维度 |
+| 快 / 慢充 | `chargeTypeName` 含「直流」/「交流」 | 上游有时给空名 ⇒ 落 `unknown`，别猜 |
+| 平均功率 | 电量 ÷ (时长/60) | 比"充了多久"更能说明桩快慢 |
+| 每次充电时长 | 该月总时长 ÷ 次数 | 趋势图的**第二根轴**（小时）；量纲不同，不能硬套左轴 |
+| 金额 | **不存在** | 见下 |
+
+**充电页是一张「充入电量」卡**（月度大数 + 月度趋势图 + 直流/交流拆分一行），
+不是两张卡也不是四宫格：
+
+- 大数只属于**所选月份**，图里却有**全部月份** ⇒ 所选月份那根柱子高亮、其余压暗
+  （`drawLineChart` 的 `opts.highlight`），否则"这个数对应哪根"要人工去对；
+- 图是**柱（电量，左轴）+ 折线（每次充电时长，右轴）**：同样 40 度，
+  快充二十分钟、慢充一整夜，光看柱子完全一样；
+- **快充 / 慢充不单独给"次数"** —— 直流次数 + 交流次数 = 上面那个「共 N 次」，
+  换个说法重复一遍而已。只保留各自的**电量**，压成图下面一行。
+
+iOS 侧（`ChargesView.trendChart`）要额外记住一件事：**Swift Charts 没有"每系列一套刻度"**。
+所以时长按 `scale = (axisMax * 0.74) / maxHours` 折算进电量的坐标空间，
+右轴的刻度值再反向折算回小时显示（`raw / scale`）。改 `axisMax` 的取值时，
+两个地方必须一起改，否则右轴数字和线的位置就对不上了。
+
+**金额一定不要编。** 车端报文里没有任何 `fee/cost/amount/price` 字段，站点也不在
+充电记录里；官方 App 的「补能订单」金额页在浩汉网关后面（要浩汉账号态），
+**不可自动化**。所以金额只有三条路：截图识别（主线，已接入）/ 手写录入 / 估算
+（必须标 `estimated`，且**不与真值混算**）。没有金额时费用卡写「金额未记录」，
+**不显示任何估算数字** —— 把猜测画成"实际支出"比留空更糟。
+
+**表设计：`charge_sessions` 与 `charge_records` 不要合并。**
+前者是"车充了多少度"（自动、权威），后者是"支付账单解析出的金额"（历史遗留、实测 0 行）。
+合成一行就会逼着二选一 —— `charge_records.energy_kwh` 恒为 NULL 就是这么来的。
+`amount` 与 `station_name` 只由 OCR/手工写入，同步时用 `COALESCE(旧值, 新值)` 保留，
+**例行同步绝不能把用户补录的钱抹掉**。
+
+**不要把 VIN 落进这张表**：本机单车主场景，落一份车架号只是凭空多一处敏感数据，
+查询也只按月份过滤。
+
+**同步节奏**：`POST /api/charges/sync` 是幂等的（按 `eventId` upsert），但有 10 秒冷却
+（连点会连打官方网关）。页面只在**本地库为空**时自动同步一次，其余时候靠「同步」按钮，
+切月份/切 tab 都只读本地库。
+
+---
+
+## 💴 金额补录（截图识别 / 手写 / 待确认配对）：改这块之前先读
+
+金额唯一能拿到的地方是**人手里的那张截图**（极氪 App「补能订单」页、第三方账单、
+支付凭证）。链路：
+
+```
+选图 → POST /api/charges/receipts/ocr   （识别，**不入库**，返回候选 + needsReview）
+     → 前端弹核对框（金额/电量/时间/站点可改，可指定归属哪次充电）
+     → POST /api/charges/receipts/commit（幂等，配不上的落 pending / unmatched）
+     → GET  /api/charges/payments       （待确认队列，点一下即可绑定）
+```
+
+三条红线：
+
+| 红线 | 为什么 |
+|---|---|
+| **识别结果不直接入库** | 模型会把服务费原价当金额、会把一笔看成两笔；"金额读错"比"没有金额"更糟 |
+| **配不上的不丢** | 零命中 → `unmatched`，多候选 → `pending`。钱已经花了，删掉等于把支出抹了 |
+| **图片不落盘** | 只在内存 → base64 → 上游；日志只记 `sha8` / 字节数 / 耗时 |
+
+**配对口径**（`bills/matching.py`，别自己改）：
+强匹配 = 电量差 ≤5% **且** 起点差 ≤10 分钟；弱匹配 = 落在 session 起止 ±30 分钟。
+唯一强匹配才自动绑定，其余一律进「待确认」。之所以不用订单号：官方订单号在支付侧，
+充电流水里没有，能对齐的只有电量 + 时间。
+
+**隐私**：`vision_ocr.py` 的 prompt 明确禁止输出 VIN / 车牌 / 手机号 / 完整订单号，
+回传后还要按白名单 + 正则再刮一遍（模型不听话是常态，不能只靠 prompt）。
+订单号只留后四位，站点名去掉门牌楼层。
+
+**开关**：`DEEPSEEK_API_KEY`（根 `.env`）。没配时 `/receipts/status` 返回
+`configured=false`，前端把识别按钮降级并给出指引，但**手写录入永远可用**。
 
 ---
 
