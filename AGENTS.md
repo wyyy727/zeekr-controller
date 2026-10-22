@@ -143,9 +143,9 @@ python scripts/apk_intel.py <新版.apk> --compare docs/zeekr-apk-intel.json
 | `server/app/adapters/haohan.py` | 第三方充电网关（站名 + 电价来源），与极氪侧零耦合 |
 | `server/app/api/stations.py` | `GET /api/stations/nearby` —— 两跳合并、并发取价、降级与缓存 |
 | `server/app/api/trips.py` | `GET /api/trips/energy` —— **官方「行程与能耗」日统计**（`h5/getDailyStatisticsInfo`，≤31 天），行程页的数据源 |
-| `server/app/adapters/tencent_map.py` | 腾讯位置服务（逆地理编码 + 静态图）。**key 只在服务端** |
+| `server/app/adapters/tencent_map.py` | 腾讯位置服务（逆地理编码 + 静态图 + **天气**）。**key 只在服务端** |
 | `server/app/core/coords.py` | WGS-84 ↔ GCJ-02。车坐标 `marsCoordinates="0"` 时必须转，否则地图偏约 500 米 |
-| `server/app/api/location.py` | `GET /api/vehicle/location` 与 `.../map.png` —— **全项目唯一把车坐标发给第三方的出口** |
+| `server/app/api/location.py` | `GET /api/vehicle/location`、`.../map.png`、**`.../weather`** —— **全项目唯一把车坐标发给第三方的出口** |
 | `server/app/adapters/mock_client.py` | 模拟数据（字段形状必须与 live 保持一致 —— 有测试守着） |
 | `server/tests/test_adapter_shape.py` | 防漂移：两个适配器输出形状必须一致 |
 | `server/tests/test_stations.py` | 附近充电站：字段裁剪、降级语义、缓存网格 |
@@ -161,7 +161,9 @@ python scripts/apk_intel.py <新版.apk> --compare docs/zeekr-apk-intel.json
 | `ZeekrDash/Features/Charges/NearbyStationsView.swift` | 附近充电站卡片 UI |
 | `ZeekrDash/Features/Charges/ChargesViewModel.swift` | 充入电量（月份 / 流水 / 同步）+ 金额补录（OCR / 手工 / 待确认配对） |
 | `ZeekrDash/Features/Charges/ChargesView.swift` | 充电页 UI：充入电量单卡（大数 + 双轴趋势图）、充电记录、充电费用 |
-| `ZeekrDash/Features/Dashboard/DashboardView.swift` | 车况主页：电量 / 胎压 / 车身状态 / **车辆位置** / 车控面板 |
+| `ZeekrDash/Features/Dashboard/DashboardView.swift` | 车况主页：电量 / 胎压 / 车身状态 / **车辆位置**（车控面板已独立成 tab） |
+| `ZeekrDash/Features/Controls/ControlsView.swift` | 车控 tab：只放 `ControlsPanel` + 未登录引导 / 空态 / 脚注 |
+| `ZeekrDash/Features/Controls/ControlsPanel.swift` | 快捷车控面板本体（15 个按钮、三组、动效与安全开关都在这里） |
 | `docs/zeekr-apk-reference.md` | 官方接口情报（**先查这里**） |
 | `docs/真机验证清单.md` | 真车逐条核对清单 |
 
@@ -254,18 +256,26 @@ body: {"startTimeStart": null, "chargeType": ""}   // 一次给约两年
 | 充电次数 | 记录条数 | **含电量缺失的记录**；次数与电量是两个维度 |
 | 快 / 慢充 | `chargeTypeName` 含「直流」/「交流」 | 上游有时给空名 ⇒ 落 `unknown`，别猜 |
 | 平均功率 | 电量 ÷ (时长/60) | 比"充了多久"更能说明桩快慢 |
-| 每次充电时长 | 该月总时长 ÷ 次数 | 趋势图的**第二根轴**（小时）；量纲不同，不能硬套左轴 |
+| 每次充电时长 | 逐笔的 `chargedTime` / 该月总时长 ÷ 次数 | 图表的**第二根轴**（小时）；量纲不同，不能硬套左轴 |
 | 金额 | **不存在** | 见下 |
 
-**充电页是一张「充入电量」卡**（月度大数 + 月度趋势图 + 直流/交流拆分一行），
+**充电页是一张「充入电量」卡**（左电量 + 右金额 → 逐次图 → 直流/交流拆分一行），
 不是两张卡也不是四宫格：
 
-- 大数只属于**所选月份**，图里却有**全部月份** ⇒ 所选月份那根柱子高亮、其余压暗
-  （`drawLineChart` 的 `opts.highlight`），否则"这个数对应哪根"要人工去对；
-- 图是**柱（电量，左轴）+ 折线（每次充电时长，右轴）**：同样 40 度，
-  快充二十分钟、慢充一整夜，光看柱子完全一样；
+- **图是"所选月份内的每一次充电"**，不是全年月度趋势。这张卡讲的就是"这一个月"，
+  在下面摆一条全年趋势只会让人怀疑看的是哪个月。
+  横轴标签 `10-09`，同一天充两次时追加 `#2` —— 重复标签在类目轴上会被当成同一个刻度
+  （iOS 的 Swift Charts 会直接把两根柱子合并）。
+- 图是**柱（本次电量，左轴）+ 折线（本次时长，右轴）**：同样 40 度，
+  快充二十分钟、慢充一整夜，光看柱子完全一样。
+- **金额就在大数区右边**：当月金额（跟着月份筛选）+ 累计金额（Σ 所有可查月份）。
+  `months` 接口每个月都带 `amount` / `amountCount`，前端只做加法；
+  估算（`amount_source='estimate'`）不计入，与单月汇总同一口径。
+  没补录时显示「--」，**绝不显示 0 或估算值**。
 - **快充 / 慢充不单独给"次数"** —— 直流次数 + 交流次数 = 上面那个「共 N 次」，
   换个说法重复一遍而已。只保留各自的**电量**，压成图下面一行。
+- 最下面那张卡是**纯操作卡**（「金额补录」）：数字已经在上面了，这块只留三个入口
+  加一句状态 —— 一块放数、一块放操作，各自只有一件事。
 
 iOS 侧（`ChargesView.trendChart`）要额外记住一件事：**Swift Charts 没有"每系列一套刻度"**。
 所以时长按 `scale = (axisMax * 0.74) / maxHours` 折算进电量的坐标空间，
@@ -275,7 +285,7 @@ iOS 侧（`ChargesView.trendChart`）要额外记住一件事：**Swift Charts �
 **金额一定不要编。** 车端报文里没有任何 `fee/cost/amount/price` 字段，站点也不在
 充电记录里；官方 App 的「补能订单」金额页在浩汉网关后面（要浩汉账号态），
 **不可自动化**。所以金额只有三条路：截图识别（主线，已接入）/ 手写录入 / 估算
-（必须标 `estimated`，且**不与真值混算**）。没有金额时费用卡写「金额未记录」，
+（必须标 `estimated`，且**不与真值混算**）。没有金额时大数区写「未补录」，
 **不显示任何估算数字** —— 把猜测画成"实际支出"比留空更糟。
 
 **表设计：`charge_sessions` 与 `charge_records` 不要合并。**
@@ -287,9 +297,26 @@ iOS 侧（`ChargesView.trendChart`）要额外记住一件事：**Swift Charts �
 **不要把 VIN 落进这张表**：本机单车主场景，落一份车架号只是凭空多一处敏感数据，
 查询也只按月份过滤。
 
-**同步节奏**：`POST /api/charges/sync` 是幂等的（按 `eventId` upsert），但有 10 秒冷却
-（连点会连打官方网关）。页面只在**本地库为空**时自动同步一次，其余时候靠「同步」按钮，
-切月份/切 tab 都只读本地库。
+**同步节奏**：`POST /api/charges/sync` 是幂等的（按 `eventId` upsert），服务端有 10 秒冷却。
+请求体是 `{startTimeStart: null}` ⇒ **一次拉约两年全量**，没有增量参数，
+所以"多久同步一次"本质是"多久愿意打一次官方网关"（风控问题，不是数据量问题）。
+
+页面**没有手动同步按钮**，只有三种触发：
+
+| 触发 | 条件 | 说明 |
+|---|---|---|
+| 空库 | 本地一条流水都没有 | 第一进来必须填上 |
+| **跨天** | 上次同步不是今天（`zk.chargeSyncAt` 存本地，跨刷新保留） | 一天最多打一次；同一天反复切 tab 不再打 |
+| **充电结束** | 车况 `isCharging` true→false | **唯一真正产生新数据**的时刻；等 60 秒（官方落库有延迟）再拉 |
+
+切月份只读本地库，**不打网关**。自动同步一律静默（不弹 toast），失败下次机会再说。
+只有真的打到网关才写「同步时间」—— 429/401/网络失败都不写，否则一次失败会被记成
+"今天已同步"，当天不再重试。手动兜底在调试台（`?debug=1` → 接口 → `POST /api/charges/sync`）。
+
+iOS 侧规则完全相同，落点：`ChargeSyncStamp`（UserDefaults key `zk.chargeSyncAt`）、
+`ChargesViewModel.sync(silent:)` / `syncAfterChargeEnd()`、
+`ChargesView.onChange(of: store.isCharging)`。iOS 没有调试台，**下拉刷新**就是手动入口
+（原生手势，界面上不占位置）。
 
 ---
 
@@ -304,6 +331,19 @@ iOS 侧（`ChargesView.trendChart`）要额外记住一件事：**Swift Charts �
      → POST /api/charges/receipts/commit（幂等，配不上的落 pending / unmatched）
      → GET  /api/charges/payments       （待确认队列，点一下即可绑定）
 ```
+
+调试口：`POST /api/charges/receipts/ocr-debug` + 页面 `/preview/ocr-test.html`。
+正式链路的白名单过滤把"模型到底读了什么"也裁掉了，评测识别质量要看被裁掉的那部分，
+所以调试口额外带 `raw`（模型原文）与 `parsedRows`（未清洗字段）——
+**只许本机调试**：这两样可能含 prompt 没拦住的 VIN / 手机号 / 完整订单号，
+不入库、不进日志、不进正式链路。
+
+⚠️ **网页侧 POST 必须带 `Content-Type: application/json`**（`withAuth()` 里统一补）。
+`fetch` 对字符串 body 的默认头是 `text/plain;charset=UTF-8`，而 FastAPI 的 `Body(...)`
+只解析 JSON —— 少了这个头，请求在**进入函数之前**就被判 422，
+报错形如 `{"type":"dict_type","msg":"Input should be a valid dictionary"}`，
+看着像报文格式写错，实际只是少了一个头（2026-10-22 的「确认补录报 422」就是它）。
+`FormData`（截图上传）不是字符串，不会被加这个头。
 
 三条红线：
 
@@ -340,6 +380,23 @@ iOS 侧（`ChargesView.trendChart`）要额外记住一件事：**Swift Charts �
   坐标不变就完全不请求第三方。改缓存逻辑前想清楚"会不会让外发变多"。
 - **降级要分清两种**：`mapAvailable=false` 是没配 key（去填 `.env`）；
   `mapAvailable=true` 但 `address=null` 是第三方取不到（额度/网络），改配置没用。
+- **「当地气温」不是「车外温度」**：车端 `climateStatus.exteriorTemp` 实测非空率 0/15，
+  这版固件根本不上报。所以那一格是 `GET /api/vehicle/weather` 按坐标查来的天气，
+  界面标签**必须**写「当地气温」—— 暴晒、地下车库时两者能差十几度，标成"车外温度"就是谎报。
+  取不到显示 `--`，**绝不用 0℃ 顶替**（0℃ 是具体气温，会被当真）。
+  该接口与 `/location` 共用同一份 60 秒位置缓存，多一个接口不多外发一次坐标；
+  天气结果另按坐标缓存 5 分钟（官方约 10 分钟更新一次）。
+  若哪天固件开始上报 `exteriorTemp`，在 `weatherTemp()` 里加一条"有真值优先用真值"即可。
+  iOS 侧同口径：`AppStore.weather`（`loadWeather()` 挂在 `refresh()` 末尾，失败只清这一格）
+  + `DashboardView` 的「当地气温」卡 + `MockData.weather`（演示固定 22℃）。
+- **设置页（网页/iOS 同一套规则）**：
+  · 「服务端/服务连接」卡**只在未登录时显示**（登录后地址与连接状态是噪音；
+    退出登录后可回来改，或用 `?api=`）；
+  · 「服务端车控」（`.env` 的 ALLOW_COMMANDS）放在**车辆控制卡**里、客户端总开关上方 ——
+    两把锁并排看才讲得清"发不发"和"收不收"；诊断卡里不再重复；
+  · 车辆权限只显示前 6 项，多的折叠。**网页用「…」小按钮，iOS 用「展开全部 N 项」文字按钮
+    （44pt 触控区）** —— 省略号在触摸屏上既不好点也不像按钮，这是两端的**有意差异**；
+  · 权限卡不再写"来源：ms-app-bff/…"，那是实现细节。
 
 ---
 
