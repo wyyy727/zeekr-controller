@@ -732,6 +732,13 @@ body.is-scrolled .topbar::before {
     background: rgba(22,184,154,.10); color: var(--qing-bi);
   }
   .cap.no { background: rgba(91,100,114,.08); color: var(--text-3); text-decoration: line-through; }
+  /* 权限列表的「…」：虚线描边，一眼看出是可点的，而不是一项权限 */
+  .cap-more {
+    font-family: inherit; cursor: pointer; letter-spacing: 1px;
+    background: transparent; color: var(--text-3);
+    border: 1px dashed rgba(91,100,114,.32);
+  }
+  .cap-more:hover { color: var(--accent); border-color: var(--accent); }
   .cap-badge { font-size: 10.5px; font-weight: 400; color: var(--text-3); }
   .cap-hint {
     margin-top: 10px; font-size: 11px; color: var(--text-3);
@@ -1047,6 +1054,22 @@ body.is-scrolled .topbar::before {
   margin-top: 9px; font-size: 11.5px; color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
+/* 大数区的左右分栏：左边电量、右边金额。
+   金额原来单独占一张卡，但它跟"这个月充了多少度"是同一笔账 ——
+   电量左边、金额右边的空白，正好一人一半。
+   金额区两行「标签 + 数值」：标签在左、数字在右，同一行读完；
+   拆成"数字一行、标签一行"要多扫一眼才知道那个数是什么。 */
+.ch-hero-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ch-money { flex: 0 0 auto; padding-top: 3px; }
+.ch-money .row {
+  display: flex; align-items: baseline; justify-content: flex-end; gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.ch-money .row + .row { margin-top: 3px; }
+.ch-money .k { font-size: 10.5px; opacity: .82; }
+.ch-money .v { font-size: 21px; font-weight: 600; letter-spacing: -.4px; line-height: 1.15; }
+.ch-money .v2 { font-size: 13px; font-weight: 600; opacity: .9; }
+.ch-money .v.na { font-size: 14px; font-weight: 600; opacity: .86; letter-spacing: 0; }
 /* 月份筛选行：左侧标签 + 原生 select（样式贴近玻璃卡片） */
 .en-month-row { gap: 8px; }
 .en-month-label { display: inline-flex; align-items: center; gap: 5px; }
@@ -1058,18 +1081,15 @@ body.is-scrolled .topbar::before {
 }
 .en-month-btn svg { width: 12px; height: 12px; opacity: .55; }
 
-/* 充入电量：月份按钮与「同步」并排放在标题行右侧。
-   同步是"打官方网关"的动作，必须能看见、能点，但又不该抢占月份筛选的视觉权重，
-   所以做成同一个尺寸的次要按钮。 */
+/* 充入电量：标题行右侧是「同步时间小字 + 月份按钮」。
+   同步没有按钮 —— 时机全自动（空库 / 跨天 / 充电结束），细节见 state.chargeSyncAt。 */
 .ch-actions { display: inline-flex; align-items: center; gap: 7px; }
-.ch-sync {
-  display: inline-flex; align-items: center;
-  border: none; background: var(--glass-inner-2);
-  color: var(--text-2); font-family: inherit; font-size: 11.5px; font-weight: 500;
-  padding: 5px 10px; border-radius: 8px; cursor: pointer;
-  transition: opacity .15s;
+/* 同步时间小字（原来这里是「同步」按钮）。
+   去掉按钮后它是唯一的新鲜度线索，所以放得比按钮低调、但必须看得见。 */
+.ch-sync-at {
+  font-size: 11px; color: var(--text-3);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
 }
-.ch-sync:disabled { opacity: .55; cursor: default; }
 
 /* ── iOS 风格底部弹层（月份选择）──
    参照 iOS ActionSheet：遮罩 + 圆角面板 + 居中列表 + 独立「取消」 */
@@ -1268,18 +1288,6 @@ canvas { display: block; width: 100%; }
   text-align: center; padding: 46px 24px; color: var(--text-3); font-size: 13px;
 }
 .empty .ico { font-size: 40px; opacity: .35; margin-bottom: 12px; }
-.soon {
-  display: flex; align-items: center; gap: 11px;
-  background: var(--glass-bg); border-radius: var(--card-radius); padding: 14px;
-  opacity: .62;
-}
-.soon .ico { font-size: 21px; }
-.soon .t { font-size: 13.5px; font-weight: 500; }
-.soon .d { font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
-.soon-badge {
-  margin-left: auto; font-size: 10px; padding: 3px 8px; border-radius: 6px;
-  background: var(--glass-inner-2); color: var(--text-3); white-space: nowrap;
-}
 
 /* ─────────── 账号登录 ───────────
    预览页在「地址指向本机」时默认走内置模拟数据、不发请求（便于没后端时也能看设计）；
@@ -1536,6 +1544,13 @@ canvas { display: block; width: 100%; }
       <path d="M13 2L4.5 13H11l-1 9 8.5-11H12l1-9z"/>
     </svg>充电
   </button>
+  <button class="tab" data-tab="ctrl">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="9"/>
+      <circle cx="12" cy="12" r="2.6"/>
+      <path d="M3.2 10.4h17.6M12 14.6V21"/>
+    </svg>车控
+  </button>
   <button class="tab" data-tab="settings">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="12" cy="12" r="3"/>
@@ -1775,10 +1790,16 @@ const state = {
   charge: null,
   chargeMonths: [],
   chargeMonth: 'currentMonth',
-  /* 本地库里有没有任何流水。空 ⇒ loadCharges() 会自动同步一次，
-     之后靠卡片上的「同步」按钮按需刷新（不每次进页面都打网关）。 */
+  /* 本地库里有没有任何流水。空 ⇒ loadCharges() 会自动同步一次。 */
   chargeHasData: false,
-  chargeAutoSynced: false,
+  /* 同步时机（页面上**没有**手动同步按钮，只有这三种自动触发）：
+       1. 本地库为空 → 立刻同步一次；
+       2. 进入充电页且**跨天**了（上次同步不是今天）→ 静默同步一次；
+       3. 车况从「充电中」变回「未充电」→ 等一分钟再同步（官方落库有延迟）。
+     想要手动触发就去调试台（`?debug=1`）打 `POST /api/charges/sync`。 */
+  chargeSyncAt: null,        // 上次同步完成的时间戳（存本地，跨刷新保留）
+  chargeAutoSyncDay: '',     // 本次会话已经自动同步过的日期，防止切 tab 反复打网关
+  chargeSyncPending: false,  // 充电结束后已排队一次同步，别重复排
   chargeSyncing: false,
   chargeLoading: false,
   /* ── 金额补录 ──
@@ -1814,6 +1835,13 @@ const state = {
      `reportedAt` 可能滞后几十分钟（实测抓到过滞后 39 分钟的）。
      未登录 / 未加载时为 null，卡片显示"定位中"，不要显示假坐标。 */
   location: null,
+  /* 车辆所在地的天气（GET /api/vehicle/weather）。
+     只取气温用来顶「当地气温」那一格 —— 车端 `climateStatus.exteriorTemp`
+     实测恒为空（这版固件不上报），这是唯一能拿到的"外面几度"。
+     未取到时为 null，界面显示「--」，绝不拿 0 顶替。 */
+  weather: null,
+  /* 车辆权限卡是否展开了全部（默认只显示前 6 项 + 省略号） */
+  permExpanded: false,
   /* 车控指令总开关（**客户端**，默认关，存 localStorage）。
      与 iOS `SettingsStore.commandsEnabled` 同语义：关闭时车控面板只可查看、
      点击不下发。刻意与 `health.allowCommands`（**服务端**是否允许下发）分开 ——
@@ -1874,6 +1902,40 @@ const state = {
   mode: PREFERS_MOCK ? 'mock' : 'live',
 };
 
+/* ── 充电流水的同步时间（跨刷新保留）──
+   页面没有手动同步按钮，靠"跨天才自动同步"这一条兜底；
+   判断"是不是今天同步过"必须跨刷新记得住，所以落 localStorage。
+   与服务端的 10 秒冷却无关 —— 那个只防连点。 */
+const CHARGE_SYNC_AT_LS = 'zk.chargeSyncAt';
+
+function readChargeSyncAt() {
+  try {
+    const v = Number(localStorage.getItem(CHARGE_SYNC_AT_LS)) || 0;
+    return v > 0 ? v : null;
+  } catch { return null; }   // 隐私模式 / 沙箱下 localStorage 会抛异常
+}
+
+function markChargeSynced() {
+  state.chargeSyncAt = Date.now();
+  try { localStorage.setItem(CHARGE_SYNC_AT_LS, String(state.chargeSyncAt)); } catch { /* 忽略 */ }
+}
+
+/* 退出登录时一并清掉：换个人登录，"同步于 14:07"就不该还是上一位的时间 */
+function clearChargeSynced() {
+  state.chargeSyncAt = null;
+  state.chargeAutoSyncDay = '';
+  try { localStorage.removeItem(CHARGE_SYNC_AT_LS); } catch { /* 忽略 */ }
+}
+
+/* 上次同步不是今天 ⇒ 该补一次。跨天就算过期，不看几小时 ——
+   一天最多打一次网关，比"6 小时"更省也更好解释。 */
+function chargeSyncStale() {
+  if (!state.chargeSyncAt) return true;
+  return new Date(state.chargeSyncAt).toDateString() !== new Date().toDateString();
+}
+
+state.chargeSyncAt = readChargeSyncAt();
+
 /* ═══════════════════════════════════════════════
    预览兜底数据：2026 款焕新极氪 001（真实感演示）
    仅当后端未连接时启用，不影响接真实数据后的逻辑
@@ -1926,6 +1988,18 @@ function mockCharge() {
   const pad = (v) => String(v).padStart(2, '0');
   const now = new Date();
   const kwhPool = [61.9, 42.3, 78.4, 30.6, 55.2, 88.1, 24.9, 67.5, 36.4, 52.8];
+  /* 演示金额：按度数 × 电价现算，保证「金额 = 电量 × 单价」自洽。
+     电价取 1.0~1.6 之间（快充略贵、交流便宜），看起来才像真的。
+     真机上金额只能来自 OCR / 手工录入 —— 但演示数据要有数字才能看出样式，
+     页面顶部有「演示数据」标记，不会被当成自己花的钱。 */
+  const pricePool = [1.28, 1.45, 1.12, 1.62, 0.95, 1.35, 1.18, 1.55];
+  /* 站名同理：真机上**只有 OCR 补录过才有**，官方流水链路里没有。
+     演示里给几个"运营商·地点"样式的名字，是为了看列表标题换行和长度，
+     名字都是通用地名，不对应任何真实场站。 */
+  const stationPool = [
+    '极氪极充·世纪公园', '特来电·张江高科', '星星充电·万象城',
+    '国家电网·静安寺', '小桔充电·虹桥枢纽', '云快充·南京西路',
+  ];
   const sessions = [];
 
   for (let m = 0; m < 10; m += 1) {
@@ -1936,6 +2010,9 @@ function mockCharge() {
     // 当月只回溯到"昨天"：演示数据里不该出现还没发生的充电
     const upper = m === 0 ? Math.max(1, now.getDate() - 1) : lastDay;
     const count = m === 0 ? Math.max(1, Math.min(4, Math.floor(now.getDate() / 8) + 1)) : 3 + ((m * 2) % 3);
+    /* 留一个月**不补金额**：切到那个月就能看到「未补录」的样子 ——
+       全都补满了，这个状态在演示里就永远看不到。 */
+    const priced = m !== 2;
 
     for (let i = 0; i < count; i += 1) {
       const kwh = kwhPool[(m * 3 + i) % kwhPool.length];
@@ -1945,6 +2022,7 @@ function mockCharge() {
       const day = Math.max(1, Math.min(upper, 1 + ((m * 7 + i * 5) % upper)));
       const hour = [7, 12, 18, 21, 22][(m + i) % 5];
       const minute = [3, 15, 28, 41, 55][(m * 2 + i) % 5];
+      const price = pricePool[(m + i) % pricePool.length];
 
       sessions.push({
         sessionId: `mock-${year}${pad(mon)}-${i}`,
@@ -1952,9 +2030,9 @@ function mockCharge() {
         durationMin: minutes,
         energyKwh: kwh,
         chargeType: isAc ? 'ac' : 'dc',
-        stationName: null,
-        amount: null,
-        amountSource: null,
+        stationName: stationPool[(m * 2 + i) % stationPool.length],
+        amount: priced ? +(kwh * price).toFixed(2) : null,
+        amountSource: priced ? 'ocr' : null,
       });
     }
   }
@@ -1971,6 +2049,8 @@ function mockCharge() {
       count: st.count,
       kwh: st.totalKwh,
       avgMinutes: st.avgMinutes,
+      amount: st.amountTotal || 0,
+      amountCount: st.amountCount,
       dcCount: st.dcCount,
       acCount: st.acCount,
     };
@@ -1989,6 +2069,15 @@ function summarizeCharge(ym, sessions) {
   let dcKwh = 0;
   let acCount = 0;
   let acKwh = 0;
+  // 金额三口径与后端 `_summarize_month` 完全一致：
+  // 真值（amountTotal / pricedKwh）/ 估算（单独计）/ 未补（unpriced*）
+  let amountTotal = 0;
+  let amountCount = 0;
+  let pricedKwh = 0;
+  let unpricedCount = 0;
+  let unpricedKwh = 0;
+  let estimatedCount = 0;
+  let estimatedTotal = 0;
 
   rows.forEach((r) => {
     const kwh = Number(r.energyKwh) || 0;
@@ -1996,6 +2085,18 @@ function summarizeCharge(ym, sessions) {
     totalMinutes += Number(r.durationMin) || 0;
     if (r.chargeType === 'dc') { dcCount += 1; dcKwh += kwh; }
     if (r.chargeType === 'ac') { acCount += 1; acKwh += kwh; }
+
+    if (r.amountSource === 'estimate') {
+      estimatedCount += 1;
+      estimatedTotal += Number(r.amount) || 0;
+    } else if (r.amount != null) {
+      amountCount += 1;
+      amountTotal += Number(r.amount) || 0;
+      pricedKwh += kwh;
+    } else {
+      unpricedCount += 1;
+      unpricedKwh += kwh;
+    }
   });
 
   return {
@@ -2011,11 +2112,18 @@ function summarizeCharge(ym, sessions) {
     avgKwh: rows.length ? +(totalKwh / rows.length).toFixed(1) : 0,
     avgMinutes: rows.length ? Math.round(totalMinutes / rows.length) : 0,
     avgPowerKw: totalMinutes > 0 ? +(totalKwh / (totalMinutes / 60)).toFixed(1) : null,
-    amountCount: 0,
-    amountTotal: null,
-    // 估算金额与真值分开记：混算会让"每度多少钱"变成第三种数字
-    estimatedCount: 0,
-    estimatedTotal: null,
+    amountTotal: amountCount ? +amountTotal.toFixed(2) : null,
+    amountCount,
+    // 单价分母只用**已补录金额对应的电量**：拿总电量去除会把没补录的算进去，单价凭空变低
+    pricedKwh: +pricedKwh.toFixed(1),
+    unitPrice: pricedKwh > 0 ? +(amountTotal / pricedKwh).toFixed(2) : null,
+    unpricedCount,
+    unpricedKwh: +unpricedKwh.toFixed(1),
+    // 估算与真值分开记：混算会让"每度多少钱"变成第三种数字
+    estimatedTotal: estimatedCount ? +estimatedTotal.toFixed(2) : null,
+    estimatedCount,
+    pendingPayments: 0,
+    unmatchedPayments: 0,
     records: rows,
   };
 }
@@ -2323,6 +2431,13 @@ function fmtDuration(min) {
   const h = Math.floor(t / 60), m = t % 60;
   return m === 0 ? h + ' 小时' : h + ' 小时 ' + m + ' 分';
 }
+/* 时间戳 → HH:MM。用于「同步于 14:07」这类"今天几点"的场景，
+   不需要日期 —— 跨天的情况已经由"未同步/同步于"这类文案提示过了。 */
+function clockOf(ts) {
+  const d = new Date(Number(ts));
+  if (Number.isNaN(d.getTime())) return '--';
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
 function fmtTime(ts) {
   if (!ts) return '--';
   const d = new Date(String(ts).replace(/-/g, '/'));
@@ -2369,11 +2484,20 @@ const CTRL_LABELS = {
 /* 给请求补上 API 令牌。调试台里令牌可在「连接」区填写，
    也可用 ?token=xxx 打开本页带入；留空则不额外加头。 */
 function withAuth(opts) {
-  if (!API_TOKEN) return opts;
   const merged = Object.assign({}, opts || {});
-  merged.headers = Object.assign({}, (opts && opts.headers) || {}, {
-    Authorization: 'Bearer ' + API_TOKEN,
-  });
+  merged.headers = Object.assign({}, (opts && opts.headers) || {});
+
+  /* 字符串 body 一律按 JSON 发。
+     fetch 对字符串 body 的默认 Content-Type 是 `text/plain;charset=UTF-8`，
+     而 FastAPI 的 `Body(...)` 只解析 application/json —— 少了这个头，POST 会在
+     进入函数之前就被判 **422**，报错是 `{"type":"dict_type","msg":"Input should be
+     a valid dictionary"}`，看起来像报文格式写错了，极易误判。
+     FormData（截图上传）不是字符串，不会被加这个头，multipart 边界照常。 */
+  if (typeof merged.body === 'string' && !merged.headers['Content-Type']) {
+    merged.headers['Content-Type'] = 'application/json';
+  }
+
+  if (API_TOKEN) merged.headers.Authorization = 'Bearer ' + API_TOKEN;
   return merged;
 }
 
@@ -2807,7 +2931,6 @@ const SVG = {
   chart:  '<svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 19V5M4 19h16M8 19v-6M13 19v-9M18 19v-4"/></svg>',
   route:  '<svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M6 15.8V11a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v0"/></svg>',
   phone:  '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="6" y="3" width="12" height="18" rx="2.5"/><path d="M10.5 18h3"/></svg>',
-  file:   '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z"/><path d="M14 3v5h5"/></svg>',
   lock:   '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>',
   unlock: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 7.5-2"/></svg>',
   snow:   '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3v18M3.5 7.5l17 9M20.5 7.5l-17 9"/></svg>',
@@ -2906,6 +3029,150 @@ function vehicleLocationCard() {
       : ''}
     <div class="loc-note">位置取自车辆最后一次上报，车辆移动后可能不会立即更新。</div>
   </div>`;
+}
+
+/* 车控按钮构造器：**必须放顶层**。
+   原来它们定义在 renderDashboard 内部，靠闭包拿 `cmdsOn`；
+   现在车控页也要用同一份，留在函数里会直接 ReferenceError。 */
+  const ctrlBtn = (o) => {
+    // 原来靠闭包取 renderDashboard 的局部变量，挪到顶层后自己从 state 取
+    const cmdsOn = state.allowCommands;
+    const cls = [
+      'ctrl',
+      `ctrl--${o.kind || 'action'}`,
+      o.on ? 'on' : '',
+      o.danger ? 'danger' : '',
+      o.wide ? 'wide' : '',
+    ].filter(Boolean).join(' ');
+    const sub = o.sub ? `<span class="ctrl-sub">${o.sub}</span>` : '';
+    // 两种禁用来源：① 该指令当前不适用（如未插枪不能开充）；② 车控总开关关闭。
+    // 用同一个 `disabled` 属性 —— 视觉（.ctrl[disabled] 半透明）与行为一致，
+    // 不必再造一套"半禁用"状态。
+    return `
+    <button class="${cls}" data-cmd="${o.cmd}" data-label="${o.label}"
+            aria-pressed="${o.kind === 'toggle' ? String(!!o.on) : 'false'}"
+            ${(o.disabled || !cmdsOn) ? 'disabled' : ''}>
+      <span class="ico">${o.icon}</span>
+      <span class="ctrl-txt">${o.label}${sub}</span>
+      <span class="ctrl-spin" aria-hidden="true"></span>
+    </button>`;
+  };
+
+  /* 带能力门控的车控按钮：车辆不支持该能力时**整格不渲染**。
+     旧版把 18 条指令全列出来（其中 10 条未经真车验证），点了只会静默失败 ——
+     先问车支持什么，能一次性消掉这批死按钮。 */
+  const capBtn = (key, o) => (cap(key) ? ctrlBtn(o) : '');
+
+/* 快捷车控卡：车况页与「车控」页**共用同一份 markup**。
+   两边各写一遍必然漂移 —— 改了启用/禁用文案忘改另一处，是这类卡片最常见的 bug。
+
+   卡内用到的四个状态在这里各自现取，不再依赖 renderDashboard 的局部变量：
+   `cmdsOn` 总开关、`locked` 车锁、`climateOn` 空调、`charging` 充电中。 */
+function quickControlsCard() {
+  const s = state.status;
+  if (!s) return '';
+
+  const charging = s.isCharging === true;
+  const cmdsOn = state.allowCommands;
+  const climateOn = s.climateOn === true;
+  const locked = s.isLocked === true;
+
+  return `
+    <div class="card">
+      <div class="card-title">
+        <span>快捷车控</span>
+        <span class="ctrl-hint">${cmdsOn
+          ? (locked ? '车辆已上锁' : '车辆未上锁')
+          : '已禁用'}</span>
+      </div>
+
+      <div class="ctrl-grid">
+        ${capBtn('doorLock', {
+          cmd: locked ? 'unlock' : 'lock',
+          label: locked ? '解锁' : '锁车',
+          sub: locked ? '当前已锁' : '当前未锁',
+          icon: locked ? SVG.carUnlock : SVG.carLock,
+          kind: 'toggle', on: locked,
+        })}
+        ${capBtn('climate', {
+          cmd: climateOn ? 'climateOff' : 'climateOn',
+          label: climateOn ? '关空调' : '开空调',
+          sub: climateOn ? '运行中' : '已关闭',
+          icon: SVG.snow, kind: 'toggle', on: climateOn,
+        })}
+        ${capBtn('defrost', {
+          cmd: 'defrost', label: '前除霜', sub: '风挡除雾',
+          icon: SVG.defrost, kind: 'toggle',
+        })}
+        ${capBtn('wheelHeat', {
+          cmd: 'wheelHeat', label: '方向盘', sub: '加热',
+          icon: SVG.wheelHeat, kind: 'toggle',
+        })}
+        ${capBtn('seatHeat', {
+          cmd: 'seatHeat', label: '座椅加热', sub: '主 / 副驾',
+          icon: SVG.seats, kind: 'toggle',
+        })}
+        ${capBtn('seatVent', {
+          cmd: 'ventSeat', label: '座椅通风', sub: '主 / 副驾',
+          icon: SVG.vent, kind: 'toggle',
+        })}
+      </div>
+
+      <div class="ctrl-sep">远程操作</div>
+
+      <div class="ctrl-grid">
+        ${ctrlBtn({ cmd: 'flash', label: '闪灯', icon: SVG.light, kind: 'action' })}
+        ${ctrlBtn({ cmd: 'honk', label: '鸣笛', icon: SVG.horn, kind: 'action' })}
+        ${capBtn('window', { cmd: 'closeWindows', label: '关车窗', icon: SVG.window, kind: 'action' })}
+        ${capBtn('sunshade', { cmd: 'sunshade', label: '遮阳帘', icon: SVG.sunshade, kind: 'action' })}
+        ${ctrlBtn({
+          cmd: charging ? 'chargeStop' : 'chargeStart',
+          label: charging ? '结束充电' : '开始充电',
+          icon: SVG.plug, kind: 'action', disabled: !charging && !s.isPlugged,
+        })}
+        ${capBtn('sentinel', { cmd: 'sentinel', label: '哨兵模式', icon: SVG.shield, kind: 'toggle' })}
+      </div>
+
+      <div class="ctrl-sep">场景</div>
+
+      <div class="ctrl-grid ctrl-grid--scene">
+        ${capBtn('travelPlan', { cmd: 'tripPlan', label: '出行规划', sub: '预设出发时间', icon: SVG.route, kind: 'scene' })}
+        ${ctrlBtn({ cmd: 'carFinder', label: '寻车', sub: '定位车辆', icon: SVG.pin, kind: 'scene' })}
+        ${ctrlBtn({ cmd: 'refresh', label: '立即刷新', sub: '同步车况', icon: SVG.refresh, kind: 'scene' })}
+      </div>
+
+      ${cmdsOn ? '' : `
+      <div class="cap-hint">在「设置」中开启控制指令开关后可用</div>`}
+      ${(cmdsOn && state.health && state.health.allowCommands === false) ? `
+      <div class="cap-hint">服务端也没有开启车控（<code>.env</code> 里 <code>ALLOW_COMMANDS=true</code>），即便本开关打开，指令仍会被拒绝</div>` : ''}
+    </div>
+
+`;
+}
+
+/* 车控页：只放快捷车控卡。
+   从车况页拆出来的理由 —— 车况页已经有电量 / 胎压 / 车身状态 / 位置四块，
+   而车控是高频操作，每次都要滑到最底才能按；给它一个独立入口更直接。 */
+function renderControls() {
+  if (!state.status) {
+    if (state.statusLoading) {
+      return `<div class="empty">
+        <div class="ico">${SVG.car}</div>
+        <div>正在读取车辆数据…</div>
+      </div>`;
+    }
+    return `<div class="empty">
+      <div class="ico">${SVG.car}</div>
+      <div>尚未获取到车辆数据</div>
+      <div style="margin-top:8px;font-size:11.5px">请确认 Python 服务已启动，且地址配置正确</div>
+    </div>`;
+  }
+
+  return `${quickControlsCard()}
+    <div class="foot">
+      ${state.lastRefresh ? '更新于 ' + state.lastRefresh + '<br>' : ''}
+      车控指令需在「设置」中开启总开关
+    </div>`;
 }
 
 function renderDashboard() {
@@ -3008,32 +3275,6 @@ function renderDashboard() {
   //    由服务端返回的 vehicle_status 驱动 .on 状态与图标方向
   // 2) action：瞬时动作（对应 button 实体），点击后给一次性脉冲反馈
   // 3) scene ：场景型（组合指令），同样是一次性动作
-  const ctrlBtn = (o) => {
-    const cls = [
-      'ctrl',
-      `ctrl--${o.kind || 'action'}`,
-      o.on ? 'on' : '',
-      o.danger ? 'danger' : '',
-      o.wide ? 'wide' : '',
-    ].filter(Boolean).join(' ');
-    const sub = o.sub ? `<span class="ctrl-sub">${o.sub}</span>` : '';
-    // 两种禁用来源：① 该指令当前不适用（如未插枪不能开充）；② 车控总开关关闭。
-    // 用同一个 `disabled` 属性 —— 视觉（.ctrl[disabled] 半透明）与行为一致，
-    // 不必再造一套"半禁用"状态。
-    return `
-    <button class="${cls}" data-cmd="${o.cmd}" data-label="${o.label}"
-            aria-pressed="${o.kind === 'toggle' ? String(!!o.on) : 'false'}"
-            ${(o.disabled || !cmdsOn) ? 'disabled' : ''}>
-      <span class="ico">${o.icon}</span>
-      <span class="ctrl-txt">${o.label}${sub}</span>
-      <span class="ctrl-spin" aria-hidden="true"></span>
-    </button>`;
-  };
-
-  /* 带能力门控的车控按钮：车辆不支持该能力时**整格不渲染**。
-     旧版把 18 条指令全列出来（其中 10 条未经真车验证），点了只会静默失败 ——
-     先问车支持什么，能一次性消掉这批死按钮。 */
-  const capBtn = (key, o) => (cap(key) ? ctrlBtn(o) : '');
 
   return `
     <div class="card">
@@ -3065,8 +3306,8 @@ function renderDashboard() {
         <div class="val">${fmt(s.interiorTemp, 1)}<span class="u">°C</span></div>
       </div>
       <div class="stat">
-        <div class="head">${SVG.sun} 车外温度</div>
-        <div class="val">${fmt(s.exteriorTemp, 1)}<span class="u">°C</span></div>
+        <div class="head">${SVG.sun} 当地气温</div>
+        <div class="val">${weatherTemp()}<span class="u">°C</span></div>
       </div>
       <div class="stat">
         <div class="head">${SVG.chart} 平均能耗</div>
@@ -3118,75 +3359,6 @@ function renderDashboard() {
 
     ${vehicleLocationCard()}
 
-    <div class="card">
-      <div class="card-title">
-        <span>快捷车控</span>
-        <span class="ctrl-hint">${cmdsOn
-          ? (locked ? '车辆已上锁' : '车辆未上锁')
-          : '已禁用'}</span>
-      </div>
-
-      <div class="ctrl-grid">
-        ${capBtn('doorLock', {
-          cmd: locked ? 'unlock' : 'lock',
-          label: locked ? '解锁' : '锁车',
-          sub: locked ? '当前已锁' : '当前未锁',
-          icon: locked ? SVG.carUnlock : SVG.carLock,
-          kind: 'toggle', on: locked,
-        })}
-        ${capBtn('climate', {
-          cmd: climateOn ? 'climateOff' : 'climateOn',
-          label: climateOn ? '关空调' : '开空调',
-          sub: climateOn ? '运行中' : '已关闭',
-          icon: SVG.snow, kind: 'toggle', on: climateOn,
-        })}
-        ${capBtn('defrost', {
-          cmd: 'defrost', label: '前除霜', sub: '风挡除雾',
-          icon: SVG.defrost, kind: 'toggle',
-        })}
-        ${capBtn('wheelHeat', {
-          cmd: 'wheelHeat', label: '方向盘', sub: '加热',
-          icon: SVG.wheelHeat, kind: 'toggle',
-        })}
-        ${capBtn('seatHeat', {
-          cmd: 'seatHeat', label: '座椅加热', sub: '主 / 副驾',
-          icon: SVG.seats, kind: 'toggle',
-        })}
-        ${capBtn('seatVent', {
-          cmd: 'ventSeat', label: '座椅通风', sub: '主 / 副驾',
-          icon: SVG.vent, kind: 'toggle',
-        })}
-      </div>
-
-      <div class="ctrl-sep">远程操作</div>
-
-      <div class="ctrl-grid">
-        ${ctrlBtn({ cmd: 'flash', label: '闪灯', icon: SVG.light, kind: 'action' })}
-        ${ctrlBtn({ cmd: 'honk', label: '鸣笛', icon: SVG.horn, kind: 'action' })}
-        ${capBtn('window', { cmd: 'closeWindows', label: '关车窗', icon: SVG.window, kind: 'action' })}
-        ${capBtn('sunshade', { cmd: 'sunshade', label: '遮阳帘', icon: SVG.sunshade, kind: 'action' })}
-        ${ctrlBtn({
-          cmd: charging ? 'chargeStop' : 'chargeStart',
-          label: charging ? '结束充电' : '开始充电',
-          icon: SVG.plug, kind: 'action', disabled: !charging && !s.isPlugged,
-        })}
-        ${capBtn('sentinel', { cmd: 'sentinel', label: '哨兵模式', icon: SVG.shield, kind: 'toggle' })}
-      </div>
-
-      <div class="ctrl-sep">场景</div>
-
-      <div class="ctrl-grid ctrl-grid--scene">
-        ${capBtn('travelPlan', { cmd: 'tripPlan', label: '出行规划', sub: '预设出发时间', icon: SVG.route, kind: 'scene' })}
-        ${ctrlBtn({ cmd: 'carFinder', label: '寻车', sub: '定位车辆', icon: SVG.pin, kind: 'scene' })}
-        ${ctrlBtn({ cmd: 'refresh', label: '立即刷新', sub: '同步车况', icon: SVG.refresh, kind: 'scene' })}
-      </div>
-
-      ${cmdsOn ? '' : `
-      <div class="cap-hint">在「设置」中开启控制指令开关后可用</div>`}
-      ${(cmdsOn && state.health && state.health.allowCommands === false) ? `
-      <div class="cap-hint">服务端也没有开启车控（<code>.env</code> 里 <code>ALLOW_COMMANDS=true</code>），即便本开关打开，指令仍会被拒绝</div>` : ''}
-    </div>
-
     <div class="foot">
       ${state.lastRefresh ? '更新于 ' + state.lastRefresh + '<br>' : ''}
       数据来自非官方接口，仅供参考
@@ -3206,6 +3378,17 @@ function renderDashboard() {
    刻意不做"拿不到就隐藏"：网络抖动不该让整页功能凭空消失。
    而"某个字段网关没给"是另一回事，由 chip 的 unknown 态表达 ——
    两者职责分开，不要混用。 */
+/* 当地气温。
+   车端 `climateStatus.exteriorTemp` 实测非空率 0/15 —— 这版固件根本不上报，
+   所以只能按车辆位置查天气。**标签必须写「当地气温」而不是「车外温度」**：
+   暴晒、地下车库时两者能差十几度，标成"车外温度"就是谎报。
+   取不到就 `--`，不拿 0 顶替（0℃ 是个具体的气温，会被当真）。 */
+function weatherTemp() {
+  const w = state.weather;
+  if (!w || w.available !== true || w.temperature == null) return '--';
+  return String(Math.round(w.temperature));
+}
+
 function cap(key) {
   const c = state.capabilities;
   if (!c || c[key] === undefined) return true;
@@ -3500,14 +3683,18 @@ function renderCharges() {
   const isCurrent = state.chargeMonth === 'currentMonth';
   const monthLabel = isCurrent ? '本月' : (selected.label || state.chargeMonth);
 
+  /* 同步状态小字：**没有按钮了，这行是唯一能判断数据新不新的线索**。
+     同步中就把"同步于 XX:XX"换成"同步中…"，不额外占一块位置。 */
+  const syncHint = state.chargeSyncing
+    ? '同步中…'
+    : (state.chargeSyncAt ? `同步于 ${clockOf(state.chargeSyncAt)}` : '未同步');
+
   const monthRow = `<div class="en-range en-month-row">
       <span class="en-month-label">${SVG.clock} 统计月份${state.chargeLoading ? ' · 更新中' : ''}</span>
       <span class="ch-actions">
+        <span class="ch-sync-at">${syncHint}</span>
         <button class="en-month-btn" id="chargeMonthBtn">
           ${esc(monthLabel)}${SVG.chevron}
-        </button>
-        <button class="ch-sync" id="chargeSyncBtn"${state.chargeSyncing ? ' disabled' : ''}>
-          ${state.chargeSyncing ? '同步中…' : '同步'}
         </button>
       </span>
     </div>`;
@@ -3528,6 +3715,13 @@ function renderCharges() {
 
   const demo = state.mode !== 'live';
 
+  /* 累计金额：所有可查月份的金额之和（服务端按月汇总好，前端只做加法）。
+     没有月份带金额时给 null —— 显示 0 会被读成"这个月一分没花"。 */
+  const totalAmount = (() => {
+    const sum = state.chargeMonths.reduce((acc, m) => acc + (Number(m.amount) || 0), 0);
+    return sum > 0 ? sum : null;
+  })();
+
   if (!c.count) {
     return `${nearby}${monthRow}
       <div class="card">
@@ -3539,24 +3733,38 @@ function renderCharges() {
           <div class="ico">${SVG.plug}</div>
           <div>${esc(monthLabel)}没有充电记录</div>
           <div style="margin-top:8px;font-size:11.5px">
-            换个月份看看，或点右上角「同步」重新拉取流水
+            换个月份看看；新流水会在充完电 / 跨天后的自动同步里出现
           </div>
         </div>
-        ${chargeMonthChartBlock()}
       </div>`;
   }
 
   /* ── 充入电量：一张卡 ────────────────────────────
-     原来是「本月大数」+「月度柱状图」两张卡，但它们是同一笔账的两个切面：
-     分开摆，最右边那根柱子和上面的大数看着像两个数。
-     合进一张卡后，把所选月份那根柱子高亮，其余压暗 ——
-     "大数对应哪根"不用再靠月份标签去对。
-
-     三个副数字同框的理由：只给总量，"这个月充得多"到底是
+     左边电量、右边金额 —— 这两个数是同一笔账的两面：
+     "充了 182 度"和"花了 234 块"分开摆会让人以为是两件事。
+     金额只能来自截图识别 / 手工录入，没补录时显示「--」，绝不编。
+     下面三个副数字同框：只给总量，"这个月充得多"到底是
      单次充得满、还是充得勤，看不出来。 */
+  /* 金额区：一行一条「标签 + 数字」。
+     没补录时数字位写「未补录」而不是 0 —— 0 会被读成"这个月一分没花"。 */
+  const monthValue = c.amountTotal == null
+    ? '<div class="v na">未补录</div>'
+    : `<div class="v">¥${fmt(c.amountTotal, 2)}</div>`;
+
   const hero = `<div class="summary-hero">
-      <div class="lbl">${esc(monthLabel)} · 共 ${c.count} 次${demo ? '<em class="en-demo">演示数据</em>' : ''}</div>
-      <div class="big">${fmt(c.totalKwh, 1)}<span class="u">度</span></div>
+      <div class="ch-hero-top">
+        <div>
+          <div class="lbl">${esc(monthLabel)} · 共 ${c.count} 次${demo ? '<em class="en-demo">演示数据</em>' : ''}</div>
+          <div class="big">${fmt(c.totalKwh, 1)}<span class="u">度</span></div>
+        </div>
+        <div class="ch-money">
+          <div class="row"><span class="k">${esc(monthLabel)}金额</span>${monthValue}</div>
+          <div class="row">
+            <span class="k">累计</span>
+            <div class="v2">${totalAmount == null ? '--' : '¥' + fmt(totalAmount, 2)}</div>
+          </div>
+        </div>
+      </div>
       <div class="summary-sub">
         <div><div class="v">${fmt(c.avgKwh, 1)}<small>度</small></div><div class="k">平均单次</div></div>
         <div><div class="v">${fmtDuration(c.totalMinutes)}</div><div class="k">总时长</div></div>
@@ -3581,17 +3789,18 @@ function renderCharges() {
         <span>充入电量</span>
         <span class="cap-badge">${esc(monthLabel)}</span>
       </div>
-      ${hero}${chargeMonthChartBlock()}${split}
+      ${hero}${chargeSessionChartBlock(c)}${split}
     </div>
     ${list}${costCard(c)}`;
 }
 
-/* ── 充电费用卡 ──
-   这张卡的立场：**一个编出来的数字都不显示**。
-   官方接口只给电量（车不知道电价），金额只能来自截图识别 / 手工录入；
-   在拿到真值之前显示估算值，会被当成"我花的钱" —— 比留空更糟。
+/* ── 金额补录卡 ──
+   金额数字已经搬进上面的「充入电量」卡（当月 + 累计），这里**不再重复摆数字**，
+   只留三件补录入口 + 一句状态。原来那张「充电费用」卡既是大数又是按钮，
+   跟上面的卡抢同一份信息 —— 一块放数、一块放操作，各自只有一件事。
 
-   所以这里是「现状 + 三条补录入口」，而不是「一个金额 + 一句解释」：
+   立场不变：**一个编出来的数字都不显示**。
+   官方接口只给电量（车不知道电价），金额只能来自：
      1. 截图识别（主线）：App「补能订单」页截图 → 识别 → 人工核对 → 入库；
      2. 手工录入（零依赖）：金额 + 时间就能兜底，不需要任何 key；
      3. 待确认队列：识别出来但配不上流水 / 有多条候选的，一条都不丢，等人点一下。 */
@@ -3601,27 +3810,18 @@ function costCard(c) {
   const unpriced = c.unpricedCount || 0;
 
   const badge = !priced
-    ? '金额未记录'
+    ? '未补录'
     : (unpriced ? `已补录 ${priced}/${priced + unpriced} 笔` : '已补全');
-
-  /* 已补录的三件套：金额 / 笔数 / 每度单价。
-     单价的分母只用**已补录金额对应的电量**（pricedKwh），
-     拿总电量去除会把没补录的那些算进去，单价凭空变低。 */
-  const sub = priced
-    ? `<div class="cost-sub">
-        <div><div class="v">¥${fmt(c.amountTotal, 2)}</div><div class="k">已补录金额</div></div>
-        <div><div class="v">${priced}<small>笔</small></div><div class="k">有金额记录</div></div>
-        <div><div class="v">${c.unitPrice == null ? '--' : fmt(c.unitPrice, 2)}<small>元/度</small></div>
-            <div class="k">每度单价</div></div>
-      </div>`
-    : '';
 
   const notes = [];
   if (!priced) {
-    notes.push('极氪只提供电量，不提供金额 —— 车不知道电价，站点也不在充电记录里。'
-      + '金额要自己补：截图识别（App「补能订单」页）或手工录入。');
-  } else if (unpriced) {
-    notes.push(`还有 ${unpriced} 笔（${fmt(c.unpricedKwh, 1)} 度）没补金额，单价只按已补录的算。`);
+    notes.push('极氪只给电量，不给金额 —— 车不知道电价，站点也不在充电记录里。'
+      + '补录后上面的「当月金额 / 累计」才会有数。');
+  } else {
+    const unit = c.unitPrice == null ? '' : `，每度约 ¥${fmt(c.unitPrice, 2)}`;
+    notes.push(unpriced
+      ? `已补录 ${priced} 笔${unit}；还有 ${unpriced} 笔（${fmt(c.unpricedKwh, 1)} 度）没补，单价只按已补录的算。`
+      : `已补录 ${priced} 笔，全部有金额${unit}。`);
   }
   if (c.estimatedCount) {
     notes.push(`另有 ${c.estimatedCount} 笔为电价估算，未计入合计与单价。`);
@@ -3652,10 +3852,9 @@ function costCard(c) {
 
   return `<div class="card">
       <div class="card-title">
-        <span>充电费用</span>
+        <span>金额补录</span>
         <span class="cap-badge">${badge}</span>
       </div>
-      ${sub}
       ${notes.length ? `<div class="st-note">${notes.map(esc).join('<br>')}</div>` : ''}
       ${actions}
     </div>`;
@@ -3667,19 +3866,32 @@ function canWriteCharges() {
   return state.mode === 'live' && isLoggedIn();
 }
 
-/* 月度趋势图：柱 = 当月电量（左轴），折线 = 每次充电时长（右轴）。
-   横轴是**全部**可查月份，不受上方月份筛选影响 ——
-   这张图的作用就是"看出哪个月充得多"，跟着筛选变它每次只会剩一根柱子。
+/* 当月逐次图：柱 = 这一次充了多少度（左轴），折线 = 这一次充了多久（右轴）。
+   横轴是**所选月份内的每一次充电**，跟着月份筛选走 ——
+   这张卡讲的就是"这一个月"，摆一条全年月度趋势在下面只会让人怀疑看的是哪个月。
 
    为什么把时长叠进来：同样充 40 度，快充二十分钟、慢充一整夜，
    光看电量两根柱子一模一样。时长是第二根轴（量纲完全不同），
    不能硬套左轴，否则会被压成一条贴底的直线。 */
-function chargeMonthChartBlock() {
+function chargeSessionChartBlock(c) {
+  if (!c || !c.records || !c.records.length) return '';
+
   return `<div class="ch-legend">
-      <span><i class="en-dot" style="background:#2E8BC0"></i>月度电量 · 度</span>
-      <span><i class="en-dot" style="background:#E8A33D"></i>每次充电时长 · 小时</span>
+      <span><i class="en-dot" style="background:#2E8BC0"></i>本次电量 · 度</span>
+      <span><i class="en-dot" style="background:#E8A33D"></i>本次时长 · 小时</span>
     </div>
-    <div class="chart-scroll"><canvas id="chargeMonthChart"></canvas></div>`;
+    <div class="chart-scroll"><canvas id="chargeSessionChart"></canvas></div>`;
+}
+
+/* 逐次的横轴标签：`10-09`。同一天充了两次时追加 #2、#3 ——
+   重复的标签在类目轴上会被当成同一个刻度（iOS 的 Swift Charts 直接合并）。 */
+function sessionChartLabels(rows) {
+  const seen = {};
+  return rows.map((r) => {
+    const key = String(r.startTime || '').slice(5, 10) || '--';
+    seen[key] = (seen[key] || 0) + 1;
+    return seen[key] === 1 ? key : `${key}#${seen[key]}`;
+  });
 }
 
 /* 一条充电流水。
@@ -4684,25 +4896,34 @@ function capabilityCard() {
   /* off = 后端明确判定"没有此项"的功能（只有服务类会出现在这里；
      胎压/空调/车窗这类硬件能力后端不下判断，因此永远不会被隐藏）。 */
   const off = (c ? Object.keys(CAP_LABELS).filter((k) => k in c && c[k] === false) : []);
+
+  /* 权限包常有十几项，全铺出来会把卡片撑得很长，而多数人只想知道"有哪些"。
+     默认显示前 6 项 + 一个省略号，点开看全部 —— 省略号本身就是"还有更多"的
+     信号，比一个"展开全部"按钮省地方，也不会让人以为列表就这么多。 */
+  const PERM_PREVIEW = 6;
+  const permAll = perms || [];
+  const permExpanded = state.permExpanded === true;
+  const permShown = permExpanded ? permAll : permAll.slice(0, PERM_PREVIEW);
+  const permMore = permAll.length > PERM_PREVIEW;
+
   return `
     <div class="card">
       <div class="card-title">
         <span>车辆权限</span>
         ${perms ? `<span class="cap-badge">${perms.length} 项</span>` : ''}
       </div>
-      ${perms && perms.length ? `
+      ${permShown.length ? `
       <div class="cap-list">
-        ${perms.map((p) => `<span class="cap" title="${p}">${PERM_LABELS[p] || p}</span>`).join('')}
+        ${permShown.map((p) => `<span class="cap" title="${p}">${PERM_LABELS[p] || p}</span>`).join('')}
+        ${permMore ? `<button class="cap cap-more" data-perm-toggle
+              aria-expanded="${permExpanded}">${permExpanded ? '收起' : '…'}</button>` : ''}
       </div>` : ''}
       ${off.length ? `
       <div class="cap-list">
         ${off.map((k) => `<span class="cap no">${CAP_LABELS[k]}</span>`).join('')}
       </div>` : ''}
-      <div class="cap-hint">
-        来源：ms-app-bff/api/1.0/permissions${off.length
-          ? ' · 灰项为本账号未开通、已从界面隐藏的功能'
-          : ' · 界面已按此裁剪'}
-      </div>
+      ${off.length ? `
+      <div class="cap-hint">灰项为本账号未开通、已从界面隐藏的功能</div>` : ''}
     </div>`;
 }
 
@@ -4809,10 +5030,15 @@ async function authLogout() {
     state.charge = null; state.chargeMonths = []; state.chargeMonth = 'currentMonth'; state.health = null;
     /* 补录的金额与核对中的截图同样是个人数据，退出即清 */
     state.payments = []; state.ocrRows = null; state.ocrPick = {}; state.ocrImageSha = '';
-    state.chargeHasData = false; state.chargeAutoSynced = false;
+    state.chargeHasData = false;
+    /* 同步时间也要清：换个人登录，"同步于 14:07"不该还是上一位的时间，
+       而且不清的话"跨天判断"会误以为今天已经同步过了 */
+    clearChargeSynced();
     state.capabilities = null; state.permissions = null;
     /* 车辆位置同样是个人数据，退出即清 —— 不能让下一位登录者看到上一位的车停在哪 */
     state.location = null;
+    /* 气温是按定位查的，也属于"车在哪"的衍生信息，一并清掉 */
+    state.weather = null;
     /* 充电站与**坐标**一并清掉：坐标属于个人位置数据，不该跨会话留存，
        而且它只对"这一次查询"有意义。 */
     state.stations = null; state.stationsTotal = 0; state.stationsPriceOk = true;
@@ -4897,9 +5123,10 @@ function renderSettings() {
     mock:    '本地模拟数据',
   }[state.mode];
 
-  return `
-    ${capabilityCard()}
-
+  /* 「服务连接」只在**没登录**时显示。
+     登录后地址/连接状态已经不是需要用户操心的东西（而且地址只在 `?api=` 或退出后改），
+     天天摆在设置页最上面只是噪音。退出登录后卡片会重新出现，需要改地址时也有路可走。 */
+  const connCard = isLoggedIn() ? '' : `
     <div class="card">
       <div class="card-title">服务连接</div>
       <div class="mini-row" style="padding:5px 0">
@@ -4920,15 +5147,19 @@ function renderSettings() {
         <span class="mini-label">数据来源</span>
         <span class="mini-val" style="font-size:12px">${sourceText}</span>
       </div>
-      ${h ? `
-      <div class="mini-row" style="padding:5px 0">
-        <span class="mini-label">服务端车控</span>
-        <span class="mini-val" style="font-size:12px">${h.allowCommands ? '已开启' : '已禁用'}</span>
-      </div>` : ''}
-    </div>
+    </div>`;
+
+  return `
+    ${capabilityCard()}
+    ${connCard}
 
     <div class="card">
       <div class="card-title">车辆控制</div>
+      ${h ? `
+      <div class="mini-row" style="padding:0 0 8px">
+        <span class="mini-label">服务端车控</span>
+        <span class="mini-val" style="font-size:12px">${h.allowCommands ? '已开启' : '已禁用'}</span>
+      </div>` : ''}
       <label class="sw-row">
         <span class="sw-txt">
           <span class="t">允许下发控制指令</span>
@@ -4973,14 +5204,6 @@ function renderSettings() {
     <div class="card">
       <div class="card-title">账号与凭据</div>
       ${authCard()}
-      <div class="soon" style="background:var(--surface-alt);margin-top:10px">
-        <span class="ico">${SVG.file}</span>
-        <div>
-          <div class="t">导入账单</div>
-          <div class="d">支付宝 / 微信 CSV</div>
-        </div>
-        <span class="soon-badge">原生版提供</span>
-      </div>
     </div>
 
     <div class="card">
@@ -5010,6 +5233,7 @@ function render() {
     dash: renderDashboard,
     trips: renderTrips,
     charges: renderCharges,
+    ctrl: renderControls,
     settings: renderSettings,
   }[state.tab]();
 
@@ -5074,32 +5298,24 @@ function render() {
       }
     }
     if (state.tab === 'charges') {
-      /* 月度充入电量：柱状图，横轴是**全部**可查月份（与上方筛选无关）。
-         月份清单是倒序的（本月在最前），这里反转成时间正序，否则图会从右往左读。 */
-      const c = $('#chargeMonthChart');
-      const months = state.chargeMonths || [];
-      if (c && months.length) {
-        const ordered = [...months].reverse();
-        const now = new Date();
-        /* 高亮所选月份那根柱子：上方大数只属于一个月，
-           图上却有全部月份 —— 不标出来就得靠月份标签去对。 */
-        const curIdx = ordered.findIndex((m) => m.yearMonth === state.chargeMonth);
-        drawLineChart(c,
-          ordered.map((m) => ({
-            v: m.kwh,
-            label: m.yearMonth === 'currentMonth'
-              ? `${now.getMonth() + 1}月`
-              : fmtMonth(m.yearMonth),
-          })),
-          { height: 176, decimals: 0, showValue: true, scrollable: true,
-            xLabelStep: 1, minPointWidth: 52, niceMax: true, bar: true,
+      /* 当月逐次图：横轴是所选月份里的每一次充电（时间正序）。
+         每次各占一个刻度，所以前后都要留出位置，不能按"月度"的密度铺。 */
+      const canvas = $('#chargeSessionChart');
+      const records = (state.charge && state.charge.records) || [];
+      if (canvas && records.length) {
+        const ordered = [...records].reverse();          // 后端是倒序，图上要正序
+        const labels = sessionChartLabels(ordered);
+        drawLineChart(canvas,
+          ordered.map((r, i) => ({ v: r.energyKwh, label: labels[i] })),
+          { height: 176, decimals: 1, showValue: true, scrollable: true,
+            xLabelStep: 1, minPointWidth: 56, niceMax: true, bar: true,
             color: '#2E8BC0', fillTop: 'rgba(46,139,192,.24)',
-            highlight: curIdx >= 0 ? curIdx : null,
+            /* 第二根轴：这一次充了多久（小时）。没有时长的记录留 null，
+               折线在那里断开 —— 画成 0 会读成"充得特别快"。 */
             series2: {
-              values: ordered.map((m) => {
-                const v = Number(m.avgMinutes);
-                // 没有流水的月份给 null（折线断开）—— 画成 0 会读成"充得特别快"
-                return m.count && !Number.isNaN(v) ? +(v / 60).toFixed(2) : null;
+              values: ordered.map((r) => {
+                const m = Number(r.durationMin);
+                return m > 0 ? +(m / 60).toFixed(2) : null;
               }),
               color: '#E8A33D',
               decimals: 1,
@@ -5157,11 +5373,19 @@ async function loadHealth() {
 
 async function loadStatus() {
   state.statusLoading = true;
+  // 先记下上一拍的充电状态，用来判断"充电结束"这个跳变
+  const wasCharging = !!(state.status && state.status.isCharging);
   try {
     state.status = await api('/api/vehicle/status');
     const d = new Date();
     state.lastRefresh = String(d.getHours()).padStart(2, '0') + ':' +
                        String(d.getMinutes()).padStart(2, '0');
+    /* 充电中 → 未充电：这是唯一会产生新充电流水的时刻，安排一次同步。
+       放在这里而不是定时器里，是因为轮询间隔本来就跟着充电状态走
+       （充电中 60 秒一次），跳变一定能被捕捉到。 */
+    if (wasCharging && state.status && state.status.isCharging !== true) {
+      scheduleChargeSyncAfterCharging();
+    }
     return true;
   } catch (e) {
     console.warn('状态加载失败', e);
@@ -5181,6 +5405,19 @@ async function loadLocation() {
     console.warn('位置加载失败', e);
     state.location = null;
     return false;
+  }
+}
+
+/* 当地气温。**独立于位置加载**：位置卡挂了（腾讯或网关抽风）不该顺带把温度也弄没，
+   反过来也一样 —— 两个接口共用服务端 60 秒位置缓存，多请求一次不会多外发坐标。 */
+async function loadWeather() {
+  try {
+    state.weather = await api('/api/vehicle/weather');
+    return true;
+  } catch (e) {
+    console.warn('天气加载失败', e);
+    state.weather = null;
+    return true;   // 温度缺失只是少一个数字，不该让整页掉进"连接失败"
   }
 }
 
@@ -5279,14 +5516,17 @@ async function loadChargeSessions() {
 }
 
 /* 同步充电流水（打官方网关，幂等）。
-   `silent` 用于"本地库是空的、自动补一次"的场景 —— 那时不该弹 toast，
-   成功失败都只是把页面填上或保持空态。 */
+   页面上**没有手动按钮**，只有三种自动触发（见 state.chargeSyncAt 注释）。
+   统一走 silent：自动触发对用户是"后台发生的事"，成功失败都不该弹 toast。 */
 async function runChargeSync(opts = {}) {
   if (state.chargeSyncing) return false;
   state.chargeSyncing = true;
   render();
   try {
     const data = await api('/api/charges/sync', { method: 'POST' });
+    /* 只有**真的打到网关**才算同步过一次。服务端 429（10 秒冷却）/ 401 / 网络失败
+       都不写这个时间 —— 否则一次失败会被记成"今天已经同步过"，当天再不重试。 */
+    markChargeSynced();
     await loadChargeMonths();
     await loadChargeSessions();
     if (!opts.silent) {
@@ -5306,6 +5546,19 @@ async function runChargeSync(opts = {}) {
   }
 }
 
+/* 充电结束 = **唯一真正会产生新充电流水的时刻**。
+   官方落库有延迟（实测几十秒），所以等一分钟再拉；期间若又充上了就不拉。
+   失败静默 —— 用户没点任何东西，不该被弹窗打扰。 */
+function scheduleChargeSyncAfterCharging() {
+  if (state.chargeSyncPending) return;
+  state.chargeSyncPending = true;
+  setTimeout(async () => {
+    state.chargeSyncPending = false;
+    if (state.mode !== 'live' || !isLoggedIn()) return;
+    await runChargeSync({ silent: true });
+  }, 60000);
+}
+
 async function loadCharges() {
   // 演示 / 离线：用内置数据，一个请求都不发
   if (state.mode === 'mock' || state.mode === 'offline') {
@@ -5321,12 +5574,15 @@ async function loadCharges() {
     loadOcrStatus();
     await loadChargeMonths();
 
-    /* 本地库空 ⇒ 自动同步一次。
-       为什么只在这一种情况下自动打网关：官方接口一次给两年全量，
-       而用户多数时候只是"看一眼上个月"，每次进页面都拉一遍纯属浪费，
-       也更容易触发风控。之后靠卡片上的「同步」按钮按需刷新。 */
-    if (!state.chargeHasData && !state.chargeAutoSynced) {
-      state.chargeAutoSynced = true;
+    /* 两种自动同步，一个会话最多各触发一次：
+         · 本地库空 —— 第一次进来必须填上，否则页面是空的；
+         · **跨天**了 —— 上次同步不是今天，补一次（防"上次充电时 App 没开"漏数据）。
+       同一天反复切 tab 不会再打网关：官方接口一次给两年全量，
+       每次都拉纯属浪费，也更容易触发风控。 */
+    const today = new Date().toDateString();
+    const needSync = !state.chargeHasData || chargeSyncStale();
+    if (needSync && state.chargeAutoSyncDay !== today) {
+      state.chargeAutoSyncDay = today;
       // 同步内部已经把月份与流水都重新读了一遍，成功就直接返回，
       // 免得同一份本地数据再查一次
       if (await runChargeSync({ silent: true })) return true;
@@ -5369,7 +5625,8 @@ function seedMock() {
   state.months = MOCK.months;
   state.yearMonth = 'currentMonth';
   state.energyWindow = MOCK.energyWindow;
-  /* 充入电量：演示数据与真实接口同一个缺口（没有金额、没有站点名） */
+  /* 充入电量：演示流水带金额（为了看样式），但没有站点名 ——
+     站名只能来自 OCR 补录，演示数据不该长得比真实接口更完整 */
   state.chargeMonths = MOCK.charge.months;
   state.chargeMonth = 'currentMonth';
   state.chargeHasData = true;
@@ -5378,6 +5635,8 @@ function seedMock() {
   state.capabilities = MOCK.capabilities;
   state.permissions = MOCK.permissions;
   state.location = MOCK.location;
+  // 演示天气：MockData 里没有车辆坐标，给一个固定值让这格有内容（真机是按位置查的）
+  state.weather = { available: true, temperature: 22, weather: '多云' };
   // 演示数据一次给完，不做分页（也不该让用户滑出"加载更多"的假动作）；
   // 若此时已经选了筛选条件，一并按同一套规则过滤掉
   state.stationsPriceOk = true;
@@ -5471,6 +5730,7 @@ async function bootstrap() {
   /* 未登录时不定位、也不保留上一会话的站点与坐标 */
   state.stations = null; state.loc = null; state.locStatus = 'idle';
   state.location = null;
+  state.weather = null;
   state.mode = 'needLogin';
   render();
 }
@@ -5509,11 +5769,13 @@ function renderLoginWall() {
    花在没人看的数据上（充电站还要逐站取价，最贵）。
    `loadedKeys` 只记**成功**过的键，失败的下次进该 tab 会自动重试。 */
 const TAB_NEEDS = {
-  dash:     ['health', 'capabilities', 'status', 'location'],
+  dash:     ['health', 'capabilities', 'status', 'location', 'weather'],
   trips:    ['energyMonths', 'trips'],
   // 充电页不再需要能力集：预约充电卡已换成「充入电量」，
   // 而附近站点只看气泡接口字段，与权限包无关。少一个请求就少一分压力。
   charges:  ['charges'],
+  // 车控页要车况（上锁/空调/充电中）+ 能力集（cap() 决定显示哪些按钮）+ 服务端车控开关
+  ctrl:     ['health', 'capabilities', 'status'],
   settings: ['health', 'capabilities'],
 };
 
@@ -5523,6 +5785,7 @@ const DATA_LOADERS = {
   capabilities: loadCapabilities,
   status: loadStatus,
   location: loadLocation,
+  weather: loadWeather,
   trips: loadTrips,
   energyMonths: loadEnergyMonths,
   charges: loadCharges,
@@ -5627,6 +5890,13 @@ document.addEventListener('click', (e) => {
     openStationNav(navBtn.dataset.nav);
     return;
   }
+  // 车辆权限：省略号展开 / 收起
+  const permToggle = e.target.closest('[data-perm-toggle]');
+  if (permToggle) {
+    state.permExpanded = !state.permExpanded;
+    render();
+    return;
+  }
   // 站点排序（限定 data-sort，与下面的时间区间切换互不干扰）
   const sortBtn = e.target.closest('.seg button[data-sort]');
   if (sortBtn) {
@@ -5695,11 +5965,8 @@ document.addEventListener('click', (e) => {
     });
     return;
   }
-  // 手动同步充电流水（官方接口幂等，连点有后端 10 秒冷却兜底）
-  if (e.target.closest('#chargeSyncBtn')) {
-    runChargeSync();
-    return;
-  }
+  /* 充电流水的「同步」按钮已移除（时机全自动：空库 / 跨天 / 充电结束）。
+     需要手动触发时去调试台（`?debug=1` → 接口 → POST /api/charges/sync）。 */
   /* 金额补录三个入口。
      顺序无所谓，但都要在 `.st` 之类判断之前无所谓 —— 它们不在站点卡里，
      这里只需要注意别被上面的站点筛选/排序规则误伤（用的是独立 id）。 */
