@@ -16,6 +16,8 @@ struct SettingsView: View {
 
     @State private var model = SettingsViewModel()
     @State private var showCodeSheet = false
+    /// 车辆权限是否展开全部（默认只看前 6 项）
+    @State private var showAllPermissions = false
     /// 服务端地址输入框焦点：失焦即提交，避免「改完不按回车」导致不生效
     @FocusState private var isAddressFocused: Bool
     /// API 令牌输入框焦点，同上
@@ -29,7 +31,12 @@ struct SettingsView: View {
                 //   车辆权限 → 服务连接 → 车辆控制 → 关于当前数据 → 待配置项 → 账号与凭据
                 // iOS 独有的「诊断」放在后面，不与网页抢前面的位置。
                 capabilitySection
-                connectionSection
+                /* 「服务端」卡只在**没登录**时显示：登录后地址与连接状态已经不是
+                   需要用户操心的事，天天摆在最上面只是噪音。
+                   退出登录后卡片会回来；要改地址也可以先退出或重装时带 ?api=。 */
+                if !model.isAuthenticated {
+                    connectionSection
+                }
                 commandSection
 
                 // 对齐网页：非 live 时给一段"现在看到的是不是真数据"的说明
@@ -377,6 +384,22 @@ struct SettingsView: View {
     private var commandSection: some View {
         SettingsCard(title: "车辆控制") {
             VStack(spacing: 8) {
+                /* 服务端那把锁（.env 的 ALLOW_COMMANDS）。放在开关上方是当它的上下文：
+                   两把锁都开才能下发，先看到"收不收"再看"发不发"。 */
+                HStack(spacing: 6) {
+                    Text("服务端车控")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.textSecondary(scheme))
+                    Spacer(minLength: 8)
+                    Text(model.serverAllowCommands.map { $0 ? "已开启" : "已禁用" } ?? "--")
+                        .font(.system(size: 13))
+                        .foregroundStyle(model.serverAllowCommands == false
+                                         ? ChineseColor.statusWarn
+                                         : Theme.textPrimary(scheme))
+                }
+
+                Divider().overlay(Theme.separator(scheme))
+
                 Toggle(isOn: Bindable(settings).commandsEnabled) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("允许下发控制指令")
@@ -409,7 +432,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Text("总开关（默认关）与「诊断」里的「服务端车控」是两把锁，都要打开才能下发指令。")
+                Text("总开关（默认关）与上面的「服务端车控」是两把锁，都要打开才能下发指令。")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textTertiary(scheme))
                     .fixedSize(horizontal: false, vertical: true)
@@ -477,11 +500,13 @@ struct SettingsView: View {
                     }
                 }
 
-                Text(capabilityHint)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textTertiary(scheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if !capabilityHint.isEmpty {
+                    Text(capabilityHint)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary(scheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
     }
@@ -497,15 +522,26 @@ struct SettingsView: View {
     ///
     /// 取不到时如实说「没取到」，而不是显示一个空列表 —— 后者会被读成
     /// 「什么权限都没有」，那是把「不知道」谎报成「确认没有」。
+    /// 权限清单默认只显示前 6 项。
+    ///
+    /// 十几项 chip 铺满会把卡片撑得很长，而多数人只想知道"有哪些"。
+    /// 网页那边用「…」小按钮，iOS 这边改成**文字按钮 + 44pt 触控区**：
+    /// 一个省略号在触摸屏上既不好点也不像按钮，HIG 要求可见的可点目标。
+    private static let permissionPreview = 6
+
     @ViewBuilder
     private var permissionChips: some View {
         if let permissions = store.permissions, !permissions.isEmpty {
+            let shown = showAllPermissions
+                ? permissions
+                : Array(permissions.prefix(Self.permissionPreview))
+
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 88), spacing: 6)],
                 alignment: .leading,
                 spacing: 6
             ) {
-                ForEach(permissions, id: \.self) { permission in
+                ForEach(shown, id: \.self) { permission in
                     Text(Self.permissionLabels[permission] ?? permission)
                         .font(.system(size: 11.5))
                         .foregroundStyle(ChineseColor.qingBi)
@@ -517,6 +553,29 @@ struct SettingsView: View {
                         .background(ChineseColor.qingBi.opacity(0.10))
                         .clipShape(Capsule())
                 }
+            }
+
+            if permissions.count > Self.permissionPreview {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        showAllPermissions.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        Text(showAllPermissions ? "收起" : "展开全部 \(permissions.count) 项")
+                            .font(.system(size: 12))
+                        Image(systemName: showAllPermissions ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .foregroundStyle(Theme.accent(scheme))
+                    .frame(minHeight: Metrics.minTouchTarget)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(showAllPermissions
+                                    ? "收起权限列表"
+                                    : "展开全部 \(permissions.count) 项权限")
             }
         } else {
             Text(store.permissions == nil
@@ -530,20 +589,17 @@ struct SettingsView: View {
 
     /// 卡片脚注。
     ///
-    /// 除来源之外，把**被隐藏的按钮名逐个列出来** —— 这张卡存在的意义就是让
-    /// 「某个按钮怎么不见了」变得可解释，只报个数字等于没说。
+    /// **不再写数据来源**（`ms-app-bff/api/1.0/permissions` 是实现细节，
+    /// 对用户没有意义，网页那边也已删掉）。这里只解释一件事：
+    /// 那些灰色 chip 是什么意思。一个个点名没必要 —— 灰 chip 本身已经列出来了。
+    /// 没有灰 chip 时返回空串，调用处直接不渲染这一行。
     private var capabilityHint: String {
-        let source = "来源：ms-app-bff/api/1.0/permissions"
         guard let permissions = store.permissions, !permissions.isEmpty else {
-            return source + " · 未取到时界面按「全部显示」处理"
+            return ""   // 取不到权限包的情况由 permissionChips 的空态文案负责
         }
-        let hidden = VehicleCommand.allCases
-            .filter { !store.isCapabilityAvailable($0) }
-            .map(\.displayName)
-        guard !hidden.isEmpty else {
-            return "\(source) · \(permissions.count) 项 · 界面已按此裁剪"
-        }
-        return "\(source) · \(permissions.count) 项 · 已隐藏：\(hidden.joined(separator: "、"))"
+        return hiddenCommandNames.isEmpty
+            ? ""
+            : "灰项为本账号未开通、已从界面隐藏的功能"
     }
 
     // MARK: - 诊断
@@ -555,12 +611,8 @@ struct SettingsView: View {
                 Divider().overlay(Theme.separator(scheme))
                 diagnosticRow("配置完整", value: model.isLiveConfigured ? "是" : "否")
                 Divider().overlay(Theme.separator(scheme))
-                // 服务端那把锁（.env 的 ALLOW_COMMANDS）。与设置页的车控总开关
-                // 是两回事：一个管"发不发"，一个管"收不收"。取不到时显示 `--`。
-                diagnosticRow("服务端车控", value: model.serverAllowCommands.map {
-                    $0 ? "已开启" : "已禁用"
-                } ?? "--")
-                Divider().overlay(Theme.separator(scheme))
+                // 「服务端车控」已移到「车辆控制」卡（和客户端总开关放一起看才讲得清）。
+                // 同一个信息不在一处之外再摆一遍 —— 两处都可能过期，还容易只改一处。
                 diagnosticRow("上次刷新", value: store.lastRefresh.map {
                     $0.formatted(date: .omitted, time: .shortened)
                 } ?? "--")

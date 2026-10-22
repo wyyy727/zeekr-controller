@@ -2,7 +2,7 @@
 //  RootView.swift
 //  ZeekrDash
 //
-//  根视图：四 Tab + 液态玻璃
+//  根视图：五 Tab + 液态玻璃
 //
 //  设计对齐确认版预览页（preview/index.html）：
 //  - 底部导航为「悬浮玻璃胶囊」，两侧留 14pt 间隙，而非通栏
@@ -123,6 +123,8 @@ struct RootView: View {
             TripsView()
         case .charges:
             ChargesView()
+        case .controls:
+            ControlsView()
         case .settings:
             SettingsView()
         }
@@ -243,7 +245,8 @@ struct RootView: View {
 // MARK: - 四个 Tab
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case dashboard, trips, charges, settings
+    // 车控单开一页：车况页太长，而车控是高频操作（见 ControlsView 顶部注释）
+    case dashboard, trips, charges, controls, settings
 
     var id: String { rawValue }
 
@@ -252,6 +255,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .dashboard: return "车况"
         case .trips:     return "行程"
         case .charges:   return "充电"
+        case .controls:  return "车控"
         case .settings:  return "设置"
         }
     }
@@ -261,6 +265,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .dashboard: return "car"
         case .trips:     return "chart.xyaxis.line"
         case .charges:   return "bolt"
+        case .controls:  return "steeringwheel"
         case .settings:  return "gearshape"
         }
     }

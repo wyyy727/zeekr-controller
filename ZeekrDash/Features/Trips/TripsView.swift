@@ -222,7 +222,7 @@ struct TripsView: View {
     private var distanceChart: some View {
         Chart(model.series) { point in
             BarMark(
-                x: .value("日期", point.date),
+                x: .value("日期", point.shortDate),
                 y: .value("里程", point.distanceKm ?? 0)
             )
             .foregroundStyle(distanceColor)
@@ -258,7 +258,7 @@ struct TripsView: View {
         Chart(model.series) { point in
             if let energy = point.energyKwh {
                 AreaMark(
-                    x: .value("日期", point.date),
+                    x: .value("日期", point.shortDate),
                     y: .value("电耗", energy)
                 )
                 .foregroundStyle(
@@ -271,7 +271,7 @@ struct TripsView: View {
                 .interpolationMethod(.catmullRom)
 
                 LineMark(
-                    x: .value("日期", point.date),
+                    x: .value("日期", point.shortDate),
                     y: .value("电耗", energy)
                 )
                 .foregroundStyle(energyColor)
@@ -279,7 +279,7 @@ struct TripsView: View {
                 .lineStyle(StrokeStyle(lineWidth: 2))
 
                 PointMark(
-                    x: .value("日期", point.date),
+                    x: .value("日期", point.shortDate),
                     y: .value("电耗", energy)
                 )
                 .foregroundStyle(energyColor)

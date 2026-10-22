@@ -36,9 +36,22 @@ final class ChargesViewModel {
     /// 当前展示的是不是演示数据（界面据此标徽标、禁用补录入口）
     private(set) var isMock = false
 
+    /// 上次同步完成的时间。存 `UserDefaults`（见 `ChargeSyncStamp`）——
+    /// "今天同步过没有"必须跨启动记得住，否则每次冷启动都会重拉一遍两年流水。
+    private(set) var lastSyncedAt: Date?
+
+    /// 本次启动是否已经自动同步过：切 tab / 反复刷新不该连打网关
+    private var autoSyncedThisRun = false
+    /// 充电结束后已排队一次同步，别重复排
+    private var chargeEndSyncPending = false
+
     /// 加载代次。切月份会连发请求，先发后到时用它丢弃过时的结果 ——
     /// 否则旧月份的数据会把新选中的月份覆盖掉。
     private var loadGeneration = 0
+
+    init() {
+        lastSyncedAt = ChargeSyncStamp.last
+    }
 
     // MARK: - 派生值
 
@@ -57,9 +70,11 @@ final class ChargesViewModel {
     var records: [ChargeSession] { stat?.records ?? [] }
     var count: Int { stat?.count ?? 0 }
 
-    /// 趋势图用：月份清单是倒序的，图要从左往右读
-    var trendMonths: [ChargeMonthOption] {
-        Array(months.filter { ($0.yearMonth ?? "").isEmpty == false }.reversed())
+    /// 累计金额：所有可查月份的金额之和（服务端按月汇总好，这里只做加法）。
+    /// 没有月份带金额时给 nil —— 显示 0 会被读成"一分没花"。
+    var totalAmountText: String {
+        let sum = months.reduce(0.0) { $0 + ($1.amount ?? 0) }
+        return sum > 0 ? "¥" + String(format: "%.2f", sum) : "--"
     }
 
     /// 待确认金额笔数（配不上流水 + 有多条候选）
@@ -71,6 +86,14 @@ final class ChargesViewModel {
     /// 演示/离线下后端会返回 503，与其让用户点一个必然失败的按钮，不如直接禁用。
     var canWrite: Bool {
         !isMock && !AppStore.shared.needsLogin
+    }
+
+    /// 标题行右侧那行小字。**页面没有同步按钮，这是唯一的数据新鲜度线索**。
+    var lastSyncText: String {
+        guard let lastSyncedAt else { return "未同步" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return "同步于 " + formatter.string(from: lastSyncedAt)
     }
 
     // MARK: - 加载
@@ -100,10 +123,12 @@ final class ChargesViewModel {
 
         isMock = false
 
+        var hasData = true
         do {
             let loaded: ChargeMonthsPayload = try await APIClient.shared.get(APIRoutes.chargeMonths)
             guard generation == loadGeneration, !Task.isCancelled else { return }
             months = loaded.months ?? []
+            hasData = loaded.hasData ?? !months.isEmpty
 
             // 跨月后原来选中的月份可能已不在清单里，退回本月
             if !months.isEmpty && !months.contains(where: { $0.yearMonth == selectedMonth }) {
@@ -113,6 +138,18 @@ final class ChargesViewModel {
             // 月份清单取不到也要继续取当月流水：整页空白比少几个选项糟得多
             guard generation == loadGeneration else { return }
             months = []
+            hasData = false
+        }
+
+        /* 空库 / 跨天 ⇒ 静默同步一次。
+           页面上没有手动同步按钮，这里是"补数据"的主要入口：
+             · 空库 —— 第一次打开必须填上，否则整页是空的；
+             · 跨天 —— 上次同步不是今天（防"上次充电时 App 没开"漏数据）。
+           同一天反复进页面不会再打网关：官方接口一次给两年全量，每次都拉纯属浪费。 */
+        if (!hasData || ChargeSyncStamp.isStale) && !autoSyncedThisRun {
+            autoSyncedThisRun = true
+            await sync(silent: true)
+            return
         }
 
         await loadSessions(generation: generation)
@@ -158,35 +195,69 @@ final class ChargesViewModel {
 
     // MARK: - 同步官方流水
 
-    /// 幂等。连点由 `isSyncing` 挡住，服务端还有 10 秒冷却兜底。
-    func sync() async {
+    /// 幂等。并发由 `isSyncing` 挡住，服务端还有 10 秒冷却兜底。
+    ///
+    /// `silent` 用于自动触发（空库 / 跨天 / 充电结束）—— 那时用户没点任何东西，
+    /// 成功失败都不该弹 toast。
+    func sync(silent: Bool = false) async {
         guard !isSyncing else { return }
         isSyncing = true
         defer { isSyncing = false }
 
         if SettingsStore.shared.prefersMockData {
-            showToast("演示数据不落库，同步只在真实数据源下有意义")
+            if !silent { showToast("演示数据不落库，同步只在真实数据源下有意义") }
             return
         }
 
         do {
             let result: ChargeSyncResult = try await APIClient.shared.post(APIRoutes.chargeSync)
-            if result.persisted == false {
-                showToast("演示数据不落库（上游 \(result.fetched ?? 0) 条）")
-            } else {
-                let inserted = result.inserted ?? 0
-                let note = inserted > 0 ? "新增 \(inserted) 条" : "无新增"
-                showToast("已同步 · \(note)，共 \(result.total ?? 0) 条")
+            /* 只有**真的打到网关**才记时间。429（10 秒冷却）/ 401 / 网络失败都不记 ——
+               否则一次失败会被当成"今天已经同步过"，当天不再重试。 */
+            ChargeSyncStamp.mark()
+            lastSyncedAt = ChargeSyncStamp.last
+
+            if !silent {
+                if result.persisted == false {
+                    showToast("演示数据不落库（上游 \(result.fetched ?? 0) 条）")
+                } else {
+                    let inserted = result.inserted ?? 0
+                    let note = inserted > 0 ? "新增 \(inserted) 条" : "无新增"
+                    showToast("已同步 · \(note)，共 \(result.total ?? 0) 条")
+                }
             }
         } catch let error as ApiError {
-            showToast(error.errorDescription ?? "同步失败")
+            if !silent { showToast(error.errorDescription ?? "同步失败") }
             return
         } catch {
-            showToast("同步失败：\(error.localizedDescription)")
+            if !silent { showToast("同步失败：\(error.localizedDescription)") }
             return
         }
 
         await load()
+    }
+
+    /// 下拉刷新：等于"现在就去拉一次"（原生手势，界面上不占位置）。
+    /// 演示模式下没有可拉的网关，退回本地重算。
+    func refresh() async {
+        if isMock || SettingsStore.shared.prefersMockData {
+            await load()
+            return
+        }
+        await sync(silent: false)
+    }
+
+    /// 充电结束 = **唯一真正会产生新流水的时刻**。
+    ///
+    /// 官方落库有延迟（实测几十秒），所以等一分钟再拉；
+    /// 轮询间隔本来就跟着充电状态走（充电中 60 秒一次），这个跳变一定抓得到。
+    func syncAfterChargeEnd() async {
+        guard !chargeEndSyncPending else { return }
+        chargeEndSyncPending = true
+        defer { chargeEndSyncPending = false }
+
+        try? await Task.sleep(nanoseconds: 60_000_000_000)
+        guard !Task.isCancelled else { return }
+        await sync(silent: true)
     }
 
     // MARK: - 金额补录：截图识别
@@ -353,6 +424,38 @@ final class ChargesViewModel {
 }
 
 // MARK: - 接口响应模型
+
+/// 充电流水的同步时间戳（`UserDefaults`，跨启动保留）。
+///
+/// 页面上**没有手动同步按钮**，只有三种自动触发：空库 / 跨天 / 充电结束。
+/// "今天同步过没有"必须跨启动记得住，否则每次冷启动都会重拉一遍两年流水。
+///
+/// 与服务端的 10 秒冷却无关 —— 那个只防连点。
+enum ChargeSyncStamp {
+
+    private static let key = "zk.chargeSyncAt"
+
+    static var last: Date? {
+        let stamp = UserDefaults.standard.double(forKey: key)
+        return stamp > 0 ? Date(timeIntervalSince1970: stamp) : nil
+    }
+
+    /// 上次同步不是今天 ⇒ 该补一次。跨天就算过期，不看几小时 ——
+    /// 一天最多打一次网关，比"6 小时"更省也更好解释。
+    static var isStale: Bool {
+        guard let last else { return true }
+        return !Calendar.current.isDateInToday(last)
+    }
+
+    static func mark() {
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: key)
+    }
+
+    /// 退出登录时清掉：换个人登录不该沿用上一位的「同步于」，也会打乱跨天判断。
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+}
 
 /// 金额入库结果（`_persist_payments` 的返回值）
 struct CommitResult: Codable {

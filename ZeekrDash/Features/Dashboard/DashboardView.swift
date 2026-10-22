@@ -8,7 +8,8 @@
 import SwiftUI
 import UIKit
 
-/// 车况主页：电量、续航、胎压、门窗、充电状态、快捷车控
+/// 车况主页：电量、续航、胎压、门窗、充电状态
+/// （快捷车控已独立成「车控」tab，见 `ControlsView`）
 struct DashboardView: View {
 
     @Environment(AppStore.self) private var store
@@ -35,7 +36,9 @@ struct DashboardView: View {
                     // 「车身状态」保持 2×2，不随胎压一起改横排
                     statusCard(status)
                     locationCard(store.vehicleLocation)
-                    ControlsPanel()
+                    /* 快捷车控已搬到独立的「车控」tab：
+                       车况页已经有电量 / 胎压 / 车身 / 位置四块，
+                       而车控是高频操作，每次都要滑到最底才能按。 */
                     footerNote
                 } else if store.isLoading {
                     LoadingView(text: "正在获取车辆状态")
@@ -169,9 +172,12 @@ struct DashboardView: View {
                     unit: "°C"
                 )
             }
-            StatCard(title: "车外温度", icon: "thermometer.sun") {
+            /* 「当地气温」而不是「车外温度」：车端 `exteriorTemp` 实测恒为空
+               （这版固件不上报），这个数是按车辆位置查来的天气。
+               暴晒 / 地库时两者能差十几度，标成"车外温度"就是谎报。 */
+            StatCard(title: "当地气温", icon: "thermometer.sun") {
                 StatValue(
-                    value: status.exteriorTemp.map { String(format: "%.1f", $0) } ?? "--",
+                    value: store.weather?.temperature.map { String($0) } ?? "--",
                     unit: "°C"
                 )
             }

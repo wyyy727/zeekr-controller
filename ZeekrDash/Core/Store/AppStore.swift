@@ -65,6 +65,14 @@ final class AppStore {
     /// 卡片会永远停在「正在获取位置…」，看起来像卡死。
     var locationError: String?
 
+    /// 车辆所在地的天气（只用来顶「当地气温」那一格）。
+    ///
+    /// 车端 `climateStatus.exteriorTemp` 实测恒为空，这版固件不上报 ——
+    /// 所以这个数是按位置查来的，**不是车外实测温度**。
+    /// 取不到就是 nil，界面显示 `--`，绝不用 0℃ 顶替。
+    /// 失败**不影响** `dataMode`：少一个数字不该把整页打成"离线"。
+    var weather: WeatherInfo?
+
     /// 全局 Toast 文案（车控指令回执等），由 RootView 统一呈现
     var toast: String?
 
@@ -160,6 +168,11 @@ final class AppStore {
                 vehicleLocation = nil
                 locationMapData = nil
                 locationError = nil
+                // 气温是按定位查的，同属"车在哪"的衍生信息，换人登录不该沿用
+                weather = nil
+                // 充电流水的「同步于 XX:XX」也不该沿用上一位的时间，
+                // 而且不清会让"跨天才同步"误以为今天已经同步过了
+                ChargeSyncStamp.clear()
                 dataMode = .live
                 return
             }
@@ -189,6 +202,20 @@ final class AppStore {
 
         await loadCapabilities()
         await loadLocation()
+        await loadWeather()
+    }
+
+    /// 拉「当地气温」。
+    ///
+    /// 与 `loadLocation` 同一条原则：**失败只影响那一格**，不把整页打成模拟数据。
+    /// 服务端按坐标缓存 5 分钟，所以轮询再密也不会把腾讯额度打穿。
+    private func loadWeather() async {
+        do {
+            let info: WeatherInfo = try await APIClient.shared.get(APIRoutes.vehicleWeather)
+            weather = info.available == true ? info : nil
+        } catch {
+            weather = nil
+        }
     }
 
     /// 拉车辆位置与地图缩略图。
@@ -295,6 +322,8 @@ final class AppStore {
         permissions = MockData.permissions
         chargePlan = MockData.chargePlan
         vehicleLocation = MockData.vehicleLocation
+        // 演示天气：演示模式不联网，给固定值让「当地气温」有内容
+        weather = MockData.weather
         // 演示模式不联网，也就不该去请求地图图片
         locationMapData = nil
         locationError = nil

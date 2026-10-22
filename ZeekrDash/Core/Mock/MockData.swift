@@ -115,6 +115,23 @@ enum MockData {
         )
     )
 
+    // MARK: - 当地气温
+    //
+    // 对应 preview/index.html → MOCK 里的演示天气。
+    // 演示模式不联网，所以给固定值 —— 真机上是按车辆位置查腾讯天气。
+
+    static let weather = WeatherInfo(
+        available: true,
+        temperature: 22,
+        weather: "多云",
+        humidity: 55,
+        windDirection: "东北风",
+        windPower: "1-2级",
+        city: "演示市",
+        district: "演示区",
+        updateTime: nil
+    )
+
     // MARK: - 行程记录
     //
     // 对应 preview/index.html → MOCK.trips
@@ -401,6 +418,14 @@ enum MockData {
         let now = Date()
 
         let kwhPool = [38.5, 52.1, 44.0, 61.3, 29.8, 47.6, 55.2, 33.4, 49.9, 41.2]
+        /* 演示金额与站名：真机上金额只能来自 OCR / 手工录入、站名只有补录过才有 ——
+           但演示数据要有这些字段，界面样式才看得出来（页面有「演示数据」标记）。
+           金额按 `度数 × 电价` 现算，保证「金额 = 电量 × 单价」自洽。 */
+        let pricePool = [1.28, 1.45, 1.12, 1.62, 0.95, 1.35, 1.18, 1.55]
+        let stationPool = [
+            "极氪极充·世纪公园", "特来电·张江高科", "星星充电·万象城",
+            "国家电网·静安寺", "小桔充电·虹桥枢纽", "云快充·南京西路",
+        ]
         var out: [ChargeSession] = []
 
         // 从本月 1 号往前按月退，而不是拼 `DateComponents(month: thisMonth - m)` ——
@@ -417,6 +442,9 @@ enum MockData {
             // 当月只回溯到「昨天」：演示数据里不该出现还没发生的充电
             let upper = m == 0 ? max(1, cal.component(.day, from: now) - 1) : lastDay
             let count = m == 0 ? max(1, min(4, cal.component(.day, from: now) / 8 + 1)) : 3 + ((m * 2) % 3)
+            /* 留一个月**不补金额**：切到那个月才看得到「未补录」的样子 ——
+               全都补满了，这个状态在演示里永远看不见。 */
+            let priced = m != 2
 
             for i in 0..<count {
                 let kwh = kwhPool[(m * 3 + i) % kwhPool.count]
@@ -426,6 +454,7 @@ enum MockData {
                 let day = max(1, min(upper, 1 + ((m * 7 + i * 5) % upper)))
                 let hour = [7, 12, 18, 21, 22][(m + i) % 5]
                 let minute = [3, 15, 28, 41, 55][(m * 2 + i) % 5]
+                let price = pricePool[(m + i) % pricePool.count]
 
                 out.append(
                     ChargeSession(
@@ -435,9 +464,9 @@ enum MockData {
                         durationMin: minutes.rounded(),
                         energyKwh: kwh,
                         chargeType: isAc ? "ac" : "dc",
-                        stationName: nil,
-                        amount: nil,
-                        amountSource: nil
+                        stationName: stationPool[(m * 2 + i) % stationPool.count],
+                        amount: priced ? ((kwh * price) * 100).rounded() / 100 : nil,
+                        amountSource: priced ? "ocr" : nil
                     )
                 )
             }
@@ -465,6 +494,8 @@ enum MockData {
                 count: stat.count,
                 kwh: stat.totalKwh,
                 avgMinutes: stat.avgMinutes,
+                amount: stat.amountTotal ?? 0,
+                amountCount: stat.amountCount,
                 dcCount: stat.dcCount,
                 acCount: stat.acCount
             )
@@ -482,6 +513,14 @@ enum MockData {
         var acKwh = 0.0
         var dcCount = 0
         var acCount = 0
+        // 金额三口径与后端 `_summarize_month` 一致：真值 / 估算 / 未补
+        var amountTotal = 0.0
+        var amountCount = 0
+        var pricedKwh = 0.0
+        var unpricedCount = 0
+        var unpricedKwh = 0.0
+        var estimatedCount = 0
+        var estimatedTotal = 0.0
 
         for row in rows {
             let kwh = row.energyKwh ?? 0
@@ -489,6 +528,18 @@ enum MockData {
             totalMinutes += row.durationMin ?? 0
             if row.isDC { dcCount += 1; dcKwh += kwh }
             if row.isAC { acCount += 1; acKwh += kwh }
+
+            if row.amountSource == "estimate" {
+                estimatedCount += 1
+                estimatedTotal += row.amount ?? 0
+            } else if let amount = row.amount {
+                amountCount += 1
+                amountTotal += amount
+                pricedKwh += kwh
+            } else {
+                unpricedCount += 1
+                unpricedKwh += kwh
+            }
         }
 
         let count = rows.count
@@ -505,14 +556,15 @@ enum MockData {
             avgKwh: count > 0 ? round1(totalKwh / Double(count)) : 0,
             avgMinutes: count > 0 ? (totalMinutes / Double(count)).rounded() : 0,
             avgPowerKw: totalMinutes > 0 ? round1(totalKwh / (totalMinutes / 60)) : nil,
-            amountTotal: nil,
-            amountCount: 0,
-            pricedKwh: 0,
-            unitPrice: nil,
-            unpricedCount: count,
-            unpricedKwh: round1(totalKwh),
-            estimatedTotal: nil,
-            estimatedCount: 0,
+            amountTotal: amountCount > 0 ? round2(amountTotal) : nil,
+            amountCount: amountCount,
+            // 单价分母只用**已补录金额对应的电量**：拿总电量去除会把没补录的算进去
+            pricedKwh: round1(pricedKwh),
+            unitPrice: pricedKwh > 0 ? round2(amountTotal / pricedKwh) : nil,
+            unpricedCount: unpricedCount,
+            unpricedKwh: round1(unpricedKwh),
+            estimatedTotal: estimatedCount > 0 ? round2(estimatedTotal) : nil,
+            estimatedCount: estimatedCount,
             pendingPayments: 0,
             unmatchedPayments: 0,
             records: rows
@@ -534,6 +586,10 @@ enum MockData {
 
     private static func round1(_ value: Double) -> Double {
         (value * 10).rounded() / 10
+    }
+
+    private static func round2(_ value: Double) -> Double {
+        (value * 100).rounded() / 100
     }
 
     // MARK: - 附近充电站

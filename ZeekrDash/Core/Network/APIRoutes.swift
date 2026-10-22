@@ -28,6 +28,12 @@ enum APIRoutes {
     static let vehicleLocation = "/api/vehicle/location"
     /// 位置卡的地图缩略图（PNG/JPEG）。由服务端代取，**不要**在这里拼腾讯的 URL。
     static let vehicleLocationMap = "/api/vehicle/location/map.png"
+    /// 车辆所在地的实时天气。
+    ///
+    /// 只用来顶「当地气温」那一格：车端 `climateStatus.exteriorTemp` 实测恒为空
+    /// （这版固件不上报），所以这个数**不是车外实测温度**，界面标签必须写「当地气温」。
+    /// 坐标不出现在入参里 —— 服务端自己向极氪取，并复用位置接口的 60 秒缓存。
+    static let vehicleWeather = "/api/vehicle/weather"
 
     // 行程与能耗
     static let trips          = "/api/trips"

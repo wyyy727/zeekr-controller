@@ -14,9 +14,10 @@ import UniformTypeIdentifiers
 ///
 /// 与 `preview/index.html` 的充电页一一对应，卡片顺序与口径都保持一致：
 ///   1. 附近充电站（实时、要定位）；
-///   2. **充入电量**：一张卡 = 月度大数 + 月度趋势图 + 直/交流电量；
+///   2. **充入电量**：一张卡 = 月度大数（左电量 / 右当月与累计金额）+ 当月逐次图
+///      （柱=本次电量、折线=本次时长）+ 直/交流电量；
 ///   3. 充电记录（逐笔）；
-///   4. 充电费用（金额只能靠截图识别 / 手工补录，**不显示估算数字**）。
+///   4. 金额补录（金额只能靠截图识别 / 手工补录，**不显示估算数字**）。
 struct ChargesView: View {
 
     @Environment(\.colorScheme) private var scheme
@@ -62,7 +63,8 @@ struct ChargesView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
-            .refreshable { await model.load() }
+            // 下拉 = 现在就去拉一次（原生手势替代已移除的「同步」按钮）
+            .refreshable { await model.refresh() }
         }
         .overlay(alignment: .bottom) {
             if let toast = model.toast {
@@ -73,6 +75,13 @@ struct ChargesView: View {
         }
         .animation(.easeInOut(duration: 0.25), value: model.toast)
         .task { await model.load() }
+        /* 充电中 → 未充电：这是唯一会产生新充电流水的时刻。
+           车况轮询间隔本来就跟着充电状态走（充电中 60 秒一次），跳变一定抓得到。 */
+        .onChange(of: store.isCharging) { wasCharging, isCharging in
+            if wasCharging && !isCharging {
+                Task { await model.syncAfterChargeEnd() }
+            }
+        }
 
         // 月份选择：与行程页共用同一个滚轮（MonthPickerSheet）
         .sheet(isPresented: $showMonthPicker) {
@@ -120,6 +129,11 @@ struct ChargesView: View {
 
     // MARK: - 月份行
 
+    /// 左侧「统计月份」+ 右侧「同步时间小字 + 月份按钮」。
+    ///
+    /// **没有同步按钮**：时机全自动（空库 / 跨天 / 充电结束），
+    /// 所以这行小字是唯一的数据新鲜度线索，必须看得见；
+    /// 想立刻刷新就下拉（原生手势，不占界面位置）。
     private var monthRow: some View {
         HStack(spacing: 8) {
             Image(systemName: "calendar")
@@ -135,6 +149,11 @@ struct ChargesView: View {
             }
 
             Spacer(minLength: 8)
+
+            Text(model.isSyncing ? "同步中…" : model.lastSyncText)
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textTertiary(scheme))
+                .monospacedDigit()
 
             Button {
                 showMonthPicker = true
@@ -152,19 +171,6 @@ struct ChargesView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-
-            Button {
-                Task { await model.sync() }
-            } label: {
-                Text(model.isSyncing ? "同步中…" : "同步")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(model.isSyncing ? Theme.textTertiary(scheme) : Theme.accent(scheme))
-                    .padding(.horizontal, 12)
-                    .frame(minHeight: Metrics.minTouchTarget)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(model.isSyncing)
         }
     }
 
@@ -191,16 +197,14 @@ struct ChargesView: View {
                 heroBlock(stat)
                 Divider().overlay(Theme.separator(scheme))
                 subBlock(stat)
-                legendRow
-                trendChart
+                if !sessionPoints.isEmpty {
+                    legendRow
+                    sessionChart
+                }
                 splitLine(stat)
             } else {
-                // 这个月没记录，但别的月份有 —— 图照样画，换月份前先知道哪个月有数据
+                // 这个月没记录：逐次图没有可画的点，只留空态
                 emptyMonthBlock
-                if !model.trendMonths.isEmpty {
-                    legendRow
-                    trendChart
-                }
             }
         }
         .padding(Metrics.cardPadding)
@@ -208,20 +212,62 @@ struct ChargesView: View {
         .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
     }
 
+    /// 左边电量、右边金额 —— 这两个数是同一笔账的两面：
+    /// "充了 182 度"和"花了 234 块"分开摆会让人以为是两件事。
+    /// 金额只能来自截图识别 / 手工录入，没补录时写「未补录」，绝不编。
     private func heroBlock(_ stat: ChargeMonthStat) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("\(model.selectedMonthLabel) · 共 \(stat.count ?? 0) 次")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textSecondary(scheme))
-
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(fmt(stat.totalKwh, 1))
-                    .font(.system(size: 33, weight: .medium, design: .rounded))
-                    .foregroundStyle(Theme.textPrimary(scheme))
-                    .monospacedDigit()
-                Text("度")
-                    .font(.system(size: 15, weight: .regular))
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(model.selectedMonthLabel) · 共 \(stat.count ?? 0) 次")
+                    .font(.system(size: 12))
                     .foregroundStyle(Theme.textSecondary(scheme))
+
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    Text(fmt(stat.totalKwh, 1))
+                        .font(.system(size: 33, weight: .medium, design: .rounded))
+                        .foregroundStyle(Theme.textPrimary(scheme))
+                        .monospacedDigit()
+                    Text("度")
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundStyle(Theme.textSecondary(scheme))
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            moneyBlock(stat)
+        }
+    }
+
+    /// 金额区：一行一条「标签 + 数字」。
+    /// 拆成"数字一行、标签一行"要多扫一眼才知道那个数是什么，所以放同一行。
+    private func moneyBlock(_ stat: ChargeMonthStat) -> some View {
+        VStack(alignment: .trailing, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("\(model.selectedMonthLabel)金额")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Theme.textTertiary(scheme))
+                if let amount = stat.amountTotal {
+                    Text("¥" + String(format: "%.2f", amount))
+                        .font(.system(size: 21, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Theme.textPrimary(scheme))
+                        .monospacedDigit()
+                } else {
+                    // 0 会被读成"这个月一分没花"，所以写「未补录」
+                    Text("未补录")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.textTertiary(scheme))
+                }
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("累计")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Theme.textTertiary(scheme))
+                Text(model.totalAmountText)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Theme.textSecondary(scheme))
+                    .monospacedDigit()
             }
         }
     }
@@ -264,7 +310,7 @@ struct ChargesView: View {
             Text("\(model.selectedMonthLabel)没有充电记录")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Theme.textSecondary(scheme))
-            Text("换个日期看看，或点右上角「同步」重新拉取流水")
+            Text("换个日期看看；新流水会在充完电 / 跨天后的自动同步里出现")
                 .font(.system(size: 11.5))
                 .foregroundStyle(Theme.textTertiary(scheme))
         }
@@ -289,12 +335,12 @@ struct ChargesView: View {
         )
     }
 
-    // MARK: - 月度趋势图
+    // MARK: - 当月逐次图
 
     private var legendRow: some View {
         HStack(spacing: 14) {
-            legendDot(ChineseColor.tianQing, "月度电量 · 度")
-            legendDot(ChineseColor.tengHuang, "每次充电时长 · 小时")
+            legendDot(ChineseColor.tianQing, "本次电量 · 度")
+            legendDot(ChineseColor.tengHuang, "本次时长 · 小时")
             Spacer(minLength: 0)
         }
         .font(.system(size: 11))
@@ -310,16 +356,16 @@ struct ChargesView: View {
         }
     }
 
-    /// 柱 = 月度电量（左轴），折线 = 每次充电时长（右轴）。
+    /// 柱 = 这一次充了多少度（左轴），折线 = 这一次充了多久（右轴）。
     ///
-    /// 横轴是**全部**可查月份，不受上方月份筛选影响 —— 这张图的作用就是
-    /// "看出哪个月充得多"，跟着筛选变它每次只会剩一根柱子。
+    /// 横轴是**所选月份里的每一次充电**（时间正序），跟着月份筛选走 ——
+    /// 这张卡讲的就是"这一个月"，摆一条全年趋势在下面只会让人怀疑看的是哪个月。
     ///
     /// Swift Charts 没有"每系列一套刻度"，所以时长按 `scale` 折算进电量的
     /// 坐标空间，右轴刻度再反向折算回小时显示。峰值压在 ~74% 高度：
     /// 柱顶的数值标注在 ~91%，两组数字才不会叠在一起。
-    private var trendChart: some View {
-        let points = trendPoints
+    private var sessionChart: some View {
+        let points = sessionPoints
         let axisMax = niceMax(points.map { $0.kwh }.max() ?? 1)
         let maxHours = max(points.compactMap { $0.hours }.max() ?? 0.1, 0.1)
         let scale = (axisMax * 0.74) / maxHours
@@ -327,22 +373,17 @@ struct ChargesView: View {
         return Chart {
             ForEach(points) { point in
                 BarMark(
-                    x: .value("月份", point.label),
+                    x: .value("日期", point.label),
                     y: .value("电量", point.kwh)
                 )
-                // 非所选月份压暗：图里有全部月份、大数只有所选月份
-                .foregroundStyle(
-                    point.isSelected
-                        ? ChineseColor.tianQing
-                        : ChineseColor.tianQing.opacity(0.34)
-                )
+                .foregroundStyle(ChineseColor.tianQing)
                 .cornerRadius(3)
             }
 
             ForEach(points) { point in
                 if let hours = point.hours {
                     LineMark(
-                        x: .value("月份", point.label),
+                        x: .value("日期", point.label),
                         y: .value("时长", hours * scale),
                         series: .value("系列", "时长")
                     )
@@ -351,7 +392,7 @@ struct ChargesView: View {
                     .interpolationMethod(.monotone)
 
                     PointMark(
-                        x: .value("月份", point.label),
+                        x: .value("日期", point.label),
                         y: .value("时长", hours * scale)
                     )
                     .foregroundStyle(ChineseColor.tengHuang)
@@ -391,26 +432,24 @@ struct ChargesView: View {
         .frame(height: 176)
     }
 
-    /// 时间正序（图要从左往右读）；`currentMonth` 显示成「10月」
-    private var trendPoints: [TrendPoint] {
-        let calendar = Calendar.current
-        let now = Date()
-        let thisMonth = calendar.component(.month, from: now)
+    /// 时间正序（图要从左往右读）。标签 `10-09`；同一天充两次追加 `#2` ——
+    /// 重复标签在类目轴上会被当成同一个刻度，Swift Charts 会直接把两根柱子合并。
+    private var sessionPoints: [SessionPoint] {
+        var seen: [String: Int] = [:]
 
-        return model.trendMonths.map { item in
-            let ym = item.yearMonth ?? ""
-            let label: String = {
-                if ym == "currentMonth" { return "\(thisMonth)月" }
-                let parts = ym.split(separator: "-").compactMap { Int($0) }
-                return parts.count == 2 ? "\(parts[1])月" : ym
-            }()
-            let hours = (item.avgMinutes ?? 0) > 0 ? (item.avgMinutes ?? 0) / 60 : nil
-            return TrendPoint(
-                id: ym,
-                label: label,
-                kwh: item.kwh ?? 0,
-                hours: hours,
-                isSelected: ym == model.selectedMonth
+        return model.records.reversed().map { record in
+            let stamp = record.startTime ?? ""
+            let base = stamp.count >= 10 ? String(stamp.dropFirst(5).prefix(5)) : stamp
+            let key = base.isEmpty ? "--" : base
+            let n = (seen[key] ?? 0) + 1
+            seen[key] = n
+
+            let minutes = record.durationMin ?? 0
+            return SessionPoint(
+                id: record.id,
+                label: n == 1 ? key : "\(key)#\(n)",
+                kwh: record.energyKwh ?? 0,
+                hours: minutes > 0 ? minutes / 60 : nil
             )
         }
     }
@@ -446,29 +485,23 @@ struct ChargesView: View {
         .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
     }
 
-    // MARK: - 充电费用
+    // MARK: - 金额补录
 
-    /// 这张卡的立场：**一个编出来的数字都不显示**。
-    /// 官方接口只给电量（车不知道电价），金额只能来自截图识别 / 手工录入；
-    /// 在拿到真值之前显示估算值，会被当成"我花的钱" —— 比留空更糟。
+    /// 金额数字已经搬进上面的「充入电量」卡（当月 + 累计），这里**不再重复摆数字**，
+    /// 只留三件补录入口 + 一句状态 —— 一块放数、一块放操作，各自只有一件事。
+    ///
+    /// 立场不变：**一个编出来的数字都不显示**。
+    /// 官方接口只给电量（车不知道电价），金额只能来自截图识别 / 手工录入。
     private var costCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                Text("充电费用")
+                Text("金额补录")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary(scheme))
                 Spacer(minLength: 8)
                 Text(costBadge)
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textTertiary(scheme))
-            }
-
-            if let stat = model.stat, (stat.amountCount ?? 0) > 0 {
-                HStack(spacing: 0) {
-                    subItem("已补录金额", value: "¥\(fmt(stat.amountTotal, 2))", unit: nil)
-                    subItem("有金额记录", value: "\(stat.amountCount ?? 0)", unit: "笔")
-                    subItem("每度单价", value: fmt(stat.unitPrice, 2), unit: "元")
-                }
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -506,9 +539,9 @@ struct ChargesView: View {
     }
 
     private var costBadge: String {
-        guard let stat = model.stat else { return "金额未记录" }
+        guard let stat = model.stat else { return "未补录" }
         let priced = stat.amountCount ?? 0
-        if priced == 0 { return "金额未记录" }
+        if priced == 0 { return "未补录" }
         let unpriced = stat.unpricedCount ?? 0
         return unpriced > 0 ? "已补录 \(priced)/\(priced + unpriced) 笔" : "已补全"
     }
@@ -519,10 +552,18 @@ struct ChargesView: View {
         let unpriced = model.stat?.unpricedCount ?? 0
 
         if priced == 0 {
-            notes.append("极氪只提供电量，不提供金额 —— 车不知道电价，站点也不在充电记录里。"
-                         + "金额要自己补：截图识别（App「补能订单」页）或手工录入。")
-        } else if unpriced > 0 {
-            notes.append("还有 \(unpriced) 笔（\(fmt(model.stat?.unpricedKwh, 1)) 度）没补金额，单价只按已补录的算。")
+            notes.append("极氪只给电量，不给金额 —— 车不知道电价，站点也不在充电记录里。"
+                         + "补录后上面的「当月金额 / 累计」才会有数。")
+        } else {
+            let unit = model.stat?.unitPrice == nil
+                ? ""
+                : "，每度约 ¥\(fmt(model.stat?.unitPrice, 2))"
+            if unpriced > 0 {
+                notes.append("已补录 \(priced) 笔\(unit)；还有 \(unpriced) 笔"
+                             + "（\(fmt(model.stat?.unpricedKwh, 1)) 度）没补，单价只按已补录的算。")
+            } else {
+                notes.append("已补录 \(priced) 笔，全部有金额\(unit)。")
+            }
         }
         if let estimated = model.stat?.estimatedCount, estimated > 0 {
             notes.append("另有 \(estimated) 笔为电价估算，未计入合计与单价。")
@@ -577,14 +618,13 @@ struct ChargesView: View {
     }
 }
 
-/// 趋势图的一根柱子 / 一个点
-private struct TrendPoint: Identifiable {
+/// 当月逐次图的一根柱子 / 一个点
+private struct SessionPoint: Identifiable {
     var id: String
     var label: String
     var kwh: Double
-    /// 每次充电时长（小时）；没有流水的月份为 nil，折线在那里断开
+    /// 这一次充了多久（小时）；没有时长的记录为 nil，折线在那里断开
     var hours: Double?
-    var isSelected: Bool
 }
 
 // MARK: - 单条充电流水
@@ -621,6 +661,11 @@ private struct ChargeSessionRow: View {
                     }
                     if let power = record.powerKw {
                         Text(String(format: "%.0f kW", power))
+                    }
+                    // 金额只在这笔补录过才有 —— 没补录就不显示，绝不填 0
+                    if let amount = record.amount {
+                        Text("¥" + String(format: "%.2f", amount))
+                            .foregroundStyle(Theme.accent(scheme))
                     }
                 }
                 .font(.system(size: 10))

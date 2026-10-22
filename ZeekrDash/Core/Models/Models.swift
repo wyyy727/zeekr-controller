@@ -218,6 +218,15 @@ struct DailyEnergyPoint: Codable, Identifiable {
     var energyKwh: Double?
     var minutes: Int?
     var consumption: Double?
+
+    /// 图表 X 轴用的短标签：`2026-10-09` → `10-09`（与网页 `date.slice(5)` 一致）。
+    ///
+    /// Swift Charts 把 x 当**字符串类目**处理，传什么就原样标什么 ——
+    /// 传全量日期，30 天的图每个刻度都挤着 `2026-xx-xx`，读不出哪天是哪天。
+    /// 图表窗口最长 31 天，跨年时（12-28 … 01-05）MM-DD 依然唯一，不需要带年份。
+    var shortDate: String {
+        date.count >= 5 ? String(date.suffix(5)) : date
+    }
 }
 
 /// 可选月份（官方 `mileageBaseInfo.existingMonth`）
@@ -475,6 +484,9 @@ struct ChargeMonthOption: Codable, Identifiable {
     var count: Int?
     var kwh: Double?
     var avgMinutes: Double?
+    /// 当月**已补录**金额（估算不计入）。前端把各月加起来就是「累计金额」。
+    var amount: Double?
+    var amountCount: Int?
     var dcCount: Int?
     var acCount: Int?
 }
@@ -483,6 +495,8 @@ struct ChargeMonthsPayload: Codable {
     var months: [ChargeMonthOption]?
     var totalCount: Int?
     var totalKwh: Double?
+    /// 所有可查月份的金额之和（服务端算好，前端不再遍历）
+    var totalAmount: Double?
     var hasData: Bool?
 }
 
@@ -603,6 +617,33 @@ struct NearbyStations: Codable {
     /// 这与「单个站点没有价格」是两件事，别混 —— 前者要提示"价格服务不可用"，
     /// 后者只显示「价格 --」。
     var isPriceAvailable: Bool { priceAvailable != false }
+}
+
+// MARK: - 当地气温
+
+/// 车辆所在地的实时天气（`GET /api/vehicle/weather`）。
+///
+/// ⚠️ 界面上的标签是**「当地气温」**，不是「车外温度」：
+/// 车端 `climateStatus.exteriorTemp` 实测非空率 0/15（这版固件不上报），
+/// 所以这个数是按车辆位置查来的天气。暴晒 / 地下车库时两者能差十几度 ——
+/// 标成"车外温度"就是谎报。
+///
+/// 取不到时 `available` 为 false（服务端不会把它当错误抛），界面显示 `--`，
+/// **不要用 0℃ 顶替**（0℃ 是具体气温，会被当成真的）。
+struct WeatherInfo: Codable {
+    var available: Bool? = nil
+    /// 气温 ℃（整数）
+    var temperature: Int? = nil
+    /// 天气现象，如「多云」「小雨」
+    var weather: String? = nil
+    var humidity: Int? = nil
+    var windDirection: String? = nil
+    var windPower: String? = nil
+    /// 行政区，界面上不展示，排障时看
+    var city: String? = nil
+    var district: String? = nil
+    /// 上游观测时间
+    var updateTime: String? = nil
 }
 
 // MARK: - 车辆位置
