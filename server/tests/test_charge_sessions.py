@@ -285,6 +285,43 @@ def test_list_sessions_filters_by_month():
     assert months == {"2026-10": 1, "2026-09": 1}
 
 
+def test_session_months_carries_recorded_amount():
+    """月份清单要带**已补录**金额：前端「累计金额」就是把它按月加起来。
+
+    估算（`amount_source='estimate'`）必须排除 —— 把估算混进合计，
+    "这个月花了多少"就变成第三种数字，和卡片上的「当月金额」对不上。
+    """
+    from app.main import store
+
+    store.save_sessions([_session("zeekr:a", energyKwh=40.0)])
+    store.save_payments([
+        {"paymentId": "p1", "source": "manual", "paidAt": "2026-10-16 22:10",
+         "amount": 50.0, "status": "pending"},
+        {"paymentId": "p2", "source": "manual", "paidAt": "2026-10-16 22:10",
+         "amount": 74.4, "status": "pending"},
+    ])
+    store.link_payment("zeekr:a", "p1", "manual", "high")
+
+    october = next(m for m in store.session_months() if m["yearMonth"] == "2026-10")
+    assert october["amount"] == pytest.approx(50.0)
+    assert october["amountCount"] == 1
+
+    # 估算来源不计入合计（金额本身仍然留着，只是不进"花了多少钱"）
+    store.save_payments([
+        {"paymentId": "p3", "source": "estimate", "paidAt": "2026-10-16 22:10",
+         "amount": 99.0, "status": "matched"},
+    ])
+    with store._connect() as conn:  # noqa: SLF001 - 测试直接造估算行
+        conn.execute(
+            "UPDATE charge_sessions SET amount = 99.0, amount_source = 'estimate' "
+            "WHERE session_id = 'zeekr:a'"
+        )
+
+    october = next(m for m in store.session_months() if m["yearMonth"] == "2026-10")
+    assert october["amount"] == 0.0
+    assert october["amountCount"] == 0
+
+
 # ── 归一化 ──────────────────────────────────────────────────────────────
 
 

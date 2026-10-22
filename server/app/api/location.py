@@ -155,6 +155,43 @@ async def get_location(vin: str | None = None) -> dict:
     }
 
 
+@router.get("/weather")
+async def get_weather(vin: str | None = None) -> dict:
+    """车辆所在地的实时天气 —— 界面上标的是**「当地气温」，不是车外实测温度**。
+
+    为什么要有这个接口：车端 `climateStatus.exteriorTemp` 实测恒为空
+    （非空率 0/15，这版固件根本不上报），"车外温度"这个数只能按位置查天气。
+    日常两者基本一致，差别只在暴晒 / 地下车库这类极端场景。
+
+    坐标**不出现在本接口的入参里**：由服务端向极氪取，与 `/location` 共用
+    同一份 60 秒缓存，所以多一个接口不会多外发一次位置。
+    查询失败一律返回 `available: false`（不是 500）—— 温度缺失只是少一个数字，
+    不该让整页弹错误。
+    """
+    position = await _current_position(vin)
+    if not position["available"]:
+        return {
+            "success": True,
+            "data": {"available": False, "reason": "车辆尚未上报位置"},
+        }
+
+    map_client = get_map_client()
+    if not map_client.available:
+        return {
+            "success": True,
+            "data": {"available": False, "reason": "未配置 TENCENT_MAP_KEY"},
+        }
+
+    weather = await map_client.weather(position["lat"], position["lng"])
+    if weather is None:
+        return {
+            "success": True,
+            "data": {"available": False, "reason": "天气查询失败"},
+        }
+
+    return {"success": True, "data": {"available": True, **weather}}
+
+
 @router.get("/location/map.png")
 async def get_location_map(
     vin: str | None = None,

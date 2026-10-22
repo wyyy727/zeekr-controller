@@ -369,6 +369,10 @@ class Store:
         `minutes` / `avgMinutes` 供趋势图的第二根轴用：
         电量只能看出"这个月充了多少"，看不出"每次充了多久"，
         而慢充一充一整夜、快充二十分钟，差的就是这个数。
+
+        `amount` / `amountCount` 是**已补录的真值**（截图识别 / 手工录入），
+        估算（`amount_source='estimate'`）不计入 —— 与 `_summarize_month` 同一口径：
+        把估算混进合计，"这个月花了多少"就成了第三种数字。
         """
         with self._connect() as conn:
             rows = conn.execute(
@@ -377,6 +381,11 @@ class Store:
                        COUNT(*)                            AS cnt,
                        COALESCE(SUM(energy_kwh), 0)        AS kwh,
                        COALESCE(SUM(duration_min), 0)      AS mins,
+                       COALESCE(SUM(CASE WHEN amount_source = 'estimate' THEN 0
+                                         ELSE amount END), 0) AS amt,
+                       SUM(CASE WHEN amount IS NOT NULL
+                                 AND COALESCE(amount_source, '') <> 'estimate'
+                                THEN 1 ELSE 0 END)         AS amt_n,
                        SUM(CASE WHEN charge_type = 'dc' THEN 1 ELSE 0 END) AS dc,
                        SUM(CASE WHEN charge_type = 'ac' THEN 1 ELSE 0 END) AS ac
                 FROM charge_sessions
@@ -392,6 +401,7 @@ class Store:
                 continue
             count = int(row["cnt"] or 0)
             minutes = round(float(row["mins"] or 0))
+            amount_count = int(row["amt_n"] or 0)
             out.append(
                 {
                     "yearMonth": row["ym"],
@@ -399,6 +409,8 @@ class Store:
                     "kwh": round(float(row["kwh"] or 0), 1),
                     "minutes": minutes,
                     "avgMinutes": round(minutes / count) if count else None,
+                    "amount": round(float(row["amt"] or 0), 2) if amount_count else 0.0,
+                    "amountCount": amount_count,
                     "dcCount": int(row["dc"] or 0),
                     "acCount": int(row["ac"] or 0),
                 }

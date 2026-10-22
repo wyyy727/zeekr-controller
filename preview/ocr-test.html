@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>截图识别测试 · ZeekrDash</title>
+<style>
+  :root {
+    --bg: #f3f5f7;
+    --panel: #ffffff;
+    --line: #e3e8ee;
+    --text: #1b1f24;
+    --sub: #5b6472;
+    --accent: #1c6fa8;
+    --accent-weak: #e8f2fa;
+    --warn: #b25e00;
+    --warn-bg: #fdf3e2;
+    --ok: #0f9d76;
+    --mono: ui-monospace, SFMono-Regular, Consolas, "Courier New", monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 20px 16px 60px;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 0; }
+  .badge {
+    font-size: 12px; padding: 3px 10px; border-radius: 999px;
+    background: var(--accent-weak); color: var(--accent);
+  }
+  .badge.bad { background: var(--warn-bg); color: var(--warn); }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px; margin-bottom: 16px;
+  }
+  h2 { font-size: 14px; margin: 0 0 10px; }
+  h2 small { font-weight: 400; color: var(--sub); font-size: 12px; margin-left: 8px; }
+  .cfg { display: grid; grid-template-columns: 84px 1fr; gap: 8px 10px; align-items: center; }
+  .cfg label { font-size: 12px; color: var(--sub); }
+  .cfg input {
+    width: 100%; padding: 7px 10px; font-size: 13px;
+    border: 1px solid var(--line); border-radius: 8px; font-family: var(--mono);
+  }
+  .cfg .full { grid-column: 1 / -1; }
+  button {
+    font: inherit; cursor: pointer; border: 1px solid var(--line);
+    background: var(--accent-weak); color: var(--accent);
+    padding: 8px 16px; border-radius: 9px; font-weight: 600;
+  }
+  button:hover { filter: brightness(.97); }
+  button.primary { background: var(--accent); color: #fff; border-color: transparent; }
+  button:disabled { opacity: .45; cursor: default; }
+  .hint { font-size: 12px; color: var(--sub); margin: 10px 0 0; }
+  .hint b { color: var(--warn); }
+  #drop {
+    border: 1.5px dashed #b9c6d4; border-radius: 12px;
+    padding: 34px 16px; text-align: center; color: var(--sub);
+    cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  #drop.over { border-color: var(--accent); background: var(--accent-weak); }
+  #drop input { display: none; }
+  #thumb {
+    display: block; max-width: 320px; max-height: 240px;
+    margin: 12px auto 0; border-radius: 8px; border: 1px solid var(--line);
+  }
+  .actions { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+  #msg { font-size: 12.5px; color: var(--sub); }
+  #msg.err { color: #c0392b; }
+  pre {
+    margin: 0; padding: 12px; border-radius: 10px;
+    background: #f7f9fb; border: 1px solid var(--line);
+    font-family: var(--mono); font-size: 12px; line-height: 1.55;
+    white-space: pre-wrap; word-break: break-all; max-height: 420px; overflow: auto;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--sub); font-weight: 600; background: #f7f9fb; }
+  td.num { font-family: var(--mono); white-space: nowrap; }
+  .empty { color: var(--sub); font-size: 12.5px; padding: 6px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>截图识别测试</h1>
+    <span class="badge" id="statusBadge">检查服务…</span>
+  </header>
+
+  <section class="panel">
+    <h2>连接 <small>与主页 /preview/index.html 共用同一份本地存储，主页填过这里就不用再填</small></h2>
+    <div class="cfg">
+      <label>服务地址</label>
+      <input id="apiBase" placeholder="留空 = 当前来源（同源访问时无需填写）">
+      <label>API 令牌</label>
+      <input id="apiToken" placeholder="服务端设置 API_TOKEN 时才需要填">
+      <div class="full"><button id="saveCfg">保存配置</button> <span id="cfgMsg" class="hint" style="display:inline-block;margin:0"></span></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>截图 <small>App「补能订单」页 / 订单详情 / 支付凭证</small></h2>
+    <div id="drop">
+      点击选择，或把截图拖到这里<br>
+      <span style="font-size:12px">JPG / PNG / WebP / GIF · 上限 12MB</span>
+      <input id="file" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
+    </div>
+    <img id="thumb" alt="">
+    <div class="actions">
+      <button class="primary" id="goBtn" disabled>识别</button>
+      <span id="msg">选一张图开始。</span>
+    </div>
+  </section>
+
+  <section class="panel" id="resultPanel" hidden>
+    <h2>结构化结果 <small>清洗后 —— 正式链路 /receipts/ocr 返回的内容</small></h2>
+    <div id="rows"></div>
+    <h2 style="margin-top:18px">模型原文 <small>未清洗 · <b>仅本机调试</b>，可能含模型没听话吐出的 VIN / 手机号 / 完整订单号，别截图外传</small></h2>
+    <pre id="raw"></pre>
+    <h2 style="margin-top:18px">未清洗字段 <small>白名单过滤前的原始 rows</small></h2>
+    <pre id="parsed"></pre>
+  </section>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var LS_API = 'zeekrdash.debug.api';
+  var LS_TOKEN = 'zeekrdash.debug.token';
+  var QUERY_TOKEN = new URLSearchParams(location.search).get('token') || '';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var apiBase = $('apiBase');
+  var apiToken = $('apiToken');
+  var fileInput = $('file');
+  var drop = $('drop');
+  var thumb = $('thumb');
+  var goBtn = $('goBtn');
+  var msg = $('msg');
+  var pickedFile = null;
+
+  /* ── 配置：读 URL ?token= > localStorage ───────────────────── */
+  try {
+    apiBase.value = localStorage.getItem(LS_API) || '';
+    apiToken.value = QUERY_TOKEN || localStorage.getItem(LS_TOKEN) || '';
+  } catch (e) { /* 隐私模式下 localStorage 会抛异常，忽略 */ }
+
+  function baseUrl() {
+    var v = (apiBase.value || '').trim().replace(/\/+$/, '');
+    return v || '';
+  }
+  function authHeaders() {
+    var t = (apiToken.value || '').trim();
+    return t ? { 'Authorization': 'Bearer ' + t } : {};
+  }
+
+  $('saveCfg').addEventListener('click', function () {
+    try {
+      if (apiBase.value.trim()) localStorage.setItem(LS_API, apiBase.value.trim());
+      else localStorage.removeItem(LS_API);
+      if (apiToken.value.trim()) localStorage.setItem(LS_TOKEN, apiToken.value.trim());
+      else localStorage.removeItem(LS_TOKEN);
+      $('cfgMsg').textContent = '已保存（只存在这台浏览器的本地）';
+      checkStatus();
+    } catch (e) {
+      $('cfgMsg').textContent = '保存失败：' + e.message;
+    }
+  });
+
+  /* ── 服务状态 ──────────────────────────────────────────────── */
+  function checkStatus() {
+    var badge = $('statusBadge');
+    fetch(baseUrl() + '/api/charges/receipts/status', { headers: authHeaders() })
+      .then(function (r) { return r.json(); })
+      .then(function (body) {
+        var d = body && body.data || {};
+        if (d.configured) {
+          badge.textContent = '识别可用 · ' + (d.model || 'vision');
+          badge.className = 'badge';
+        } else {
+          badge.textContent = '未配置 DEEPSEEK_API_KEY';
+          badge.className = 'badge bad';
+        }
+      })
+      .catch(function () {
+        badge.textContent = '服务不可达';
+        badge.className = 'badge bad';
+      });
+  }
+
+  /* ── 选图 / 拖拽 ───────────────────────────────────────────── */
+  fileInput.addEventListener('change', function () {
+    if (fileInput.files && fileInput.files[0]) pick(fileInput.files[0]);
+  });
+  drop.addEventListener('click', function () { fileInput.click(); });
+  ['dragenter', 'dragover'].forEach(function (ev) {
+    drop.addEventListener(ev, function (e) {
+      e.preventDefault(); drop.classList.add('over');
+    });
+  });
+  ['dragleave', 'drop'].forEach(function (ev) {
+    drop.addEventListener(ev, function (e) {
+      e.preventDefault(); drop.classList.remove('over');
+    });
+  });
+  drop.addEventListener('drop', function (e) {
+    var files = e.dataTransfer && e.dataTransfer.files;
+    if (files && files[0]) pick(files[0]);
+  });
+
+  function pick(file) {
+    if (!/^image\//.test(file.type || '')) {
+      say('只支持图片文件（JPG / PNG / WebP / GIF）', true);
+      return;
+    }
+    if (file.size > 12 * 1024 * 1024) {
+      say('图片超过 12MB 上限', true);
+      return;
+    }
+    pickedFile = file;
+    thumb.src = URL.createObjectURL(file);
+    thumb.hidden = false;
+    goBtn.disabled = false;
+    say(file.name + ' · ' + Math.round(file.size / 1024) + ' KB，点「识别」开始');
+  }
+
+  function say(text, isErr) {
+    msg.textContent = text;
+    msg.className = isErr ? 'err' : '';
+  }
+
+  /* ── 识别 ─────────────────────────────────────────────────── */
+  goBtn.addEventListener('click', function () {
+    if (!pickedFile) return;
+    goBtn.disabled = true;
+    say('识别中…（上游最长约 60 秒，限流会自动重试）');
+
+    var form = new FormData();
+    form.append('file', pickedFile, pickedFile.name);
+
+    fetch(baseUrl() + '/api/charges/receipts/ocr-debug', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: form,
+    })
+      .then(function (r) {
+        return r.json().catch(function () { throw new Error('HTTP ' + r.status); })
+          .then(function (body) { return { ok: r.ok, body: body }; });
+      })
+      .then(function (res) {
+        if (!res.ok || !res.body.success) {
+          var detail = (res.body && res.body.detail) || ('HTTP ' + res.status);
+          throw new Error(detail);
+        }
+        render(res.body.data);
+        say('完成');
+      })
+      .catch(function (e) {
+        say(e.message || String(e), true);
+      })
+      .then(function () { goBtn.disabled = false; });
+  });
+
+  /* ── 结果渲染 ─────────────────────────────────────────────── */
+  function render(data) {
+    $('resultPanel').hidden = false;
+
+    var rows = data.rows || [];
+    var html = '<table><tr>'
+      + '<th>金额</th><th>电量</th><th>开始</th><th>结束</th><th>站点</th>'
+      + '<th>单号尾</th><th>置信度</th><th>依据原文</th></tr>';
+    rows.forEach(function (row) {
+      html += '<tr>'
+        + '<td class="num">' + (row.amount == null ? '--' : '¥' + row.amount) + '</td>'
+        + '<td class="num">' + (row.energyKwh == null ? '--' : row.energyKwh + ' 度') + '</td>'
+        + '<td class="num">' + esc(row.startAt) + '</td>'
+        + '<td class="num">' + esc(row.endAt) + '</td>'
+        + '<td>' + esc(row.stationName) + '</td>'
+        + '<td class="num">' + esc(row.orderNoTail4) + '</td>'
+        + '<td class="num">' + (row.confidence == null ? '--' : row.confidence) + '</td>'
+        + '<td>' + esc(row.evidenceText) + '</td>'
+        + '</tr>';
+    });
+    html += '</table>';
+    if (!rows.length) html = '<div class="empty">没有可展示的行（模型返回的 rows 为空，或没有任何金额命中）</div>';
+    html += '<div class="empty">类型：' + esc(data.type) + ' · 图片指纹：' + esc(data.imageSha8)
+      + ' · 共 ' + rows.length + ' 行</div>';
+    $('rows').innerHTML = html;
+
+    $('raw').textContent = pretty(data.raw);
+    $('parsed').textContent = pretty(JSON.stringify({ rows: data.parsedRows || [] }));
+  }
+
+  function pretty(text) {
+    if (text == null) return '(空)';
+    try { return JSON.stringify(JSON.parse(text), null, 2); } catch (e) { return String(text); }
+  }
+  function esc(v) {
+    if (v == null) return '--';
+    return String(v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  checkStatus();
+})();
+</script>
+</body>
+</html>

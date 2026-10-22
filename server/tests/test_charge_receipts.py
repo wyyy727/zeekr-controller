@@ -205,6 +205,47 @@ def test_scrub_keeps_plain_values():
     assert row["currency"] == "CNY"
 
 
+def test_scrub_parses_third_party_duration_and_energy():
+    """第三方账单的三种版式（改充电 / 国网式 / 理想超充）都要能落成字段。
+
+    尤其是「00:18:25」：交给 _as_float 会抠出 "00" 当分钟 —— 时长凭空变 0，
+    平均功率和配对窗口跟着全废，所以必须走时分秒解析。
+    """
+    from app.adapters.vision_ocr import scrub_row
+
+    # 改充电：「充电62.370度 · 用时37分钟」+ 下单时间
+    li_gai = scrub_row(
+        {
+            "amount": 28.84,
+            "energyKwh": "充电62.370度",
+            "durationMin": "用时37分钟",
+            "startAt": "2026-04-30 22:11:20",
+        }
+    )
+    assert li_gai["energyKwh"] == pytest.approx(62.370)
+    assert li_gai["durationMin"] == pytest.approx(37.0)
+    assert li_gai["startAt"] == "2026-04-30 22:11:20"
+
+    # 理想超充：裸时间 + 「充电时长 00:18:25」+ 「充电度数 60.672度」
+    li_xiang = scrub_row(
+        {
+            "amount": 105.0,
+            "energyKwh": "60.672度",
+            "durationMin": "00:18:25",
+            "startAt": "2026-09-25 18:35:42",
+        }
+    )
+    assert li_xiang["energyKwh"] == pytest.approx(60.672)
+    # 18 分 25 秒 = 18.4 分钟，不是 0
+    assert li_xiang["durationMin"] == pytest.approx(18.4)
+    assert li_xiang["startAt"] == "2026-09-25 18:35:42"
+
+    # 国网式：「充电电量：56.9710度」，没有时长
+    state_grid = scrub_row({"amount": 94.38, "energyKwh": "充电电量：56.9710度"})
+    assert state_grid["energyKwh"] == pytest.approx(56.971)
+    assert state_grid["durationMin"] is None
+
+
 # ── OCR 接口 ───────────────────────────────────────────────────────────
 
 
@@ -251,7 +292,7 @@ def test_ocr_returns_rows_with_candidates(writable, monkeypatch, client):
     """
     _seed_sessions(_session("zeekr:a", BASE))
 
-    async def fake_extract(_image, _mime):
+    async def fake_extract(_image, _mime, *, include_raw: bool = False):
         return {
             "type": "list_row",
             "imageSha8": "abcd1234",

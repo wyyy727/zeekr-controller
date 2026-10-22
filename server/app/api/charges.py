@@ -111,7 +111,7 @@ async def _month_rows() -> list[dict[str, Any]]:
             item = buckets.setdefault(
                 ym,
                 {"yearMonth": ym, "count": 0, "kwh": 0.0, "minutes": 0.0,
-                 "dcCount": 0, "acCount": 0},
+                 "amount": 0.0, "amountCount": 0, "dcCount": 0, "acCount": 0},
             )
             item["count"] += 1
             if isinstance(r.get("energyKwh"), (int, float)):
@@ -321,7 +321,7 @@ async def get_sessions(yearMonth: str | None = None) -> dict:
 
 @router.get("/months")
 async def get_months() -> dict:
-    """可查月份清单（含每月电量与次数），供月份选择器与趋势图使用。"""
+    """可查月份清单（含每月电量、时长与已补录金额），供月份选择器与累计金额使用。"""
     rows = await _month_rows()
     current = datetime.now().strftime("%Y-%m")
 
@@ -333,9 +333,11 @@ async def get_months() -> dict:
             "label": _month_label(row["yearMonth"]),
             "count": row["count"],
             "kwh": row["kwh"],
-            # 趋势图第二根轴：每次充电时长。没有流水的月份给 None，
-            # 折线在那里断开 —— 画成 0 会读成"这个月充得特别快"。
+            # 每次充电时长。没有流水的月份给 None —— 画成 0 会读成"充得特别快"。
             "avgMinutes": row.get("avgMinutes"),
+            # 已补录的真值金额（估算不计入）。前端把所有月份加起来就是「累计金额」。
+            "amount": row.get("amount") or 0.0,
+            "amountCount": row.get("amountCount") or 0,
             "dcCount": row["dcCount"],
             "acCount": row["acCount"],
         }
@@ -351,7 +353,8 @@ async def get_months() -> dict:
         months.insert(
             0,
             {"yearMonth": "currentMonth", "label": "本月", "count": 0, "kwh": 0.0,
-             "avgMinutes": None, "dcCount": 0, "acCount": 0},
+             "avgMinutes": None, "amount": 0.0, "amountCount": 0,
+             "dcCount": 0, "acCount": 0},
         )
 
     total_kwh = sum(float(m["kwh"] or 0) for m in months)
@@ -361,6 +364,9 @@ async def get_months() -> dict:
             "months": months,
             "totalCount": sum(int(m["count"] or 0) for m in months),
             "totalKwh": round(total_kwh, 1),
+            # 所有可查月份的金额之和。分母（总电量）也一并给出，
+            # 前端算「全局每度均价」时不用自己再遍历一遍。
+            "totalAmount": round(sum(float(m["amount"] or 0) for m in months), 2),
             "hasData": bool(rows),
         },
     }
@@ -493,11 +499,11 @@ async def receipts_status() -> dict:
     }
 
 
-@router.post("/receipts/ocr")
-async def ocr_receipt(file: UploadFile = File(..., description="充电订单截图")) -> dict:
-    """识别一张截图，返回**待确认**的金额行（不入库、不落盘）。
+async def _read_and_ocr(file: UploadFile, *, include_raw: bool = False) -> dict[str, Any]:
+    """校验并识别一张截图（`/receipts/ocr` 与调试口共用）。
 
-    前端拿到 rows 后要让用户核对/改数，再调 `/receipts/commit`。
+    错误文案直接点名该做什么：没配 key 就说去配哪个变量，
+    识别失败就说换张清楚的图 —— 用户能自己解决的事不该让他来翻日志。
     """
     mime = (file.content_type or "").split(";")[0].strip().lower()
     if mime and mime not in _ALLOWED_IMAGE_MIME:
@@ -510,9 +516,8 @@ async def ocr_receipt(file: UploadFile = File(..., description="充电订单截�
         raise HTTPException(status_code=413, detail="图片过大（上限 12MB）")
 
     try:
-        result = await extract_receipts(raw, mime or "image/jpeg")
+        return await extract_receipts(raw, mime or "image/jpeg", include_raw=include_raw)
     except VisionUnavailable as exc:
-        # 文案里点名要配哪个变量 —— 用户能自己解决的事不该让他来翻日志。
         raise HTTPException(
             status_code=503,
             detail="未配置 DEEPSEEK_API_KEY：在 .env 填入并重启服务后即可使用截图识别；"
@@ -524,6 +529,15 @@ async def ocr_receipt(file: UploadFile = File(..., description="充电订单截�
         raise HTTPException(
             status_code=502, detail="截图识别失败，请确认图片清晰、包含金额，稍后重试"
         ) from exc
+
+
+@router.post("/receipts/ocr")
+async def ocr_receipt(file: UploadFile = File(..., description="充电订单截图")) -> dict:
+    """识别一张截图，返回**待确认**的金额行（不入库、不落盘）。
+
+    前端拿到 rows 后要让用户核对/改数，再调 `/receipts/commit`。
+    """
+    result = await _read_and_ocr(file)
 
     # 附上候选流水 + 本地防幻觉校验，用户在确认框里就能直接挑
     sessions: list[dict[str, Any]] = []
@@ -549,6 +563,21 @@ async def ocr_receipt(file: UploadFile = File(..., description="充电订单截�
             "configured": True,
         },
     }
+
+
+@router.post("/receipts/ocr-debug")
+async def ocr_receipt_debug(file: UploadFile = File(..., description="充电订单截图")) -> dict:
+    """调试接口：把模型**原始输出**原样带回，供 /preview/ocr-test.html 评测识别质量。
+
+    正式链路（`/receipts/ocr`）走白名单过滤，把"模型到底读了什么"也一起裁掉了；
+    评测识别质量恰恰要看被裁掉的那部分，所以这里额外带 `raw`（模型原文）
+    与 `parsedRows`（未清洗字段）。
+
+    ⚠️ **只许本机调试**：这两样可能含 prompt 没拦住的 VIN / 手机号 / 完整订单号
+    —— 不入库、不进日志、不进正式链路；正式入口永远是 `/receipts/ocr`。
+    """
+    result = await _read_and_ocr(file, include_raw=True)
+    return {"success": True, "data": result}
 
 
 @router.post("/receipts/commit")

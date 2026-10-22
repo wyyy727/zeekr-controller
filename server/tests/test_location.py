@@ -91,6 +91,20 @@ class _FakeMapClient:
     def __init__(self) -> None:
         self.geocode_calls = 0
         self.image_calls = 0
+        self.weather_calls = 0
+
+    async def weather(self, lat: float, lng: float):
+        self.weather_calls += 1
+        return {
+            "temperature": 20,
+            "weather": "多云",
+            "humidity": 55,
+            "windDirection": "东北风",
+            "windPower": "1-2级",
+            "city": "演示市",
+            "district": "演示区",
+            "updateTime": "2026-10-22 16:35",
+        }
 
     async def reverse_geocode(self, lat: float, lng: float):
         self.geocode_calls += 1
@@ -186,3 +200,79 @@ def test_map_image_cached_on_disk(fake_map):
     assert second.status_code == 200
     assert second.headers.get("X-Map-Cache") == "hit"
     assert fake.image_calls == 1, "坐标没变就不该再请求一次地图图片"
+
+
+# ── 当地气温（车端 exteriorTemp 恒空，只能按位置查天气）──────────────
+
+
+def test_weather_without_map_key_is_unavailable(client_no_map_key):
+    """没配 key：返回 available=false 而不是 500 —— 少一个数字不该让整页报错。"""
+    data = client_no_map_key.get("/api/vehicle/weather").json()["data"]
+
+    assert data["available"] is False
+    assert "key" in (data.get("reason") or "").lower() or data.get("reason")
+
+
+def test_weather_returns_temperature(fake_map):
+    """有 key 时把气温带到前端（字段口径与腾讯 realtime[0].infos 一致）。"""
+    client, fake = fake_map
+
+    data = client.get("/api/vehicle/weather").json()["data"]
+
+    assert data["available"] is True
+    assert data["temperature"] == 20
+    assert data["weather"] == "多云"
+    assert fake.weather_calls == 1
+
+
+def test_weather_adapter_parses_realtime_infos(monkeypatch: pytest.MonkeyPatch):
+    """客户端解析：取 realtime[0].infos，缺 temperature 就当失败（返回 None）。"""
+    import asyncio
+
+    from app.adapters.tencent_map import TencentMapClient
+
+    ok_client = TencentMapClient("fake-key")
+    empty_client = TencentMapClient("fake-key")
+
+    async def fake_get_ok(_url, _params):
+        return {
+            "status": 0,
+            "result": {
+                "realtime": [
+                    {
+                        "city": "上海市",
+                        "district": "黄浦区",
+                        "update_time": "2026-10-22 16:35",
+                        "infos": {
+                            "weather": "多云",
+                            "temperature": 20,
+                            "humidity": 55,
+                            "wind_direction": "东北风",
+                            "wind_power": "1-2级",
+                            "wind_power_v2": "1级",
+                        },
+                    }
+                ]
+            },
+        }
+
+    async def fake_get_empty(_url, _params):
+        return {"status": 0, "result": {"realtime": [{"infos": {}}]}}
+
+    monkeypatch.setattr(ok_client, "_get_json", fake_get_ok)
+    monkeypatch.setattr(empty_client, "_get_json", fake_get_empty)
+
+    data = asyncio.run(ok_client.weather(31.2304, 121.4737))
+    assert data == {
+        "temperature": 20,
+        "weather": "多云",
+        "humidity": 55,
+        "windDirection": "东北风",
+        "windPower": "1-2级",
+        "city": "上海市",
+        "district": "黄浦区",
+        "updateTime": "2026-10-22 16:35",
+    }
+
+    # 没有气温 → None（界面显示 --，绝不显示 0℃）
+    assert asyncio.run(empty_client.weather(31.2304, 121.4737)) is None

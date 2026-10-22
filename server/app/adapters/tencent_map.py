@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 GEOCODER_URL = "https://apis.map.qq.com/ws/geocoder/v1/"
 STATICMAP_URL = "https://apis.map.qq.com/ws/staticmap/v2/"
+WEATHER_URL = "https://apis.map.qq.com/ws/weather/v1/"
 
 TIMEOUT = 10.0
 
@@ -43,6 +44,9 @@ STATUS_OK = 0
 _ADDRESS_TTL = 600
 _IMAGE_TTL = 600
 _MAX_IMAGE_ENTRIES = 12
+# 天气官方约 10 分钟更新一次，缓存比它略短即可；个人 key 的天气调用量有限，
+# 页面上每次刷新都打一遍纯属浪费（还要多外发一次坐标）。
+_WEATHER_TTL = 300
 
 
 def _grid(value: float | None, digits: int = 5) -> str:
@@ -57,6 +61,7 @@ class TencentMapClient:
         self._key = (key or "").strip()
         self._address_cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
         self._image_cache: dict[str, tuple[float, tuple[bytes, str] | None]] = {}
+        self._weather_cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
 
     @property
     def available(self) -> bool:
@@ -102,6 +107,61 @@ class TencentMapClient:
             "street": component.get("street") or None,
         }
         self._address_cache[cache_key] = (now + _ADDRESS_TTL, data)
+        return data
+
+    # ── 天气 ─────────────────────────────────────────────────
+
+    async def weather(self, lat: float, lng: float) -> dict[str, Any] | None:
+        """坐标 → 当地实时天气。失败返回 None（界面显示「--」）。
+
+        ⚠️ 这是**「当地气温」，不是车外实测温度**：车端 `climateStatus.exteriorTemp`
+        实测恒为空（非空率 0/15），这版固件根本不上报。日常两者基本一致，
+        差别只在极端场景（暴晒、地下车库）—— 所以界面上写「当地气温」，不写「车外温度」。
+
+        返回结构（原始响应字段很多，只留界面要用的）：
+            temperature   气温（℃，整数）
+            weather       天气现象（「多云」「小雨」）
+            humidity      相对湿度 %
+            windDirection / windPower   风向 / 风力
+            city / district             行政区（界面可以不显示，便于排查）
+            updateTime    上游观测时间
+        """
+        if not self.available:
+            return None
+
+        cache_key = f"{_grid(lat)},{_grid(lng)}"
+        now = time.time()
+        hit = self._weather_cache.get(cache_key)
+        if hit and hit[0] > now:
+            return hit[1]
+
+        payload = await self._get_json(
+            WEATHER_URL,
+            {"location": f"{lat:.6f},{lng:.6f}", "key": self._key},
+        )
+        if payload is None:
+            # 失败不写缓存：一次网络抖动不该让界面十分钟都没有温度
+            return None
+
+        realtime = (payload.get("result") or {}).get("realtime") or []
+        current = realtime[0] if realtime and isinstance(realtime[0], dict) else {}
+        infos = current.get("infos") or {}
+        temperature = infos.get("temperature")
+        if temperature is None:
+            # 拿不到气温就当失败：界面上「--」比「0℃」诚实
+            return None
+
+        data = {
+            "temperature": temperature,
+            "weather": infos.get("weather") or None,
+            "humidity": infos.get("humidity"),
+            "windDirection": infos.get("wind_direction") or None,
+            "windPower": infos.get("wind_power") or None,
+            "city": current.get("city") or None,
+            "district": current.get("district") or None,
+            "updateTime": current.get("update_time") or None,
+        }
+        self._weather_cache[cache_key] = (now + _WEATHER_TTL, data)
         return data
 
     # ── 静态地图 ─────────────────────────────────────────────

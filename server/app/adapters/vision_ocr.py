@@ -66,6 +66,10 @@ _PHONE_RE = re.compile(r"\b1[3-9]\d{9}\b")
 _LONG_DIGITS_RE = re.compile(r"\b\d{12,}\b")
 # 站点名里的门牌/楼层/房号：只留"站点叫什么"，不留"在几层几号"
 _ADDRESS_TAIL_RE = re.compile(r"\s*\d+\s*[号栋层室].*$")
+# 「充电时长 00:18:25」这类时分秒（理想超充的版式）。
+# ⚠️ 不能交给 _as_float：它会从 "00:18:25" 里抠出 "00" 当分钟 —— 时长凭空变 0，
+# 平均功率（电量÷时长）跟着变 inf/None，配对的弱窗口也塌了。
+_CLOCK_RE = re.compile(r"^(\d{1,3}):(\d{2})(?::(\d{2}))?$")
 
 PROMPT = """你是充电账单字段抽取器。只做抽取，不做推测、不做补全、不做单位换算。
 图中若出现车架号(VIN)、车牌、手机号、完整订单号、地址门牌、账户余额，一律忽略，不要输出、不要复述。
@@ -99,7 +103,16 @@ PROMPT = """你是充电账单字段抽取器。只做抽取，不做推测、�
     }
   ]
 }
-金额必须命中该行右侧带 ¥ 的数字；不要把服务费原价当金额。"""
+金额必须命中该行右侧带 ¥ 的数字；不要把服务费原价当金额。
+
+第三方账单的常见版式（字段名各家长得不一样，都要兼容）：
+- 「充电62.370度 · 用时37分钟」→ energyKwh=62.370，durationMin=37
+- 「充电时长 00:18:25」→ durationMin=18.4（时分秒折算成分钟，保留一位小数）
+- 「充电电量：56.9710度」→ energyKwh=56.971
+- 时间字段可能叫「下单时间」「充电时间」，也可能只是行首一个裸时间 ——
+  都填进 startAt：它是截图里**最接近充电开始**的已知时间，
+  不要因为字段名叫"下单时间"就留空。
+- 页面顶部的「累计花费 / 累计充电」是汇总，不是一笔订单，不要输出成 row。"""
 
 
 def _as_float(value: Any) -> float | None:
@@ -120,6 +133,21 @@ def _as_float(value: Any) -> float | None:
         match = _NUMBER_RE.search(cleaned)
         return float(match.group()) if match else None
     return None
+
+
+def _duration_to_minutes(value: Any) -> float | None:
+    """「00:18:25」这类时分秒折算成分钟（18.4）。
+
+    各家第三方账单的时长写法不统一：改充电给「用时37分钟」，
+    理想超充给「00:18:25」。模型偶尔会原样照抄后一种 —— 这里兜住。
+    """
+    if not isinstance(value, str):
+        return None
+    match = _CLOCK_RE.match(value.strip())
+    if not match:
+        return None
+    hours, minutes, seconds = int(match.group(1)), int(match.group(2)), int(match.group(3) or 0)
+    return round(hours * 60 + minutes + seconds / 60, 1)
 
 
 def _scrub_text(value: Any) -> str | None:
@@ -143,7 +171,11 @@ def scrub_row(row: dict[str, Any]) -> dict[str, Any]:
 
     out["amount"] = _as_float(out.get("amount"))
     out["energyKwh"] = _as_float(out.get("energyKwh"))
-    out["durationMin"] = _as_float(out.get("durationMin"))
+    # 时长先试时分秒（"00:18:25"），不行再当普通数字（"用时37分钟" → 37）
+    minutes = _duration_to_minutes(row.get("durationMin"))
+    if minutes is None:
+        minutes = _as_float(row.get("durationMin"))
+    out["durationMin"] = minutes
     out["serviceFeeAmount"] = _as_float(out.get("serviceFeeAmount"))
     out["serviceFeeOriginal"] = _as_float(out.get("serviceFeeOriginal"))
     out["totalAmount"] = _as_float(out.get("totalAmount"))
@@ -196,15 +228,21 @@ def _parse_payload(text: str) -> dict[str, Any]:
     return data
 
 
-async def extract_receipts(image: bytes, mime: str = "image/jpeg") -> dict[str, Any]:
+async def extract_receipts(
+    image: bytes, mime: str = "image/jpeg", *, include_raw: bool = False
+) -> dict[str, Any]:
     """识别一张充电账单截图。
 
     Args:
         image: 原始图片字节。**只存在于内存**，调用方负责不做落盘。
         mime: `image/jpeg` / `image/png` / `image/webp` / `image/gif`。
+        include_raw: 额外带回模型**原文**与未清洗字段。
+            ⚠️ 只许调试接口用：原文可能含 prompt 没拦住的 VIN / 手机号 /
+            完整订单号 —— 不入库、不进日志、不进正式链路。
 
     Returns:
         {"type": "list_row|order_detail|receipt", "rows": [清洗后的字段], "imageSha8": str}
+        include_raw=True 时另有 "raw"（模型原文）与 "parsedRows"（未清洗字段）。
 
     Raises:
         VisionUnavailable: 没有配置 key（调用方转 503，并提示去配）。
@@ -268,11 +306,17 @@ async def extract_receipts(image: bytes, mime: str = "image/jpeg") -> dict[str, 
                 "账单识别完成：sha=%s %dKB %.0fms，%d 行",
                 image_sha8, len(image) // 1024, (time.perf_counter() - started) * 1000, len(cleaned),
             )
-            return {
+            result: dict[str, Any] = {
                 "type": str(parsed.get("type") or "receipt"),
                 "rows": cleaned,
                 "imageSha8": image_sha8,
             }
+            if include_raw:
+                # 调试用：模型原文 + 未清洗字段。白名单过滤把"模型到底读了什么"
+                # 也一起裁掉了 —— 评测识别质量恰恰要看的就是被裁掉的那部分。
+                result["raw"] = content
+                result["parsedRows"] = [r for r in rows if isinstance(r, dict)][:MAX_ROWS]
+            return result
         except VisionFailed as exc:
             last_error = exc
             if attempt < 2:
