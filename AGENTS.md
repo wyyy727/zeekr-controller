@@ -367,6 +367,51 @@ iOS 侧规则完全相同，落点：`ChargeSyncStamp`（UserDefaults key `zk.ch
 
 ---
 
+## ⚠️ 两个容易踩的构建/日志坑（2026-10-23 审计）
+
+- **`SWIFT_VERSION` 是语言模式，不是编译器版本**：合法值只有 `4` / `4.2` / `5.0` / `6.0`。
+  写 `"5.9"` 会让 `swiftc` 直接报 `SWIFT_VERSION '5.9' is unsupported`，整个 target 编不过 ——
+  而且报错在编译最开始，后面的源码错误全都看不到。`project.yml` 已改成 `"5.0"`。
+- **`logging.basicConfig(level=INFO)` 会把 httpx 的完整请求 URL 打进日志**，
+  腾讯的 URL 里带 `key` 和车辆坐标 ⇒ 密钥与位置一起落到 `.server.log`。
+  `main.py` 里已把 `httpx` / `httpcore` 压到 `WARNING`；**新增第三方 HTTP 调用时留意这点**。
+
+## ⚠️ iOS 端四条并发/生命周期规则（2026-10-23 审计）
+
+- **`JSONDecoder` 不要缓存共享**：`APIClient` 会被多个请求并发使用，
+  而 `JSONDecoder` 不是线程安全的（它闭包里捕获的 `DateFormatter` 同样不是）。
+  `JSONDecoder.zeekr` 是 **static var，每次访问返回新实例** ——
+  `APIClient` 必须**在每次 decode 时现取**（`makeDecoder()`），别存成 `let`。
+- **跨 tab 存活的东西放 `AppStore`**：底部 Tab 是 `switch` 切页，
+  切走时整个页面 View 被销毁，里面的 `@State` 全部消失。
+  凡是"切走再回来应该还在"的状态（附近充电站的坐标与列表）必须由 `AppStore` 持有。
+  卡片里用 `private var model: XxxViewModel { store.xxx }` 取，不要自己 `@State` 一个。
+- **Toast 只有一处**：全 App 统一用 `AppStore.showToast` → `RootView` 呈现。
+  页面里自己存一份 `toast` 再 overlay 渲染，会导致同一种提示在两个高度出现。
+  页面级提示用 `ErrorBanner` / 行内 hint，别新开 toast。
+- **位置类数据登出即清**：`AppStore` 的 `needsLogin` 分支里统一清
+  （`vehicleLocation` / `weather` / `nearbyStations`），
+  别在各个页面各自清 —— 漏一处就是隐私泄漏。
+- **假数据不许刷新 `lastRefresh`**：它的语义是"上次成功读到**真实**数据的时间"。
+  `applyMockData` / `fallbackToMock` / 网页 `seedMock` 里都**不要**动它 ——
+  否则界面会显示「更新于 刚刚」配一份编出来的电量/里程，用户会当成实时值。
+  演示模式下宁可不显示更新时间。
+- **"重试"按钮必须真的重试**：`ErrorBanner` 的 `onRetry` 要重新拉数据
+  （`store.refresh()` / `model.load()`），不能只 `errorMessage = nil` ——
+  只清提示等于"提示没了但数据还是旧的"，用户以为好了。
+- **"读取失败"要和"本来没数据"分开**：网页用 `statusError` / `energyError` /
+  `chargeLoadError` 三个独立标志，iOS 用 `errorMessage` + `ErrorBanner`。
+  混成一句话会让用户以为"车没连上"或"车没有行程记录"，方向全错。
+  失败时还要给**重试入口**，别让用户只能切 tab 碰运气。
+  已有旧数据时**不清屏**，改成一条"这一轮没读到最新车况，下面是上次读到的数据"。
+- **`null` 状态要分清"在查"和"没去查"**：网页 `state.auth === null` 有两种含义
+  —— ① 正在查（`state.authLoading`）② **压根没去查**（预览页默认不连后端，
+  `bootstrap()` 直接 `seedMock()` 返回，一个请求都不发）。
+  混为一谈就会让设置页永远停在「正在查询登录状态…」，而且没有错误也没有出路。
+  同理，**所有 `fetch` 都要加超时**（网页的 `fetch` 不自带超时）——
+  用 `withTimeout(ms)` 助手（`AbortController` 自计时，兼容老浏览器），
+  超时后报「连不上后端 <地址>：请求超时」。
+
 ## 📍 车辆位置：改这块之前先读
 
 - **坐标已由服务端转成 GCJ-02**（依据网关的 `marsCoordinates` 标志）。
