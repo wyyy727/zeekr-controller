@@ -1044,12 +1044,7 @@ body.is-scrolled .topbar::before {
   display: inline-block; width: 7px; height: 7px; border-radius: 50%;
   margin-right: 6px; vertical-align: middle;
 }
-/* 趋势图的两行说明：图例 + 直流/交流电量拆分。
-   都只是给图补一句，单独成卡太碎，压成一行贴在图上/图下。 */
-.ch-legend {
-  display: flex; flex-wrap: wrap; gap: 4px 14px;
-  margin: 13px 0 2px; font-size: 11px; color: var(--text-3);
-}
+/* 直流/交流电量拆分：只是给上面的数补一句，单独成卡太碎，压成一行贴在下面。 */
 .ch-split {
   margin-top: 9px; font-size: 11.5px; color: var(--text-3);
   font-variant-numeric: tabular-nums;
@@ -3752,7 +3747,11 @@ function renderCharges() {
   /* 附近充电站与充入电量是**两块完全独立的数据**：
      前者实时（要定位、要逐站取价），后者是本地历史（按月、不联网）。
      所以附近站放在"有没有充电记录"的判断之外 ——
-     「附近哪能充」跟「我上个月充了几次」没有任何关系。 */
+     「附近哪能充」跟「我上个月充了几次」没有任何关系。
+
+     渲染顺序：**统计月份 → 充入电量 → 附近充电站 → 充电记录 → 金额补录**。
+     筛选器在数据上面（先选范围、再看数），历史在前、实时在后：
+     打开先看自己的账，再看附近能去哪。 */
   const nearby = nearbyStationsCard();
   const c = state.charge;
   const months = state.chargeMonths.length
@@ -3784,8 +3783,7 @@ function renderCharges() {
     /* 读失败时不能再显示骨架：骨架表示"正在读"，一直转下去用户会以为卡死，
        而且没有任何重试入口。给一句实话 + 一个重试按钮。 */
     if (state.chargeLoadError) {
-      return `${nearby}${monthRow}
-      <div class="card">
+      const energy = `<div class="card">
         <div class="card-title"><span>充入电量</span><span class="cap-badge">读取失败</span></div>
         <div class="empty" style="padding:22px 12px 18px">
           <div class="ico">${SVG.plug}</div>
@@ -3796,9 +3794,9 @@ function renderCharges() {
           <button class="en-month-btn" id="chargeRetryBtn" style="margin-top:14px">重试</button>
         </div>
       </div>`;
+      return `${monthRow}${energy}${nearby}`;
     }
-    return `${nearby}${monthRow}
-      <div class="card">
+    const energy = `<div class="card">
         <div class="card-title"><span>充入电量</span><span class="cap-badge">加载中</span></div>
         <div class="st-skel">
           ${'<div class="skel-row"><div class="skel-line w70"></div><div class="skel-line w35"></div></div>'
@@ -3806,6 +3804,7 @@ function renderCharges() {
         </div>
         <div class="st-note">正在读取充电流水…</div>
       </div>`;
+    return `${monthRow}${energy}${nearby}`;
   }
 
   const demo = state.mode !== 'live';
@@ -3818,8 +3817,7 @@ function renderCharges() {
   })();
 
   if (!c.count) {
-    return `${nearby}${monthRow}
-      <div class="card">
+    const energy = `<div class="card">
         <div class="card-title">
           <span>充入电量</span>
           <span class="cap-badge">${esc(monthLabel)}</span>
@@ -3832,6 +3830,7 @@ function renderCharges() {
           </div>
         </div>
       </div>`;
+    return `${monthRow}${energy}${nearby}`;
   }
 
   /* ── 充入电量：一张卡 ────────────────────────────
@@ -3878,15 +3877,18 @@ function renderCharges() {
   const list = `<div class="card-title" style="padding:4px 2px 0">充电记录</div>
     <div class="list">${c.records.map(chargeSessionItem).join('')}</div>`;
 
-  return `${nearby}${monthRow}
-    <div class="card">
+  const energy = `<div class="card">
       <div class="card-title">
         <span>充入电量</span>
         <span class="cap-badge">${esc(monthLabel)}</span>
       </div>
-      ${hero}${chargeSessionChartBlock(c)}${split}
-    </div>
-    ${list}${costCard(c)}`;
+      ${hero}${split}
+    </div>`;
+
+  /* 顺序：**充入电量 → 附近充电站 → 充电记录 → 金额补录**。
+     充入电量是"我自己的历史"，附近站是"我现在能去哪"，
+     历史放前面、实时放后面 —— 打开先看自己的账，再看附近可充的。 */
+  return `${monthRow}${energy}${nearby}${list}${costCard(c)}`;
 }
 
 /* ── 金额补录卡 ──
@@ -3963,34 +3965,6 @@ function costCard(c) {
    模拟/离线模式下后端会返回 503，与其让用户点一个必然失败的按钮，不如直接置灰。 */
 function canWriteCharges() {
   return state.mode === 'live' && isLoggedIn();
-}
-
-/* 当月逐次图：柱 = 这一次充了多少度（左轴），折线 = 这一次充了多久（右轴）。
-   横轴是**所选月份内的每一次充电**，跟着月份筛选走 ——
-   这张卡讲的就是"这一个月"，摆一条全年月度趋势在下面只会让人怀疑看的是哪个月。
-
-   为什么把时长叠进来：同样充 40 度，快充二十分钟、慢充一整夜，
-   光看电量两根柱子一模一样。时长是第二根轴（量纲完全不同），
-   不能硬套左轴，否则会被压成一条贴底的直线。 */
-function chargeSessionChartBlock(c) {
-  if (!c || !c.records || !c.records.length) return '';
-
-  return `<div class="ch-legend">
-      <span><i class="en-dot" style="background:#2E8BC0"></i>本次电量 · 度</span>
-      <span><i class="en-dot" style="background:#E8A33D"></i>本次时长 · 小时</span>
-    </div>
-    <div class="chart-scroll"><canvas id="chargeSessionChart"></canvas></div>`;
-}
-
-/* 逐次的横轴标签：`10-09`。同一天充了两次时追加 #2、#3 ——
-   重复的标签在类目轴上会被当成同一个刻度（iOS 的 Swift Charts 直接合并）。 */
-function sessionChartLabels(rows) {
-  const seen = {};
-  return rows.map((r) => {
-    const key = String(r.startTime || '').slice(5, 10) || '--';
-    seen[key] = (seen[key] || 0) + 1;
-    return seen[key] === 1 ? key : `${key}#${seen[key]}`;
-  });
 }
 
 /* 一条充电流水。
@@ -5461,31 +5435,6 @@ function render() {
             requestAnimationFrame(() => { syncing = false; });
           }, { passive: true });
         });
-      }
-    }
-    if (state.tab === 'charges') {
-      /* 当月逐次图：横轴是所选月份里的每一次充电（时间正序）。
-         每次各占一个刻度，所以前后都要留出位置，不能按"月度"的密度铺。 */
-      const canvas = $('#chargeSessionChart');
-      const records = (state.charge && state.charge.records) || [];
-      if (canvas && records.length) {
-        const ordered = [...records].reverse();          // 后端是倒序，图上要正序
-        const labels = sessionChartLabels(ordered);
-        drawLineChart(canvas,
-          ordered.map((r, i) => ({ v: r.energyKwh, label: labels[i] })),
-          { height: 176, decimals: 1, showValue: true, scrollable: true,
-            xLabelStep: 1, minPointWidth: 56, niceMax: true, bar: true,
-            color: '#2E8BC0', fillTop: 'rgba(46,139,192,.24)',
-            /* 第二根轴：这一次充了多久（小时）。没有时长的记录留 null，
-               折线在那里断开 —— 画成 0 会读成"充得特别快"。 */
-            series2: {
-              values: ordered.map((r) => {
-                const m = Number(r.durationMin);
-                return m > 0 ? +(m / 60).toFixed(2) : null;
-              }),
-              color: '#E8A33D',
-              decimals: 1,
-            } });
       }
     }
   });
