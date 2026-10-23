@@ -151,9 +151,14 @@ def _summarize_month(ym: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
     amount_total = 0.0
     amount_count = 0
     priced_kwh = 0.0          # 已确认金额对应的电量（算单价的分母）
+    priced_missing_kwh = 0    # 有金额但电量缺失的笔数（单价算不准的信号）
     unpriced_kwh = 0.0        # 还没补录金额的电量（估算的分母）
     estimated_total = 0.0
     estimated_count = 0
+    # 平均功率必须用**同一批**记录：某笔有电量没时长时，
+    # 分子加了电量、分母没加时长，功率会凭空虚高。
+    power_kwh = 0.0
+    power_minutes = 0.0
 
     records: list[dict[str, Any]] = []
     for row in rows:
@@ -163,6 +168,9 @@ def _summarize_month(ym: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
             total_kwh += float(kwh)
         if isinstance(minutes, (int, float)):
             total_minutes += float(minutes)
+            if isinstance(kwh, (int, float)):
+                power_kwh += float(kwh)
+                power_minutes += float(minutes)
 
         charge_type = row.get("chargeType")
         if charge_type == "dc":
@@ -185,6 +193,8 @@ def _summarize_month(ym: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
                 amount_count += 1
                 if isinstance(kwh, (int, float)):
                     priced_kwh += float(kwh)
+                else:
+                    priced_missing_kwh += 1
         elif isinstance(kwh, (int, float)):
             unpriced_kwh += float(kwh)
 
@@ -217,12 +227,20 @@ def _summarize_month(ym: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
         "avgKwh": round(total_kwh / len(rows), 1) if rows else 0.0,
         "avgMinutes": round(total_minutes / len(rows)) if rows else 0,
         # 平均充电功率（kW）= 电量 / 小时
-        "avgPowerKw": round(total_kwh / (total_minutes / 60), 1) if total_minutes > 0 else None,
+        "avgPowerKw": (
+            round(power_kwh / (power_minutes / 60), 1) if power_minutes > 0 else None
+        ),
         # 已确认金额：只含配对成功的真值。`amountTotal / pricedKwh` 才是"每度多少钱"。
         "amountTotal": round(amount_total, 2) if amount_count else None,
         "amountCount": amount_count,
         "pricedKwh": round(priced_kwh, 1),
-        "unitPrice": round(amount_total / priced_kwh, 2) if priced_kwh > 0 else None,
+        # 单价只在「分子分母同一批记录」时可算：只要有金额的笔里缺电量，
+        # 分母就少了一块，算出来必然偏高 —— 宁可给 None。
+        "unitPrice": (
+            round(amount_total / priced_kwh, 2)
+            if priced_kwh > 0 and priced_missing_kwh == 0
+            else None
+        ),
         # 还没补录金额的电量（界面据此提示"还有多少度没算钱"）
         "unpricedCount": len(rows) - amount_count - estimated_count,
         "unpricedKwh": round(unpriced_kwh, 1),
@@ -247,6 +265,10 @@ async def sync_sessions() -> dict:
             status_code=429,
             detail=f"同步过于频繁，请 {SYNC_MIN_INTERVAL_SEC} 秒后再试",
         )
+    # 先占位再请求：原来只在**成功后**才写 `_last_sync_at`，
+    # 两个请求同时到达时都能通过上面的判断，实测上游会被打两次 ——
+    # 冷却是为了防极氪风控，被并发击穿就失去意义了。
+    _last_sync_at = now
 
     from ..main import store
 
@@ -259,8 +281,6 @@ async def sync_sessions() -> dict:
         if "079021" in message or "401" in message or "登录" in message:
             raise HTTPException(status_code=401, detail="登录状态已失效，请重新登录后再同步") from exc
         fail("同步充电记录失败，请检查登录状态与服务端日志", exc)
-
-    _last_sync_at = time.monotonic()
 
     if is_mock():
         # 模拟数据只是"给界面看形状"，没有任何写入意义 —— 落库反而会污染真实数据
@@ -364,8 +384,9 @@ async def get_months() -> dict:
             "months": months,
             "totalCount": sum(int(m["count"] or 0) for m in months),
             "totalKwh": round(total_kwh, 1),
-            # 所有可查月份的金额之和。分母（总电量）也一并给出，
-            # 前端算「全局每度均价」时不用自己再遍历一遍。
+            # 所有可查月份的金额之和。
+            # ⚠️ 不要拿它除 `totalKwh` 求均价：分母含**未补录金额**的电量，
+            # 除出来会明显偏低（实测能差 3 倍）。要均价请用 `/sessions` 的 unitPrice。
             "totalAmount": round(sum(float(m["amount"] or 0) for m in months), 2),
             "hasData": bool(rows),
         },
@@ -395,8 +416,14 @@ def _make_payment_id(
     """幂等键：图 hash + 金额 + 时间（+ 订单尾号）。
 
     同一张截图重跑 OCR 不会插两遍 —— 这也是 commit 用 `INSERT OR IGNORE` 的前提。
+
+    ⚠️ 时间**必须归一**再进键：同一笔钱模型两次可能写成 `2026/10/16 22:10` 与
+    `2026-10-16 22:10`，拿原始字符串做键会算成两笔支付 —— 钱被记两遍，
+    而且第二次会把第一次的绑定顶掉，旧的留在「待确认」里永远清不掉。
     """
-    raw = f"{image_sha}|{amount:.2f}|{paid_at or ''}|{order_tail or ''}"
+    stamp = parse_time(paid_at) if paid_at else None
+    canonical = stamp.strftime("%Y-%m-%d %H:%M") if stamp else (paid_at or "")
+    raw = f"{image_sha}|{amount:.2f}|{canonical}|{order_tail or ''}"
     return sha256(raw.encode()).hexdigest()[:16]
 
 
@@ -419,12 +446,23 @@ def _persist_payments(
     """
     from ..main import store
 
-    sessions = store.list_sessions(limit=1000)
+    # 取全量（两年高频充电可超 1000 条）：截断会让较早的账单稳定落 unmatched，
+    # 用户看到"没有时间窗内的充电流水"，而库里其实有。
+    sessions = store.list_sessions(limit=5000)
     pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    invalid = 0
 
     for row in rows:
+        # 元素不是对象（前端传了 1 / "x"）就跳过而不是 500 ——
+        # 这类请求是调用方写错，不该冒出 Internal Server Error
+        if not isinstance(row, dict):
+            invalid += 1
+            continue
         amount = row.get("amount")
         if not isinstance(amount, (int, float)) or float(amount) <= 0:
+            # 退款行 / 用户把金额改成 0 / 模型吐 NaN：**不存，但要报数**。
+            # 以前静默 continue，接口回 200 且全 0，用户以为成功了。
+            invalid += 1
             continue
         paid_at = _row_paid_at(row)
         tail = row.get("orderNoTail4") or row.get("orderTail")
@@ -449,6 +487,12 @@ def _persist_payments(
 
     linked = pending = unmatched = 0
     for payment, row in pairs:
+        # 已经配对成功的跳过：同一张截图重跑（或前端重试）不该把
+        # 用户手工绑好的结果冲成 pending/unmatched —— 钱还在，状态却自相矛盾。
+        if store.payment_status(payment["paymentId"]) == "matched":
+            linked += 1
+            continue
+
         target = row.get("sessionId")
         if isinstance(target, str) and target:
             store.link_payment(target, payment["paymentId"], "manual", "high")
@@ -481,6 +525,7 @@ def _persist_payments(
     return {
         "inserted": saved["inserted"],
         "skipped": saved["skipped"],
+        "invalid": invalid,
         "linked": linked,
         "pending": pending,
         "unmatched": unmatched,
@@ -544,7 +589,7 @@ async def ocr_receipt(file: UploadFile = File(..., description="充电订单截�
     if not is_mock():
         from ..main import store
 
-        sessions = store.list_sessions(limit=1000)
+        sessions = store.list_sessions(limit=5000)
 
     for row in result["rows"]:
         row["candidates"] = candidate_matches(
@@ -627,7 +672,7 @@ async def list_payments(status: str | None = None) -> dict:
     from ..main import store
 
     payments = store.list_payments(status=status)
-    sessions = store.list_sessions(limit=1000)
+    sessions = store.list_sessions(limit=5000)
     for item in payments:
         if item["status"] != "matched":
             item["candidates"] = candidate_matches(

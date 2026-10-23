@@ -65,9 +65,13 @@ def parse_time(value: Any) -> datetime | None:
             except ValueError:
                 continue
     try:
-        return datetime.fromisoformat(raw)
+        parsed = datetime.fromisoformat(raw)
     except ValueError:
         return None
+    # 带时区（`+08:00` / `Z`）的输入要剥掉 tzinfo：整条链路（session 时间、
+    # 比对窗口、落库格式）都是 naive 本地时间，aware 与 naive 相减会直接
+    # `TypeError` → 接口 500，这张账单永远补不进来。
+    return parsed.replace(tzinfo=None) if parsed.tzinfo is not None else parsed
 
 
 def _session_start(session: dict[str, Any]) -> datetime | None:

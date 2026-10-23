@@ -527,3 +527,114 @@ def test_summary_counts_unpriced_energy(writable, client):
     assert data["unpricedCount"] == 1
     assert data["unpricedKwh"] == pytest.approx(40.0)
     assert data["totalKwh"] == pytest.approx(100.0)
+
+
+# ── 回归：2026-10-22 审计确认的四个洞 ─────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("2026-10-16T22:10:00+08:00", datetime(2026, 10, 16, 22, 10)),
+        ("2026-10-16T14:10:00Z", datetime(2026, 10, 16, 14, 10)),
+        ("2026-10-16 22:10", datetime(2026, 10, 16, 22, 10)),
+    ],
+)
+def test_parse_time_strips_timezone(raw, expected):
+    """带时区的时间要剥成 naive：整条链路都是本地时间，
+    aware 与 naive 相减会 TypeError → 接口 500，那张账单永远补不进来。"""
+    from app.bills.matching import parse_time
+
+    assert parse_time(raw) == expected
+
+
+def test_commit_accepts_timezone_offset(client, writable):
+    """带 +08:00 的 startAt 不许 500，且要能正常落库。"""
+    _seed_sessions(_session("tz:1", BASE))
+
+    resp = client.post(
+        "/api/charges/receipts/commit",
+        json={"rows": [{"amount": 30.0, "energyKwh": 80.0, "startAt": "2026-10-16T22:10:00+08:00"}]},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["linked"] == 1
+
+
+def test_link_to_unknown_session_is_404(client, writable):
+    """绑到不存在的流水必须报错：否则 match 留孤儿、钱既不进统计也不进待确认。"""
+    from app.main import store
+
+    store.save_payments([
+        {"paymentId": "p-orphan", "source": "manual", "paidAt": "2026-10-16 22:10", "amount": 10.0},
+    ])
+
+    resp = client.post("/api/charges/payments/p-orphan/link", json={"sessionId": "no-such-session"})
+
+    assert resp.status_code == 404
+    assert store.payment_status("p-orphan") == "pending"
+
+
+def test_recommit_keeps_matched_status(client, writable):
+    """同一张截图重复 commit，不能把已配对的钱打回未配对。"""
+    from app.main import store
+
+    _seed_sessions(_session("re:1", BASE))
+    body = {"imageSha8": "deadbeef", "rows": [{"amount": 30.0, "energyKwh": 80.1, "startAt": "2026-10-16 22:10"}]}
+
+    first = client.post("/api/charges/receipts/commit", json=body).json()["data"]
+    assert first["linked"] == 1, first
+
+    second = client.post("/api/charges/receipts/commit", json=body).json()["data"]
+
+    assert second["linked"] == 1
+    assert second["unmatched"] == 0 and second["pending"] == 0
+    assert store.payment_status(first_payment_id(store)) == "matched"
+
+
+def first_payment_id(store) -> str:
+    rows = store.list_payments()
+    assert rows, "应当有一条支付记录"
+    return rows[0]["paymentId"]
+
+
+def test_commit_rejects_non_object_rows_without_500(client, writable):
+    """rows 里混入非对象元素：跳过并报 invalid，不许 AttributeError → 500。"""
+    resp = client.post("/api/charges/receipts/commit", json={"rows": [1, "x", {"amount": 0}]})
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["invalid"] == 3
+    assert data["inserted"] == 0
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("00:18:25", 18.4),
+        ("充电时长 00:18:25", 18.4),   # 模型连标签一起抄回来（本次修的正是这个）
+        ("1小时30分", 90.0),
+        ("18分25秒", 18.4),
+        ("18:25", 18.4),               # 两段式首段 ≥12 按 分:秒 读
+        ("1:30", 90.0),                # 首段 <12 按 时:分 读
+        ("99:99", None),               # 明显不是时长
+        ("2026-10-16 22:10", None),    # 日期被抄进了时长字段
+    ],
+)
+def test_duration_parsing(raw, expected):
+    from app.adapters.vision_ocr import _duration_to_minutes
+
+    assert _duration_to_minutes(raw) == expected
+
+
+def test_payment_id_normalizes_time_format():
+    """同一笔钱写成 `2026/10/16 22:10` 与 `2026-10-16 22:10` 必须得到同一个幂等键，
+    否则同一张截图重跑会记两笔，第二次还会顶掉第一次的绑定。"""
+    from app.api.charges import _make_payment_id
+
+    a = _make_payment_id("abcd1234", 28.85, "2026/10/16 22:10", None)
+    b = _make_payment_id("abcd1234", 28.85, "2026-10-16 22:10", None)
+
+    assert a == b
+    # 时间真的不同的话仍然要区分开
+    assert a != _make_payment_id("abcd1234", 28.85, "2026-10-16 22:11", None)

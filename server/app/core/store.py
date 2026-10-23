@@ -518,6 +518,15 @@ class Store:
                 return item
         return None
 
+    def payment_status(self, payment_id: str) -> str | None:
+        """查一笔支付当前状态。commit 用它在覆盖前判断"是不是已经配好了"。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT status FROM charge_payments WHERE payment_id = ?",
+                (payment_id,),
+            ).fetchone()
+        return row["status"] if row is not None else None
+
     def link_payment(
         self,
         session_id: str,
@@ -541,6 +550,15 @@ class Store:
             ).fetchone()
             if payment is None:
                 raise KeyError(f"payment not found: {payment_id}")
+
+            # 目标流水必须存在。原来直接 UPDATE（不符合就影响 0 行）却照样插 match、
+            # 照样把支付置为 matched —— 结果钱既不进任何月份统计，也不在待确认队列里。
+            session = conn.execute(
+                "SELECT session_id FROM charge_sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if session is None:
+                raise KeyError(f"session not found: {session_id}")
 
             # ① 这笔支付原来绑过的 session，先解绑
             old = conn.execute(

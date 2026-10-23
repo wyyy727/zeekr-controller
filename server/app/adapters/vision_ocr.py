@@ -69,7 +69,18 @@ _ADDRESS_TAIL_RE = re.compile(r"\s*\d+\s*[号栋层室].*$")
 # 「充电时长 00:18:25」这类时分秒（理想超充的版式）。
 # ⚠️ 不能交给 _as_float：它会从 "00:18:25" 里抠出 "00" 当分钟 —— 时长凭空变 0，
 # 平均功率（电量÷时长）跟着变 inf/None，配对的弱窗口也塌了。
-_CLOCK_RE = re.compile(r"^(\d{1,3}):(\d{2})(?::(\d{2}))?$")
+#
+# 不要用 ^...$ 锚定：模型常把标签一起抄回来（"充电时长 00:18:25"），
+# 一旦带前缀就匹配不上，又退化成 _as_float 抠出 "00"。用"前后不接数字/冒号"的
+# 边界断言，既能在句子里找，也不会从 "2026-10-16 22:10" 里误取。
+_CLOCK_RE = re.compile(r"(?<![\d:])(\d{1,3}):(\d{2})(?::(\d{2}))?(?![\d:])")
+# 日期（"2026-10-16" / "2026/10/16"）：出现在时长字段里说明模型抄错了字段
+_DATE_LIKE_RE = re.compile(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}")
+# 中文单位：1小时30分 / 18分25秒 / 37分钟（各段都可缺，全缺就不算命中）
+_CN_DURATION_RE = re.compile(
+    r"(?:(\d+)\s*(?:小时|时|h))?\s*(?:(\d+)\s*分(?:钟)?)?\s*(?:(\d+)\s*秒)?",
+    re.I,
+)
 
 PROMPT = """你是充电账单字段抽取器。只做抽取，不做推测、不做补全、不做单位换算。
 图中若出现车架号(VIN)、车牌、手机号、完整订单号、地址门牌、账户余额，一律忽略，不要输出、不要复述。
@@ -136,18 +147,51 @@ def _as_float(value: Any) -> float | None:
 
 
 def _duration_to_minutes(value: Any) -> float | None:
-    """「00:18:25」这类时分秒折算成分钟（18.4）。
+    """时长文本折算成分钟（18.4）。认三种写法，认不出返回 None 交给调用方兜底。
 
-    各家第三方账单的时长写法不统一：改充电给「用时37分钟」，
-    理想超充给「00:18:25」。模型偶尔会原样照抄后一种 —— 这里兜住。
+    各家第三方账单不统一：改充电给「用时37分钟」、理想超充给「00:18:25」、
+    有的给「1小时30分」。模型常连标签一起抄回来（"充电时长 00:18:25"），
+    所以一律用"在文本里找"而不是整串匹配。
     """
     if not isinstance(value, str):
         return None
-    match = _CLOCK_RE.match(value.strip())
+    text = value.strip()
+    if not text:
+        return None
+
+    # 时间戳不是时长：模型偶尔把 startAt 抄进 durationMin，不能把日期算成 23 小时
+    if _DATE_LIKE_RE.search(text):
+        return None
+
+    # ① 中文单位最明确，先试（"1小时30分" / "18分25秒" / "37分钟"）
+    #    各段都是可选的，`search` 会先命中空串 —— 所以要挨个找"至少有一段数字"的匹配
+    for cn in _CN_DURATION_RE.finditer(text):
+        if not any(cn.groups()):
+            continue
+        hours, minutes, seconds = (int(g) if g else 0 for g in cn.groups())
+        total = hours * 60 + minutes + seconds / 60
+        if total > 0 and minutes < 60 and seconds < 60:
+            return round(total, 1)
+        break
+
+    # ② 时钟写法（"00:18:25" / "18:25" / "充电时长 00:18:25"）
+    match = _CLOCK_RE.search(text)
     if not match:
         return None
-    hours, minutes, seconds = int(match.group(1)), int(match.group(2)), int(match.group(3) or 0)
-    return round(hours * 60 + minutes + seconds / 60, 1)
+    first = int(match.group(1))
+    second = int(match.group(2))
+    third = match.group(3)
+    if third is None:
+        # 两段式有歧义："1:30" 更像 1 小时 30 分，"18:25" 更像 18 分 25 秒。
+        # 判据用常识：一次充电超过 12 小时极罕见，所以首段 ≥12 按 分:秒 读。
+        if second >= 60:
+            return None
+        return round(first + second / 60, 1) if first >= 12 else round(first * 60 + second, 1)
+
+    seconds = int(third)
+    if second >= 60 or seconds >= 60:
+        return None       # "99:99" 这种明显不是时长，宁可判不出也别编
+    return round(first * 60 + second + seconds / 60, 1)
 
 
 def _scrub_text(value: Any) -> str | None:

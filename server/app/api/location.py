@@ -39,13 +39,16 @@ _MAP_CACHE_MAX = 40
 
 # 位置卡与缩略图共用：60 秒内不重复打车况接口
 _POSITION_TTL = 60
-_position_cache: dict[str, Any] = {"at": 0.0, "data": None}
+# 缓存必须**按 vin 分开**：否则 60 秒内先查 A 车再看 B 车，B 会拿到 A 的坐标
+# （接口暴露了 `?vin=`，多车场景一用就串）。
+_position_cache: dict[str, Any] = {"at": 0.0, "data": None, "vin": ""}
 
 
 def reset_position_cache() -> None:
     """测试用。"""
     _position_cache["at"] = 0.0
     _position_cache["data"] = None
+    _position_cache["vin"] = ""
 
 
 def coord_key(lat: float, lng: float, digits: int = 5) -> str:
@@ -102,8 +105,13 @@ async def _current_position(vin: str | None) -> dict[str, Any]:
     只有 3 个位置点），所以 `reportedAt` 必须一并返回，界面要显示出来。
     """
     now = time.time()
+    key = vin or ""
     cached = _position_cache["data"]
-    if cached is not None and now - _position_cache["at"] < _POSITION_TTL:
+    if (
+        cached is not None
+        and _position_cache["vin"] == key
+        and now - _position_cache["at"] < _POSITION_TTL
+    ):
         return cached
 
     client = get_client()
@@ -125,7 +133,7 @@ async def _current_position(vin: str | None) -> dict[str, Any]:
     if not data["available"]:
         data["reason"] = "车辆尚未上报位置"
 
-    _position_cache.update(at=now, data=data)
+    _position_cache.update(at=now, data=data, vin=key)
     return data
 
 
@@ -274,8 +282,12 @@ def _store_map(
         path = _MAP_CACHE_DIR / f"{_map_stem(lat, lng, width, height, zoom)}.{ext}"
         path.write_bytes(body)
 
-        # 简单上限：超出就删最旧的几张，避免长期停车换位置后无限增长
-        files = sorted(_MAP_CACHE_DIR.glob("*.png")) + sorted(_MAP_CACHE_DIR.glob("*.jpg"))
+        # 简单上限：超出就删**最旧**的几张（按 mtime，不是按文件名 ——
+        # 文件名是坐标串，按它排序删掉的不是最旧的那张，会反复删错、反复回源）
+        files = sorted(
+            list(_MAP_CACHE_DIR.glob("*.png")) + list(_MAP_CACHE_DIR.glob("*.jpg")),
+            key=lambda p: p.stat().st_mtime,
+        )
         if len(files) > _MAP_CACHE_MAX:
             for old in files[: len(files) - _MAP_CACHE_MAX]:
                 old.unlink(missing_ok=True)

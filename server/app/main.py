@@ -21,6 +21,12 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# httpx 在 INFO 级别打印**完整请求 URL**，而腾讯的 URL 里带 key 与车辆坐标：
+# 落到 .server.log 就等于把密钥和"车停在哪"写进文件，与本模块"日志绝不打印坐标"的
+# 承诺相反。压到 WARNING：失败仍会记（异常类型），成功不再回显 URL。
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 store = Store(config.database)
 
 
