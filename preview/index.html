@@ -1800,6 +1800,7 @@ const state = {
   chargeSyncAt: null,        // 上次同步完成的时间戳（存本地，跨刷新保留）
   chargeAutoSyncDay: '',     // 本次会话已经自动同步过的日期，防止切 tab 反复打网关
   chargeSyncPending: false,  // 充电结束后已排队一次同步，别重复排
+  chargeLoadError: false,   // 首屏读流水失败（显示错误态 + 重试，而不是永久骨架）
   chargeSyncing: false,
   chargeLoading: false,
   /* ── 金额补录 ──
@@ -1820,6 +1821,12 @@ const state = {
      独立于数据来源：即使预览页数据走内置模拟，登录也真的落到服务端 ——
      会话存在后端，debug 页和后续 live 请求都要用它。 */
   auth: null,
+  /* 登录状态**是否还在查**。
+     `auth === null` 有两种完全不同的含义，光看它分不出来：
+     ① 压根没去查（预览页默认不连后端）→ 说"正在查询"是骗人的；
+     ② 正在查（请求在飞）→ 这时才该显示"正在查询…"。
+     用这个标志把两者分开，否则不连后端时设置页会永远转圈。 */
+  authLoading: false,
   /* 车辆权限包（/ms-app-bff/api/1.0/permissions）。
      原则：**先问车开通了什么，再决定 UI 显示什么**。
      未拿到时为 null —— 此时按"保守显示"处理（不隐藏功能，但数据缺失处标注未知），
@@ -1888,8 +1895,12 @@ const state = {
      请确认 Python 服务已启动」，明明后端好好的。
      注意：这些只用于**内容区**的文案，跨页面的通用反馈靠顶部那条 `#netBar`。 */
   statusLoading: false,
+  /* 车况读取失败：与"本来就没数据"分开（否则用户以为车没连上） */
+  statusError: '',
   chargeLoading: false,
   energyLoading: false,
+  /* 行程/能耗读取失败（与"本来就没有数据"是两回事，得分开显示） */
+  energyError: '',
   /* 定位状态机：idle → locating → ok / denied / unsupported / error */
   locStatus: 'idle',
   locError: '',
@@ -2573,15 +2584,22 @@ async function apiInner(path, opts) {
   const t0 = performance.now();
   let res;
 
+  const t = withTimeout(15000);
   try {
-    res = await fetch(API_SOURCE + path, withAuth(opts));
+    res = await fetch(API_SOURCE + path, withAuth(opts), t.signal ? { signal: t.signal } : undefined);
   } catch (err) {
+    if (t.done) t.done();
+    if (err && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      dbgRecord({ method, path, status: '超时', ms: Math.round(performance.now() - t0), ok: false, detail: '15 秒无响应' });
+      throw new Error('连不上后端 ' + API_SOURCE + '：请求超时（15 秒无响应）');
+    }
     // 网络层失败（后端没起、地址写错、被 CORS 拦下）—— 这类原因最值得留全
     const msg = String((err && err.message) || err);
     dbgRecord({ method, path, status: '网络失败', ms: Math.round(performance.now() - t0), ok: false, detail: msg });
     throw new Error('连不上后端 ' + API_SOURCE + '：' + msg);
   }
 
+  if (t.done) t.done();
   const ms = Math.round(performance.now() - t0);
   const text = await res.text();
   let json = null;
@@ -3161,6 +3179,19 @@ function renderControls() {
         <div>正在读取车辆数据…</div>
       </div>`;
     }
+    /* 读失败 ≠ 没数据：后端可能只是登录过期或正在重启，
+       说成"请确认 Python 服务已启动"是在误导用户去查错方向。
+       而且必须给重试入口 —— 否则只能靠切 tab 碰运气。 */
+    if (state.statusError) {
+      return `<div class="empty">
+        <div class="ico">${SVG.car}</div>
+        <div>车辆数据没有读到</div>
+        <div style="margin-top:8px;font-size:11.5px">
+          后端可能正在重启，或登录状态已失效
+        </div>
+        <button class="en-month-btn" id="statusRetryBtn" style="margin-top:14px">重试</button>
+      </div>`;
+    }
     return `<div class="empty">
       <div class="ico">${SVG.car}</div>
       <div>尚未获取到车辆数据</div>
@@ -3168,7 +3199,16 @@ function renderControls() {
     </div>`;
   }
 
-  return `${quickControlsCard()}
+  /* 与车况页同一个道理：这一轮没读到就明说，别让旧值冒充实时值 */
+  const stale = state.statusError ? `
+    <div class="card" style="border-color:var(--zhu-sha);padding:12px 14px">
+      <div style="font-size:12.5px;color:var(--zhu-sha)">
+        这一轮没读到最新车况，下面是上次读到的数据
+      </div>
+      <button class="en-month-btn" id="statusRetryBtn" style="margin-top:10px">重试</button>
+    </div>` : '';
+
+  return `${stale}${quickControlsCard()}
     <div class="foot">
       ${state.lastRefresh ? '更新于 ' + state.lastRefresh + '<br>' : ''}
       车控指令需在「设置」中开启总开关
@@ -3186,6 +3226,19 @@ function renderDashboard() {
         <div>正在读取车辆数据…</div>
       </div>`;
     }
+    /* 读失败 ≠ 没数据：后端可能只是登录过期或正在重启，
+       说成"请确认 Python 服务已启动"是在误导用户去查错方向。
+       而且必须给重试入口 —— 否则只能靠切 tab 碰运气。 */
+    if (state.statusError) {
+      return `<div class="empty">
+        <div class="ico">${SVG.car}</div>
+        <div>车辆数据没有读到</div>
+        <div style="margin-top:8px;font-size:11.5px">
+          后端可能正在重启，或登录状态已失效
+        </div>
+        <button class="en-month-btn" id="statusRetryBtn" style="margin-top:14px">重试</button>
+      </div>`;
+    }
     return `<div class="empty">
       <div class="ico">${SVG.car}</div>
       <div>尚未获取到车辆数据</div>
@@ -3194,6 +3247,18 @@ function renderDashboard() {
   }
 
   const charging = s.isCharging === true;
+
+  /* 有旧数据、但这一轮刷新失败了：保留旧数据（别清屏），
+     同时明确告诉用户"这是上一次读到的，不是刚拿的"。
+     不说的话，用户会把几分钟前的数据当成实时值 —— 车况页有电量，
+     差几分钟就可能差几十公里。 */
+  const staleBanner = state.statusError ? `
+    <div class="card" style="border-color:var(--zhu-sha);padding:12px 14px">
+      <div style="font-size:12.5px;color:var(--zhu-sha)">
+        这一轮没读到最新车况，下面是上次读到的数据
+      </div>
+      <button class="en-month-btn" id="statusRetryBtn" style="margin-top:10px">重试</button>
+    </div>` : '';
 
   /* 车控总开关（设置页那个，默认关）。关闭时**保留按钮但置为 disabled** ——
      与 iOS ControlsPanel 一致：整格消失会让人以为功能丢了，
@@ -3277,6 +3342,7 @@ function renderDashboard() {
   // 3) scene ：场景型（组合指令），同样是一次性动作
 
   return `
+    ${staleBanner}
     <div class="card">
       <div class="hero">
         ${socRing(s.soc ?? 0, charging)}
@@ -3456,6 +3522,19 @@ function renderTrips() {
       return `<div class="empty">
         <div class="ico">${SVG.chart}</div>
         <div>正在加载能耗数据…</div>
+      </div>`;
+    }
+    /* 读失败与"本来就没数据"要分开：后者是正常状态（车还没跑够行程），
+       前者是故障 —— 混成一句话会让用户以为车没有行程记录。
+       而且必须给重试入口，不能让用户只能切 tab 碰运气。 */
+    if (state.energyError) {
+      return `<div class="empty">
+        <div class="ico">${SVG.chart}</div>
+        <div>能耗数据没有读到</div>
+        <div style="margin-top:8px;font-size:11.5px">
+          后端可能正在重启，或登录状态已失效
+        </div>
+        <button class="en-month-btn" id="energyRetryBtn" style="margin-top:14px">重试</button>
       </div>`;
     }
     return `<div class="empty">
@@ -3702,6 +3781,22 @@ function renderCharges() {
   /* 还没有任何数据：**只在真的一次都没查到时**显示骨架。
      已有数据时刷新不走这里（换成骨架会让内容闪一下再回来，比不动更难受）。 */
   if (!c) {
+    /* 读失败时不能再显示骨架：骨架表示"正在读"，一直转下去用户会以为卡死，
+       而且没有任何重试入口。给一句实话 + 一个重试按钮。 */
+    if (state.chargeLoadError) {
+      return `${nearby}${monthRow}
+      <div class="card">
+        <div class="card-title"><span>充入电量</span><span class="cap-badge">读取失败</span></div>
+        <div class="empty" style="padding:22px 12px 18px">
+          <div class="ico">${SVG.plug}</div>
+          <div>充电流水没有读到</div>
+          <div style="margin-top:8px;font-size:11.5px">
+            后端可能正在重启，或登录状态已失效
+          </div>
+          <button class="en-month-btn" id="chargeRetryBtn" style="margin-top:14px">重试</button>
+        </div>
+      </div>`;
+    }
     return `${nearby}${monthRow}
       <div class="card">
         <div class="card-title"><span>充入电量</span><span class="cap-badge">加载中</span></div>
@@ -3809,9 +3904,13 @@ function costCard(c) {
   const priced = c.amountCount || 0;
   const unpriced = c.unpricedCount || 0;
 
+  /* 分母要含估算笔：`unpricedCount` 是"既没金额也不是估算"的笔数，
+     漏掉 estimatedCount 会出现"已补全"和"另有 N 笔估算"同屏打架。 */
+  const estimated = c.estimatedCount || 0;
+  const totalBills = priced + unpriced + estimated;
   const badge = !priced
     ? '未补录'
-    : (unpriced ? `已补录 ${priced}/${priced + unpriced} 笔` : '已补全');
+    : (totalBills > priced ? `已补录 ${priced}/${totalBills} 笔` : '已补全');
 
   const notes = [];
   if (!priced) {
@@ -4007,6 +4106,9 @@ async function runReceiptOcr(file) {
     /* 默认归属：只有**唯一候选**时才预选；
        多候选一律留空让人挑 —— 替用户拍板的那一次，往往就是错的那一次。 */
     state.ocrPick = {};
+    /* 记下哪些行是**用户自己点的**：用户改过时间/电量后，自动预选就不作数了，
+       但用户亲手选的要尊重（他可能知道截图识别错了）。 */
+    state.ocrUserPicked = {};
     rows.forEach((r, i) => {
       const cands = r.candidates || [];
       if (cands.length === 1) state.ocrPick[i] = cands[0].sessionId;
@@ -4068,6 +4170,9 @@ function ocrRowHtml(row, i) {
           ${cands.length ? '暂不绑定（放进待确认）' : '仍要保存这笔金额'}
         </button>
       </div>
+      <div class="ocr-warn ocr-rebind" hidden>
+        时间和电量改过了，原来那次自动匹配不再作数 —— 请重新选一次对应哪次充电
+      </div>
     </div>`;
 }
 
@@ -4090,10 +4195,12 @@ function openOcrSheet() {
       const rowEl = cand.closest('.ocr-row');
       if (!rowEl) return;
       state.ocrPick[Number(rowEl.dataset.idx)] = cand.dataset.cand || '';
+      state.ocrUserPicked[Number(rowEl.dataset.idx)] = true;
       // 只重绘候选区的选择态 —— 整块重绘会让正在输入的金额被清掉
       rowEl.querySelectorAll('.ocr-cand').forEach((b) => {
         b.classList.toggle('on', (b.dataset.cand || '') === (cand.dataset.cand || ''));
       });
+      rowEl.querySelectorAll('.ocr-rebind').forEach((n) => { n.hidden = true; });
       return;
     }
 
@@ -4356,7 +4463,9 @@ function paymentRowHtml(p) {
 /* 补录完 / 配对完都要重新读这三样：
    月份统计（金额的合计与单价会变）、支付队列、识别能力状态。 */
 async function refreshChargeBills() {
-  await Promise.all([loadChargeSessions(), loadPayments(), loadOcrStatus()]);
+  /* 月份清单必须一起刷：大数区的「累计」是各月 amount 相加，
+     只刷当月流水会让「本月金额」变了、「累计」还是补录前的旧值。 */
+  await Promise.all([loadChargeMonths(), loadChargeSessions(), loadPayments(), loadOcrStatus()]);
 }
 
 /* ═══════════════════════════════════════════════
@@ -4914,13 +5023,13 @@ function capabilityCard() {
       </div>
       ${permShown.length ? `
       <div class="cap-list">
-        ${permShown.map((p) => `<span class="cap" title="${p}">${PERM_LABELS[p] || p}</span>`).join('')}
+        ${permShown.map((p) => `<span class="cap" title="${esc(p)}">${esc(PERM_LABELS[p] || p)}</span>`).join('')}
         ${permMore ? `<button class="cap cap-more" data-perm-toggle
               aria-expanded="${permExpanded}">${permExpanded ? '收起' : '…'}</button>` : ''}
       </div>` : ''}
       ${off.length ? `
       <div class="cap-list">
-        ${off.map((k) => `<span class="cap no">${CAP_LABELS[k]}</span>`).join('')}
+        ${off.map((k) => `<span class="cap no">${esc(CAP_LABELS[k])}</span>`).join('')}
       </div>` : ''}
       ${off.length ? `
       <div class="cap-hint">灰项为本账号未开通、已从界面隐藏的功能</div>` : ''}
@@ -4932,12 +5041,33 @@ function capabilityCard() {
    完全不发请求（这样没有后端也能看设计）。但登录不能这样 —— 会话存在
    服务端，必须真的请求，否则 debug 页拿不到登录态。
    所以 apiNoMock() 跳过那层判断，只用于登录相关接口。 */
+/* 给 fetch 加超时。
+   `fetch` 本身没有超时：后端没起、地址写错、被防火墙拦下时请求会一直挂着，
+   界面就永远停在"加载中"，用户既看不到原因也走不开。
+   `AbortSignal.timeout` 是较新的 API，用 `AbortController` 自己计时兜底，
+   老浏览器上也能工作。 */
+function withTimeout(ms) {
+  if (typeof AbortController === 'undefined') return {};
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  return { signal: ctrl.signal, done: () => clearTimeout(timer) };
+}
+
 async function apiNoMock(path, opts) {
   netBegin();   // 登录/诊断也要有反馈：那几步恰恰是用户盯着看的时候
   try {
-    const res = await fetch(API_SOURCE + path, withAuth(Object.assign({
-      headers: { 'Content-Type': 'application/json' },
-    }, opts || {})));
+    /* 超时保护：`fetch` 不自带超时，后端没起 / 地址写错 / 被防火墙拦下时
+       请求会一直挂着 —— 登录状态那栏就会永远停在"正在查询…"，
+       用户既看不到原因也走不开。加一道 12 秒的闸。 */
+    const t = withTimeout(12000);
+    let res;
+    try {
+      res = await fetch(API_SOURCE + path, withAuth(Object.assign({
+        headers: { 'Content-Type': 'application/json' },
+      }, opts || {})), t.signal ? { signal: t.signal } : undefined);
+    } finally {
+      if (t.done) t.done();
+    }
 
     let json = null;
     try { json = await res.json(); } catch (_) { /* 可能没有响应体 */ }
@@ -4948,16 +5078,34 @@ async function apiNoMock(path, opts) {
     }
     if (json && json.success === false) throw new Error(json.error || '服务端返回失败');
     return json && typeof json === 'object' && 'data' in json ? json.data : json;
+  } catch (err) {
+    /* 网络层失败要说清是"连不上"，别把浏览器的原始报错抛给用户。
+       `api()` 里已经是这个口径（"连不上后端 <地址>：<原因>"），
+       这里对齐 —— 否则登录失败时用户看到的是 "Failed to fetch"。 */
+    if (err && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new Error('连不上后端 ' + API_SOURCE + '：请求超时（12 秒无响应）');
+    }
+    /* 网络层失败在浏览器里是 `TypeError: Failed to fetch`，
+       但不同浏览器 / 代理的措辞不一（"NetworkError" / "Load failed"…），
+       所以按「消息里没有 HTTP 状态码、且不是我们自己抛的业务错误」来判断，
+       而不是死认 TypeError。 */
+    if (err && err.name === 'TypeError') {
+      throw new Error('连不上后端 ' + API_SOURCE + '：' + String(err.message));
+    }
+    throw err;
   } finally {
     netEnd();
   }
 }
 
 async function loadAuth() {
+  state.authLoading = true;
   try {
     state.auth = Object.assign({}, await apiNoMock('/api/auth/status'), { error: null });
   } catch (err) {
     state.auth = { error: err.message, authenticated: false };
+  } finally {
+    state.authLoading = false;
   }
   render();
 }
@@ -4995,7 +5143,8 @@ async function authLogin() {
   const phone = ((phoneEl && phoneEl.value) || '').trim();
   const code = ((codeEl && codeEl.value) || '').trim();
   if (!/^\d{11}$/.test(phone)) { toast('请输入 11 位手机号'); return; }
-  if (!/^\d{4,6}$/.test(code)) { toast('请输入短信验证码'); return; }
+  /* 后端收 4–8 位（mock 客户端只认 6 位，别在客户端提前拦掉 7–8 位） */
+  if (!/^\d{4,8}$/.test(code)) { toast('请输入 4–8 位短信验证码'); return; }
   if (authBusy) return;
   authBusy = true;
 
@@ -5055,12 +5204,26 @@ async function authLogout() {
   }
 }
 
-/* 登录卡片：查询中 / 连不上后端 / 已登录 / 未登录 四种形态 */
+/* 登录卡片：在查 / 没去查 / 连不上后端 / 已登录 / 未登录 五种形态 */
 function authCard() {
   const a = state.auth;
 
+  /* `a === null` 有两种含义，必须分开：
+     ① 在查（`authLoading`）→ 显示"正在查询…"；
+     ② **压根没去查** —— 预览页默认不连后端（`CONNECT_BACKEND` 为假），
+        `bootstrap()` 直接 seedMock 返回，一个请求都不发。
+        这时说"正在查询登录状态…"会永远转下去：没有请求在飞，
+        也没有会到来的结果。必须明说"未连接后端"。 */
   if (a === null) {
-    return `<div class="auth-note">正在查询登录状态…</div>`;
+    if (state.authLoading) {
+      return `<div class="auth-note">正在查询登录状态…</div>`;
+    }
+    return `
+      <div class="auth-note warn">未连接后端，没有查询登录状态</div>
+      <div class="auth-note">
+        预览页默认不请求后端（便于没有服务时也能看设计）。
+        要登录请在 debug 页打开「连接后端」，或用带 <code>?api=</code> 参数的地址打开本页。
+      </div>`;
   }
   if (a.error) {
     return `
@@ -5106,22 +5269,25 @@ function renderSettings() {
 
   /* 状态文案按数据来源区分 —— 与徽标口径保持一致 */
   const statusText = {
-    live:    '● 已连接',
-    offline: '● 后端不可达，已用模拟数据',
-    mock:    '● 模拟数据模式',
-  }[state.mode];
+    live:      '● 已连接',
+    offline:   '● 后端不可达，已用模拟数据',
+    mock:      '● 模拟数据模式',
+    needLogin: '● 未登录',
+  }[state.mode] || '● 未知';
 
   const statusColor = {
-    live:    'var(--qing-bi)',
-    offline: 'var(--zhu-sha)',
-    mock:    'var(--teng-huang)',
-  }[state.mode];
+    live:      'var(--qing-bi)',
+    offline:   'var(--zhu-sha)',
+    mock:      'var(--teng-huang)',
+    needLogin: 'var(--text-3)',
+  }[state.mode] || 'var(--text-3)';
 
   const sourceText = {
-    live:    '真实服务端',
-    offline: '本地模拟数据（后端不可达）',
-    mock:    '本地模拟数据',
-  }[state.mode];
+    live:      '真实服务端',
+    offline:   '本地模拟数据（后端不可达）',
+    mock:      '本地模拟数据',
+    needLogin: '未登录，未请求任何数据',
+  }[state.mode] || '--';
 
   /* 「服务连接」只在**没登录**时显示。
      登录后地址/连接状态已经不是需要用户操心的东西（而且地址只在 `?api=` 或退出后改），
@@ -5373,6 +5539,7 @@ async function loadHealth() {
 
 async function loadStatus() {
   state.statusLoading = true;
+  state.statusError = '';
   // 先记下上一拍的充电状态，用来判断"充电结束"这个跳变
   const wasCharging = !!(state.status && state.status.isCharging);
   try {
@@ -5389,6 +5556,7 @@ async function loadStatus() {
     return true;
   } catch (e) {
     console.warn('状态加载失败', e);
+    state.statusError = (e && e.message) ? String(e.message) : '读取失败';
     return false;
   } finally {
     state.statusLoading = false;
@@ -5430,6 +5598,7 @@ async function loadTrips() {
   const monthQuery = isCurrent ? '' : '&yearMonth=' + encodeURIComponent(state.yearMonth);
 
   state.energyLoading = true;
+  state.energyError = '';
   try {
     state.energy = await api('/api/trips/energy?scope=month' + monthQuery);
     if (isCurrent) {
@@ -5444,6 +5613,8 @@ async function loadTrips() {
     console.warn('能耗统计加载失败', e);
     state.energy = null;
     state.energyWindow = null;
+    // 记下失败原因：界面要区分"没数据"和"没读到"
+    state.energyError = (e && e.message) ? String(e.message) : '读取失败';
     return false;
   } finally {
     state.energyLoading = false;
@@ -5503,14 +5674,20 @@ async function loadOcrStatus() {
 }
 
 async function loadChargeSessions() {
+  /* 发请求时把月份记下来：快速连切月份时，先发的可能后到，
+     直接赋值会把上个月的数据挂在新标题下（数字与标题错配）。 */
+  const want = state.chargeMonth;
   try {
-    const q = state.chargeMonth === 'currentMonth'
-      ? ''
-      : '?yearMonth=' + encodeURIComponent(state.chargeMonth);
-    state.charge = await api('/api/charges/sessions' + q);
+    const q = want === 'currentMonth' ? '' : '?yearMonth=' + encodeURIComponent(want);
+    const data = await api('/api/charges/sessions' + q);
+    if (state.chargeMonth !== want) return false;   // 期间又切了月份，这份结果作废
+    state.charge = data;
+    state.chargeLoadError = false;
     return true;
   } catch (e) {
     console.warn('充电流水加载失败', e);
+    // 从没成功读到过才标错误态（已有数据时保留旧数据，别把页面清空）
+    if (!state.charge) state.chargeLoadError = true;
     return false;
   }
 }
@@ -5647,9 +5824,11 @@ function seedMock() {
      不该一打开就弹权限框。 */
   state.loc = { lat: 31.2304, lng: 121.4737 };
   state.locStatus = 'ok';
-  const d = new Date();
-  state.lastRefresh = String(d.getHours()).padStart(2, '0') + ':' +
-                     String(d.getMinutes()).padStart(2, '0');
+  /* ⚠️ 不要在这里设 `lastRefresh`。
+     它的语义是"上次成功读到**真实**数据的时间"。这里填的是演示值，
+     一并设成"刚刚"的话，界面会显示「更新于 刚刚」配一份编出来的
+     电量/里程 —— 用户会当成自己车的实时值。
+     演示模式下宁可不显示更新时间。（与 iOS 的 applyMockData 同一原则） */
 }
 
 /* 能力集与预约计划：真实模式下尝试拉取。
@@ -5709,7 +5888,10 @@ async function bootstrap() {
   await loadAuth();
   const a = state.auth || {};
 
-  if (a.authenticated) {
+  /* `mock === true`：服务端自己就是模拟数据源，没有真实账号可登。
+     iOS 那边 AppStore 早就这么放行了，网页只看 authenticated 会卡在登录引导，
+     同一个后端两端行为不一致。 */
+  if (a.authenticated || a.mock === true) {
     state.mode = 'live';
     // 只加载当前 tab 需要的数据；其余 tab 等用户点进去再取
     await ensureTabData(state.tab);
@@ -5849,10 +6031,16 @@ async function ensureTabData(tab, force = false) {
        其它 tab 不碰 status/health，不该因为自己没问就判后端死了。 */
     if (keys.has('status') || keys.has('health')) {
       if (failed.has('status') || failed.has('health')) {
-        seedMock();
+        /* 有真数据时**不要**用演示数据覆盖：seedMock 会把车况/充电/行程/位置
+           整套换成演示值，而它连金额和站名都有 —— 用户会把这些当成自己的账。
+           宁可继续显示"最后一次已知"的旧数据，只把模式标成离线。 */
+        if (!state.status) seedMock();
         state.mode = 'offline';
         notifyFallback('后端未响应 /api/vehicle/status 或 /api/health');
       } else {
+        /* 从离线恢复：离线期间可能进过 seedMock（或停着旧数据），
+           必须让各 tab 重新取一次，否则 loadedKeys 会拦住重取、把旧值当真。 */
+        if (state.mode === 'offline') clearLoadedKeys();
         state.mode = 'live';
         fallbackNotified = false;
       }
@@ -5874,6 +6062,28 @@ document.querySelector('.tabbar').addEventListener('click', (e) => {
 /* 车控总开关：切换后立即持久化并重渲染 —— 车控页那 15 个按钮的可用态
    跟着变（关 → 全部置灰 + 「已禁用」）。这是**界面意图**开关；
    真正的闸门在服务端（ALLOW_COMMANDS），两把锁都要开。 */
+/* 核对框里改了「开始时间 / 电量」：自动预选的那一条已经不可信，立刻撤销，
+   让用户重新选（或落到待确认）。不撤销就会把金额绑到另一次充电上。
+   **用户自己点过候选的**不动 —— 那是他的判断。 */
+document.addEventListener('input', (e) => {
+  const input = e.target.closest && e.target.closest('.ocr-row .ocr-input');
+  if (!input) return;
+  const field = input.dataset.f;
+  if (field !== 'startAt' && field !== 'energyKwh') return;
+
+  const rowEl = input.closest('.ocr-row');
+  if (!rowEl) return;
+  const idx = Number(rowEl.dataset.idx);
+  if (state.ocrUserPicked && state.ocrUserPicked[idx]) return;
+  if (!state.ocrPick[idx]) return;          // 本来就没绑，不用动
+
+  state.ocrPick[idx] = '';
+  rowEl.querySelectorAll('.ocr-cand').forEach((b) => {
+    b.classList.toggle('on', (b.dataset.cand || '') === '');
+  });
+  rowEl.querySelectorAll('.ocr-rebind').forEach((n) => { n.hidden = false; });
+});
+
 document.addEventListener('change', (e) => {
   const sw = e.target.closest('#allowCmdsSw');
   if (!sw) return;
@@ -5948,6 +6158,24 @@ document.addEventListener('click', (e) => {
     });
     return;
   }
+  if (e.target.closest('#statusRetryBtn')) {
+    state.statusError = '';
+    render();
+    loadStatus().then(render);
+    return;
+  }
+  if (e.target.closest('#energyRetryBtn')) {
+    state.energyError = '';
+    render();
+    loadTrips().then(render);
+    return;
+  }
+  if (e.target.closest('#chargeRetryBtn')) {
+    state.chargeLoadError = false;
+    render();
+    loadCharges();
+    return;
+  }
   if (e.target.closest('#chargeMonthBtn')) {
     openMonthSheet({
       months: state.chargeMonths,
@@ -5959,7 +6187,10 @@ document.addEventListener('click', (e) => {
           applyMockCharges();
           render();
         } else {
-          loadChargeSessions().then(render);
+          loadChargeSessions().then((ok) => {
+            render();
+            if (ok === false) toast('读取该月流水失败');
+          });
         }
       },
     });
