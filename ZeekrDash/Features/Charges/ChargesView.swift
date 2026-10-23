@@ -5,7 +5,6 @@
 //  充电页：充入电量（官方流水）+ 金额补录（截图识别 / 手工录入）
 //
 
-import Charts
 import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
@@ -13,11 +12,14 @@ import UniformTypeIdentifiers
 /// 充电页
 ///
 /// 与 `preview/index.html` 的充电页一一对应，卡片顺序与口径都保持一致：
-///   1. 附近充电站（实时、要定位）；
-///   2. **充入电量**：一张卡 = 月度大数（左电量 / 右当月与累计金额）+ 当月逐次图
-///      （柱=本次电量、折线=本次时长）+ 直/交流电量；
-///   3. 充电记录（逐笔）；
-///   4. 金额补录（金额只能靠截图识别 / 手工补录，**不显示估算数字**）。
+///   1. 统计月份（筛选器，在数据上面 —— 先选范围、再看数）；
+///   2. **充入电量**：一张卡 = 月度大数（左电量 / 右当月与累计金额）+ 直/交流电量；
+///   3. 附近充电站（实时、要定位）；
+///   4. 充电记录（逐笔）；
+///   5. 金额补录（金额只能靠截图识别 / 手工补录，**不显示估算数字**）。
+///
+/// ⚠️ 充入电量卡里**不再有逐次图**（柱=本次电量、折线=本次时长）：
+/// 下面的「充电记录」逐笔列了同样的信息，图在这里是重复的。
 struct ChargesView: View {
 
     @Environment(\.colorScheme) private var scheme
@@ -30,20 +32,36 @@ struct ChargesView: View {
     @State private var showManualEntry = false
     @State private var showPayments = false
 
+    /// 首次加载中（还没拿到任何月度汇总）。
+    ///
+    /// 提成计算属性是因为这个条件在 body 里要用两次（充入电量卡、记录列表），
+    /// 写两遍的话改一处忘一处就会出现"卡片转圈但列表已经在跑"的怪状态。
+    private var isFirstLoad: Bool {
+        model.isLoading && model.stat == nil
+    }
+
     var body: some View {
         NavigationStack {
             ScreenContainer(modeText: store.modeBadgeText) {
-                // 附近充电站与充入电量是**两块独立的数据**（前者实时、后者是本地历史），
-                // 所以它必须在空态判断**之外**渲染 —— 没充过电，不代表看不到
-                // "附近哪能充、现在多少钱"，而那恰恰是这一页最有用的信息。
-                //
-                // 未登录时不显示：服务端会拒绝 /api/stations，放出卡片只会
-                // 诱导用户点一个必然失败的按钮，那比不显示更糟。
-                if !store.needsLogin {
-                    NearbyStationsCard()
-                }
+                /* 顺序：**统计月份 → 充入电量 → 附近充电站 → 充电记录 → 金额补录**。
+                   筛选器在数据上面 —— 先选范围、再看数。
+                   充入电量是"我自己的历史"，附近站是"我现在能去哪" ——
+                   历史在前、实时在后，打开先看自己的账，再看附近可充的。
 
+                   附近站与充入电量是**两块独立的数据**（前者实时、后者是本地历史），
+                   所以它必须在充入电量的空态判断**之外**渲染 ——
+                   没充过电，不代表看不到"附近哪能充、现在多少钱"。
+
+                   未登录时不显示：服务端会拒绝 /api/stations，放出卡片只会
+                   诱导用户点一个必然失败的按钮，那比不显示更糟。 */
                 monthRow
+
+                if isFirstLoad {
+                    LoadingView(text: "正在读取充电流水")
+                        .padding(.top, 60)
+                } else {
+                    energyCard
+                }
 
                 if let errorMessage = model.errorMessage {
                     ErrorBanner(message: errorMessage) {
@@ -51,11 +69,11 @@ struct ChargesView: View {
                     }
                 }
 
-                if model.isLoading && model.stat == nil {
-                    LoadingView(text: "正在读取充电流水")
-                        .padding(.top, 60)
-                } else {
-                    energyCard
+                if !store.needsLogin {
+                    NearbyStationsCard()
+                }
+
+                if !isFirstLoad {
                     if !model.records.isEmpty {
                         recordList
                     }
@@ -191,13 +209,9 @@ struct ChargesView: View {
                 heroBlock(stat)
                 Divider().overlay(Theme.separator(scheme))
                 subBlock(stat)
-                if !sessionPoints.isEmpty {
-                    legendRow
-                    sessionChart
-                }
                 splitLine(stat)
             } else {
-                // 这个月没记录：逐次图没有可画的点，只留空态
+                // 这个月没记录：只留空态
                 emptyMonthBlock
             }
         }
@@ -329,135 +343,6 @@ struct ChargesView: View {
         )
     }
 
-    // MARK: - 当月逐次图
-
-    private var legendRow: some View {
-        HStack(spacing: 14) {
-            legendDot(ChineseColor.tianQing, "本次电量 · 度")
-            legendDot(ChineseColor.tengHuang, "本次时长 · 小时")
-            Spacer(minLength: 0)
-        }
-        .font(.system(size: 11))
-    }
-
-    private func legendDot(_ color: Color, _ text: String) -> some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(color)
-                .frame(width: 7, height: 7)
-            Text(text)
-                .foregroundStyle(Theme.textTertiary(scheme))
-        }
-    }
-
-    /// 柱 = 这一次充了多少度（左轴），折线 = 这一次充了多久（右轴）。
-    ///
-    /// 横轴是**所选月份里的每一次充电**（时间正序），跟着月份筛选走 ——
-    /// 这张卡讲的就是"这一个月"，摆一条全年趋势在下面只会让人怀疑看的是哪个月。
-    ///
-    /// Swift Charts 没有"每系列一套刻度"，所以时长按 `scale` 折算进电量的
-    /// 坐标空间，右轴刻度再反向折算回小时显示。峰值压在 ~74% 高度：
-    /// 柱顶的数值标注在 ~91%，两组数字才不会叠在一起。
-    private var sessionChart: some View {
-        let points = sessionPoints
-        let axisMax = niceMax(points.map { $0.kwh }.max() ?? 1)
-        let maxHours = max(points.compactMap { $0.hours }.max() ?? 0.1, 0.1)
-        let scale = (axisMax * 0.74) / maxHours
-
-        return Chart {
-            ForEach(points) { point in
-                BarMark(
-                    x: .value("日期", point.label),
-                    y: .value("电量", point.kwh)
-                )
-                .foregroundStyle(ChineseColor.tianQing)
-                .cornerRadius(3)
-            }
-
-            ForEach(points) { point in
-                if let hours = point.hours {
-                    LineMark(
-                        x: .value("日期", point.label),
-                        y: .value("时长", hours * scale),
-                        series: .value("系列", "时长")
-                    )
-                    .foregroundStyle(ChineseColor.tengHuang)
-                    .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round))
-                    .interpolationMethod(.monotone)
-
-                    PointMark(
-                        x: .value("日期", point.label),
-                        y: .value("时长", hours * scale)
-                    )
-                    .foregroundStyle(ChineseColor.tengHuang)
-                    .symbolSize(20)
-                }
-            }
-        }
-        .chartYScale(domain: 0...axisMax)
-        .chartLegend(.hidden)
-        .chartXAxis {
-            AxisMarks { _ in
-                AxisValueLabel()
-                    .font(.system(size: 9))
-                    .foregroundStyle(Theme.textTertiary(scheme))
-            }
-        }
-        .chartYAxis {
-            AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { _ in
-                AxisGridLine().foregroundStyle(Theme.separator(scheme))
-                AxisValueLabel()
-                    .font(.system(size: 9))
-                    .foregroundStyle(Theme.textTertiary(scheme))
-            }
-            AxisMarks(
-                position: .trailing,
-                values: [0.0, axisMax / 3.0, axisMax * 2.0 / 3.0, axisMax]
-            ) { value in
-                AxisValueLabel {
-                    if let raw = value.as(Double.self), scale > 0 {
-                        Text(String(format: "%.1f", raw / scale))
-                            .font(.system(size: 9))
-                            .foregroundStyle(ChineseColor.tengHuang)
-                    }
-                }
-            }
-        }
-        .frame(height: 176)
-    }
-
-    /// 时间正序（图要从左往右读）。标签 `10-09`；同一天充两次追加 `#2` ——
-    /// 重复标签在类目轴上会被当成同一个刻度，Swift Charts 会直接把两根柱子合并。
-    private var sessionPoints: [SessionPoint] {
-        var seen: [String: Int] = [:]
-
-        return model.records.reversed().map { record in
-            let stamp = record.startTime ?? ""
-            let base = stamp.count >= 10 ? String(stamp.dropFirst(5).prefix(5)) : stamp
-            let key = base.isEmpty ? "--" : base
-            let n = (seen[key] ?? 0) + 1
-            seen[key] = n
-
-            let minutes = record.durationMin ?? 0
-            return SessionPoint(
-                id: record.id,
-                label: n == 1 ? key : "\(key)#\(n)",
-                kwh: record.energyKwh ?? 0,
-                hours: minutes > 0 ? minutes / 60 : nil
-            )
-        }
-    }
-
-    /// 纵轴顶端取"好看的整数"再留 10% 余量：峰值 45 → 轴到 55，
-    /// 否则柱子几乎顶到框顶，几个月之间读不出差距。
-    private func niceMax(_ value: Double) -> Double {
-        let v = max(value, 1)
-        let exp = floor(log10(v))
-        let base = pow(10.0, exp)
-        let ratio = v / base
-        let step = ratio <= 1 ? 1.0 : (ratio <= 2 ? 2.0 : (ratio <= 5 ? 5.0 : 10.0))
-        return step * base * 1.1
-    }
 
     // MARK: - 充电记录
 
@@ -610,15 +495,6 @@ struct ChargesView: View {
         let m = total % 60
         return m == 0 ? "\(h) 小时" : "\(h) 小时 \(m) 分"
     }
-}
-
-/// 当月逐次图的一根柱子 / 一个点
-private struct SessionPoint: Identifiable {
-    var id: String
-    var label: String
-    var kwh: Double
-    /// 这一次充了多久（小时）；没有时长的记录为 nil，折线在那里断开
-    var hours: Double?
 }
 
 // MARK: - 单条充电流水
