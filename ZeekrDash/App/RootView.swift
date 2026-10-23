@@ -95,6 +95,15 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.18), value: NetworkActivity.shared.isBusy)
+        /* 充电结束的**全局**标记：监听不能只挂在充电页上 ——
+           切 tab 会销毁 ChargesView，用户充完电去看车况，那次同步就丢了，
+           而"当天已同步"又会拦住后续补同步，于是新流水要到第二天才出现。
+           这里只记一个待办（不联网），下次进充电页由 `load()` 消费。 */
+        .onChange(of: store.isCharging) { wasCharging, isCharging in
+            if wasCharging && !isCharging {
+                ChargeSyncStamp.markCharged()
+            }
+        }
         .alert(
             "已切换为模拟数据",
             isPresented: Binding(

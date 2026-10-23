@@ -388,7 +388,10 @@ struct ChargeProviderStat: Codable, Identifiable {
 /// 转 `Date` 再转回来会引入时区偏移，月份切分就对不上了。
 /// 界面只需要"哪天几点"，格式化交给 `ChargeSession` 自己的展示属性。
 struct ChargeSession: Codable, Identifiable {
-    var id: String { sessionId ?? UUID().uuidString }
+    /// ⚠️ 不要用 `UUID().uuidString` 兜底：`id` 每次求值都是新值，
+    /// SwiftUI 会认为"每帧都是另一行"，动画抖动、@State 丢失、分隔线恒真。
+    /// 用已有字段拼一个稳定键即可。
+    var id: String { sessionId ?? "\(startTime ?? "")|\(energyKwh ?? 0)" }
 
     var sessionId: String?
     var startTime: String?
@@ -632,11 +635,13 @@ struct NearbyStations: Codable {
 /// **不要用 0℃ 顶替**（0℃ 是具体气温，会被当成真的）。
 struct WeatherInfo: Codable {
     var available: Bool? = nil
-    /// 气温 ℃（整数）
-    var temperature: Int? = nil
+    /// 气温 ℃。用 `Double` 而不是 `Int`：上游文档是 number，
+    /// 一旦给 `22.5` 或字符串，`Int?` 会让**整个** `WeatherInfo` 解码失败
+    /// （连 available 一起丢），界面永远显示 `--`。
+    var temperature: Double? = nil
     /// 天气现象，如「多云」「小雨」
     var weather: String? = nil
-    var humidity: Int? = nil
+    var humidity: Double? = nil
     var windDirection: String? = nil
     var windPower: String? = nil
     /// 行政区，界面上不展示，排障时看
@@ -1103,7 +1108,14 @@ struct APIResponse<T: Codable>: Codable {
 // MARK: - 日期解析辅助
 
 extension JSONDecoder {
-    /// 支持多种日期格式的解码器（兼容 ISO8601 与常见变体）
+    /// 支持多种日期格式的解码器（兼容 ISO8601 与常见变体）。
+    ///
+    /// ⚠️ **每次访问都返回一个新实例** —— 这不是浪费，是必须的：
+    /// `JSONDecoder` 本身不是线程安全的，而 `APIClient` 会被多个并发请求共用。
+    /// 若把它存成 `let` 共享，两件事同时出错：
+    /// ① 解码器被并发 `decode` 撞车；② 它闭包里捕获的 `DateFormatter`
+    /// 同样不是线程安全的（内部有可变缓存）。
+    /// 因此 `APIClient` 必须在**每次解码时**现取一个，不能缓存。
     static var zeekr: JSONDecoder {
         let decoder = JSONDecoder()
         let iso = ISO8601DateFormatter()

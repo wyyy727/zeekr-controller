@@ -56,7 +56,15 @@ final class APIClient {
     var authToken: String = ""
 
     private let session: URLSession
-    private let decoder = JSONDecoder.zeekr
+
+    /// 解码器**按次现取**，不缓存。
+    ///
+    /// `JSONDecoder` 不是线程安全的，而本客户端会被多个请求并发使用
+    /// （车况轮询、天气、位置、充电站可以同时在飞）。缓存一个实例共享，
+    /// 等于让几个请求同时 `decode` 同一个对象 —— 行为未定义。
+    /// `JSONDecoder.zeekr` 每次访问都返回新实例（含它内部捕获的
+    /// `DateFormatter`，那也不是线程安全的），所以按次取就是安全的。
+    private func makeDecoder() -> JSONDecoder { .zeekr }
 
     private init() {
         let config = URLSessionConfiguration.default
@@ -237,7 +245,7 @@ final class APIClient {
         }
 
         do {
-            let wrapped = try decoder.decode(APIResponse<T>.self, from: data)
+            let wrapped = try makeDecoder().decode(APIResponse<T>.self, from: data)
             guard wrapped.success, let payload = wrapped.data else {
                 throw ApiError.server(message: wrapped.error ?? "服务端返回失败")
             }

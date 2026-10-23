@@ -20,7 +20,21 @@ struct NearbyStationsCard: View {
     @Environment(\.openURL) private var openURL
     @Environment(AppStore.self) private var store
 
-    @State private var model = NearbyStationsViewModel()
+    /// 附近站点模型由 `AppStore` 持有，**跨 tab 存活**。
+    ///
+    /// 为什么不放卡片自己的 `@State`：底部 Tab 是 `switch` 切页
+    /// （见 `RootView.activeScreen`），切走时整个 `ChargesView` 会被销毁 ——
+    /// 卡片里的 `@State` 模型随之消失，再切回来就得**重新定位一次**
+    /// （重新弹权限、重新等 GPS、重新拉一遍站）。用户抱怨的
+    /// "每次进充电页都重新定位"就是这么来的。
+    ///
+    /// 现在切回来看到的是上次的站，想换位置点「重新定位」即可。
+    ///
+    /// 用计算属性而不是存一份 `@State`：模型本体是 class 引用，
+    /// `model.sort = item` 这种写入照样生效；而读取 `model.xxx` 时
+    /// `@Observable` 的访问器会登记观察，视图该刷新还是会刷新。
+    private var model: NearbyStationsViewModel { store.nearbyStations }
+
     @State private var manualText = ""
     @State private var showManualField = false
     /// 卡片内的行内提示（如坐标格式不对），不占用全局 Toast

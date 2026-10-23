@@ -47,8 +47,13 @@ struct DashboardView: View {
                     emptyState
                 }
 
+                /* 重试必须**真的重新拉一次**。
+                   以前只是 `errorMessage = nil` —— 提示消失了，数据还是旧的，
+                   用户以为"好了"，其实什么都没变。 */
                 if let message = store.errorMessage, store.hasData {
-                    ErrorBanner(message: message, onRetry: { store.errorMessage = nil })
+                    ErrorBanner(message: message, onRetry: {
+                        Task { await store.refresh() }
+                    })
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -177,7 +182,8 @@ struct DashboardView: View {
                暴晒 / 地库时两者能差十几度，标成"车外温度"就是谎报。 */
             StatCard(title: "当地气温", icon: "thermometer.sun") {
                 StatValue(
-                    value: store.weather?.temperature.map { String($0) } ?? "--",
+                    // 保留一位小数：22.5℃ 就显示 22.5，取整会丢掉这半度。
+                    value: store.weather?.temperature.map { String(format: "%.1f", $0) } ?? "--",
                     unit: "°C"
                 )
             }

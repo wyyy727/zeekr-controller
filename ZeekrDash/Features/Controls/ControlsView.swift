@@ -36,8 +36,11 @@ struct ControlsView: View {
                     emptyState
                 }
 
+                /* 同车况页：重试要真的重新拉数据，不能只把提示清掉 */
                 if let message = store.errorMessage, store.hasData {
-                    ErrorBanner(message: message, onRetry: { store.errorMessage = nil })
+                    ErrorBanner(message: message, onRetry: {
+                        Task { await store.refresh() }
+                    })
                 }
             }
             .toolbar(.hidden, for: .navigationBar)

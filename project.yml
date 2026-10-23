@@ -21,7 +21,9 @@ options:
 
 settings:
   base:
-    SWIFT_VERSION: "5.9"
+    # 这里是**语言模式**，不是编译器版本：合法值是 4 / 4.2 / 5.0 / 6.0。
+    # 写 "5.9" 会让 swiftc 直接报 "SWIFT_VERSION '5.9' is unsupported"，整个 target 编不过。
+    SWIFT_VERSION: "5.0"
     DEVELOPMENT_TEAM: ""            # 填入你的 Apple ID Team ID（自签用）
     CODE_SIGN_STYLE: Automatic
     MARKETING_VERSION: "1.0.0"

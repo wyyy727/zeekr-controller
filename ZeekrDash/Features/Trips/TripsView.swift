@@ -40,7 +40,11 @@ struct TripsView: View {
 
                     // 有数据但期间失败过：横幅提示，而不是整页错误态
                     if let message = model.errorMessage {
-                        ErrorBanner(message: message, onRetry: { model.errorMessage = nil })
+                        /* 重试要**真的重新拉一次**。以前只是把提示清掉 ——
+                           提示没了、数据还是旧的，用户以为好了，其实什么都没变。 */
+                        ErrorBanner(message: message, onRetry: {
+                            Task { await model.load(days: model.selectedDays) }
+                        })
                     }
                 } else {
                     emptyState

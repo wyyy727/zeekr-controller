@@ -90,7 +90,9 @@ final class SettingsViewModel {
     private func refreshAuthStatus() async {
         do {
             let status: AuthStatus = try await APIClient.shared.get(APIRoutes.authStatus)
-            isAuthenticated = status.authenticated
+            /* 服务端自己处于 mock 态时没有真实账号可登（与 AppStore 的门禁同规则）。
+               只看 authenticated 会让设置页永远显示登录表单，点下去必然失败。 */
+            isAuthenticated = status.authenticated || status.mock == true
         } catch {
             isAuthenticated = false
         }

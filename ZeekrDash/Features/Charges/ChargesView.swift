@@ -66,14 +66,8 @@ struct ChargesView: View {
             // 下拉 = 现在就去拉一次（原生手势替代已移除的「同步」按钮）
             .refreshable { await model.refresh() }
         }
-        .overlay(alignment: .bottom) {
-            if let toast = model.toast {
-                ToastBubble(text: toast)
-                    .padding(.bottom, 110)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .animation(.easeInOut(duration: 0.25), value: model.toast)
+        // 提示不再在这里渲染 —— 统一走全局 Toast（RootView 呈现），
+        // 位置与其它页面一致（见 ChargesViewModel.showToast）。
         .task { await model.load() }
         /* 充电中 → 未充电：这是唯一会产生新充电流水的时刻。
            车况轮询间隔本来就跟着充电状态走（充电中 60 秒一次），跳变一定抓得到。 */

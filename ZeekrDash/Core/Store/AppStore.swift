@@ -102,6 +102,20 @@ final class AppStore {
     /// 那等于把「没登录」伪装成「网络故障」，还给用户看了一份假车况。
     var needsLogin = false
 
+    /// 附近充电站的视图模型。
+    ///
+    /// 为什么放在这里而不是让 `NearbyStationsCard` 自己 `@State` 一个：
+    /// 底部 Tab 是 `switch` 切页（见 `RootView.activeScreen`），切走时整个
+    /// `ChargesView` 会被销毁 —— 卡片里的 `@State` 模型随之消失，
+    /// 再切回来就得**重新定位一次**（重新弹权限、重新等 GPS、重新拉一遍站）。
+    /// 用户抱怨的"每次进充电页都重新定位"就是这么来的。
+    ///
+    /// 放在这里就跨 tab 存活了：切走再回来，看到的还是上次的站，
+    /// 想换位置点「重新定位」即可。
+    ///
+    /// 隐私：坐标只在内存里，登出时随 `needsLogin` 分支一起清掉（见下）。
+    var nearbyStations = NearbyStationsViewModel()
+
     /// 当前选中的底部 Tab。
     ///
     /// 放在这里而不是 RootView 的 `@State`，是为了让车况页的登录引导能直接
@@ -170,6 +184,8 @@ final class AppStore {
                 locationError = nil
                 // 气温是按定位查的，同属"车在哪"的衍生信息，换人登录不该沿用
                 weather = nil
+                // 附近站点带着用户的实时坐标 —— 同属位置隐私，换人登录必须清空
+                nearbyStations.clear()
                 // 充电流水的「同步于 XX:XX」也不该沿用上一位的时间，
                 // 而且不清会让"跨天才同步"误以为今天已经同步过了
                 ChargeSyncStamp.clear()
@@ -314,7 +330,11 @@ final class AppStore {
     /// 直接用本地模拟数据填充状态
     private func applyMockData() {
         vehicleStatus = MockData.vehicleStatus
-        lastRefresh = Date()
+        /* ⚠️ **不要**动 `lastRefresh`。
+           它的语义是"上次成功读到真实数据的时间"。这里填的是演示值，
+           一旦把时间戳也刷新成"刚刚"，界面就会显示
+           「更新于 刚刚」配一份编出来的电量/里程 —— 用户会当成自己车的实时值。
+           演示模式下宁可不显示更新时间，也不显示假的时间。 */
         dataMode = .mock
         // 权限包也一并给上 —— 否则模拟模式下设置页只能显示"尚未取到"，
         // 而这恰恰是网页预览里能看到的东西（两边演示要对得上）
@@ -334,9 +354,17 @@ final class AppStore {
     /// 真实地址不可达时的回落：切到模拟数据，并（每个地址只弹一次）告知用户
     private func fallbackToMock(reason: String?) {
         vehicleStatus = MockData.vehicleStatus
-        lastRefresh = Date()
+        /* 同样不动 `lastRefresh`：回落成模拟数据不代表读到了新东西。
+           保留上一次真实读取的时间，界面才说得清"这些数字是什么时候的"。 */
         dataMode = .offline
-        errorMessage = nil
+        /* ⚠️ 不要把 `errorMessage` 清空。
+           它是车况页/车控页那条 `ErrorBanner` 的唯一数据源 ——
+           清空等于"连接服务端失败"这个最常见的故障在页面上完全不留痕迹，
+           用户只看到一份演示数据，还以为是自己的车。
+           弹窗（`pendingDataSourceNotice`）只在首次回落时弹一次，
+           关掉之后页面必须还留着"这是模拟数据 + 为什么 + 可重试"。
+           这里给的是可重试的短文案；详细原因仍走弹窗。 */
+        errorMessage = "连接服务端失败，当前展示的是模拟数据"
 
         // 车况已经回落成模拟数据，位置必须一起回落。
         // 否则会出现"车况是假的、位置却是真的（而且是上一次的旧位置）"这种组合 ——
@@ -462,14 +490,19 @@ final class AppStore {
 
     // MARK: - 全局提示
 
-    /// 展示一条底部 Toast，2.2 秒后自动消失
+    /// 展示一条底部 Toast，2.4 秒后自动消失。
+    ///
+    /// **全 App 只有这一处 Toast**：以前充电页自己有一套（位置还不一样），
+    /// 同一个提示在两个位置飘，用户以为是两条消息。现在统一由 RootView 呈现，
+    /// 位置、动效、停留时长全都一致。
     func showToast(_ message: String) {
         toast = message
         toastTask?.cancel()
         toastTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 2_200_000_000)
+            try? await Task.sleep(nanoseconds: 2_400_000_000)
             guard !Task.isCancelled else { return }
-            self?.toast = nil
+            // 只有"仍然是这条消息"时才清除，避免误清掉更新后的那条
+            if self?.toast == message { self?.toast = nil }
         }
     }
 }

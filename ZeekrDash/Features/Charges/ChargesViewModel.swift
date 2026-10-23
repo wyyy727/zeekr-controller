@@ -24,7 +24,6 @@ final class ChargesViewModel {
     var isSyncing = false
     var isOcrBusy = false
     var errorMessage: String?
-    var toast: String?
 
     /// 截图识别是否可用。`nil` = 还没问过服务端（此时不显示任何降级提示）。
     var ocrConfigured: Bool?
@@ -146,10 +145,14 @@ final class ChargesViewModel {
              · 空库 —— 第一次打开必须填上，否则整页是空的；
              · 跨天 —— 上次同步不是今天（防"上次充电时 App 没开"漏数据）。
            同一天反复进页面不会再打网关：官方接口一次给两年全量，每次都拉纯属浪费。 */
-        if (!hasData || ChargeSyncStamp.isStale) && !autoSyncedThisRun {
+        if (!hasData || ChargeSyncStamp.isStale || ChargeSyncStamp.hasPendingCharge)
+            && !autoSyncedThisRun {
             autoSyncedThisRun = true
-            await sync(silent: true)
-            return
+            let synced = await sync(silent: true)
+            /* 成功时 sync 内部已经重新 load 过（会走完下面的读取），直接返回；
+               失败（429 冷却 / 401 / 网络抖动）**必须继续往下读本地库** ——
+               原来无条件 return，页面会显示"本月没有充电记录"，而库里其实有。 */
+            if synced { return }
         }
 
         await loadSessions(generation: generation)
@@ -159,6 +162,9 @@ final class ChargesViewModel {
 
     func select(month: String) async {
         selectedMonth = month
+        // 自增代次会让正在跑的 load() 提前退出，而它的 defer 因代次不等不会复位 ——
+        // 这里补一次，否则月份行永远显示"· 更新中"、首屏骨架永不消失。
+        isLoading = false
         loadGeneration += 1
         await loadSessions(generation: loadGeneration)
     }
@@ -199,22 +205,27 @@ final class ChargesViewModel {
     ///
     /// `silent` 用于自动触发（空库 / 跨天 / 充电结束）—— 那时用户没点任何东西，
     /// 成功失败都不该弹 toast。
-    func sync(silent: Bool = false) async {
-        guard !isSyncing else { return }
+    @discardableResult
+    func sync(silent: Bool = false) async -> Bool {
+        guard !isSyncing else { return false }
         isSyncing = true
         defer { isSyncing = false }
 
         if SettingsStore.shared.prefersMockData {
             if !silent { showToast("演示数据不落库，同步只在真实数据源下有意义") }
-            return
+            return false
         }
 
         do {
             let result: ChargeSyncResult = try await APIClient.shared.post(APIRoutes.chargeSync)
-            /* 只有**真的打到网关**才记时间。429（10 秒冷却）/ 401 / 网络失败都不记 ——
-               否则一次失败会被当成"今天已经同步过"，当天不再重试。 */
-            ChargeSyncStamp.mark()
-            lastSyncedAt = ChargeSyncStamp.last
+            /* 只有**真的打到网关**才记时间：429（10 秒冷却）/ 401 / 网络失败都不记，
+               否则一次失败会被当成"今天已经同步过"，当天不再重试。
+               服务端说 `persisted == false`（它自己处于 mock 态）同理不算 ——
+               否则切到真实数据源后当天不会再同步，充电页空一天。 */
+            if result.persisted != false {
+                ChargeSyncStamp.mark()
+                lastSyncedAt = ChargeSyncStamp.last
+            }
 
             if !silent {
                 if result.persisted == false {
@@ -227,13 +238,14 @@ final class ChargesViewModel {
             }
         } catch let error as ApiError {
             if !silent { showToast(error.errorDescription ?? "同步失败") }
-            return
+            return false
         } catch {
             if !silent { showToast("同步失败：\(error.localizedDescription)") }
-            return
+            return false
         }
 
         await load()
+        return true
     }
 
     /// 下拉刷新：等于"现在就去拉一次"（原生手势，界面上不占位置）。
@@ -406,20 +418,14 @@ final class ChargesViewModel {
 
     // MARK: - 提示
 
-    /// 当前 toast 的自动清除任务。连续提示时先取消上一个 ——
-    /// 否则先前那个 Task 到点会把**后一条**仍在展示的 toast 提前清掉
-    /// （表现为第二条只闪了不到 2.4 秒就消失）。
-    private var toastTask: Task<Void, Never>?
-
+    /// 提示交给全局 Toast（`AppStore.showToast`），由 RootView 统一呈现。
+    ///
+    /// 以前这里自己存了一份 `toast` 并在充电页 overlay 里渲染，
+    /// 位置（底部 110pt）与全局 Toast（底部导航胶囊上方）不一样 ——
+    /// 同一种提示在两个高度出现，用户会以为是两条消息。
+    /// 全 App 统一一处，位置、动效、时长才一致。
     func showToast(_ message: String) {
-        toast = message
-        toastTask?.cancel()
-        toastTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 2_400_000_000)
-            guard !Task.isCancelled else { return }
-            // 只有"仍然是这条消息"时才清除，避免误清掉更新后的那条
-            if self?.toast == message { self?.toast = nil }
-        }
+        AppStore.shared.showToast(message)
     }
 }
 
@@ -434,6 +440,12 @@ final class ChargesViewModel {
 enum ChargeSyncStamp {
 
     private static let key = "zk.chargeSyncAt"
+    /// 充电结束但还没同步过的标记。
+    ///
+    /// 为什么需要它：充电结束的监听挂在 `ChargesView` 上，而切 tab 会销毁这个视图 ——
+    /// 用户充完电去看车况，那次同步就丢了；而"当天已同步"又拦住了后续补同步。
+    /// 所以 RootView 全局记一个待办，下次进充电页由 `load()` 消费。
+    private static let pendingKey = "zk.chargeSyncPending"
 
     static var last: Date? {
         let stamp = UserDefaults.standard.double(forKey: key)
@@ -447,13 +459,26 @@ enum ChargeSyncStamp {
         return !Calendar.current.isDateInToday(last)
     }
 
+    /// 充电结束（`isCharging` true→false）：记一笔待办，下次进充电页补同步
+    static func markCharged() {
+        UserDefaults.standard.set(true, forKey: pendingKey)
+    }
+
+    /// 有没有"充完电还没同步"的待办
+    static var hasPendingCharge: Bool {
+        UserDefaults.standard.bool(forKey: pendingKey)
+    }
+
     static func mark() {
         UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: key)
+        // 同步成功 ⇒ 待办已消化
+        UserDefaults.standard.removeObject(forKey: pendingKey)
     }
 
     /// 退出登录时清掉：换个人登录不该沿用上一位的「同步于」，也会打乱跨天判断。
     static func clear() {
         UserDefaults.standard.removeObject(forKey: key)
+        UserDefaults.standard.removeObject(forKey: pendingKey)
     }
 }
 
