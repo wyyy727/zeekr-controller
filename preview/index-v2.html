@@ -6170,7 +6170,10 @@ async function authLogin() {
     await loadAuth();
     // 换了账号/刚登录：之前的"已加载"记录作废；只拉当前 tab 需要的数据
     clearLoadedKeys();
-    await ensureTabData(state.tab);
+    /* 登录成功后直接落到车况页（2026-10-25 用户要求）：
+       登录入口在设置页，登录完还停在设置页得自己再点一次底部导航。
+       goTab 内部会 render 并触发 ensureTabData('dash')，加载完再自己重绘。 */
+    goTab('dash');
   } catch (err) {
     toast('登录失败：' + err.message);
   } finally {
