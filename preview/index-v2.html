@@ -1798,7 +1798,8 @@ body {
 .v2-head { position: absolute; top: -36px; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; }
 /* 1877 行的 .v2-head 会覆盖单类选择器，这里用复合选择器保证右对齐 */
 .v2-head.v2-head--end { justify-content: flex-end; }
-.v2-updated { align-self: flex-end; font-size: 11px; font-weight: 500; color: #666F7E; line-height: 16px; }
+/* 与同行左侧的来源胶囊垂直居中齐平（跟行程/充电页 pill+月份胶囊的做法一致） */
+.v2-updated { align-self: center; font-size: 11px; font-weight: 500; color: #666F7E; line-height: 16px; }
 .v2-title { margin: 0; font-size: 28px; font-weight: 700; color: #1B2233; line-height: 34px; letter-spacing: -.4px; }
 .v2-pill-src {
   font-size: 11px; font-weight: 500; line-height: 14px; padding: 4px 8px;
@@ -4199,14 +4200,19 @@ function renderDashboard() {
   const wt = weatherTemp();
   const odo = s.odometerKm != null ? Number(s.odometerKm).toLocaleString('zh-CN') : null;
 
-  const upd = state.lastRefresh
-    ? `<div class="v2-head v2-head--end"><span class="v2-updated">更新于 ${esc(state.lastRefresh)}</span></div>`
+  /* 页头右侧只占一行：来源胶囊（仅非真实数据）与更新时间并排。
+     2026-10-25 修复：此前「模拟数据」胶囊另起 .v2-srcrow 一行，
+     未登录 / 连不上后端时页头下面多出一条 22px 空白带，首卡被顶到 98。 */
+  const srcPill = state.mode && state.mode !== 'live' ? v2SourcePill() : '';
+  const headRight = (srcPill || state.lastRefresh)
+    ? `<div class="v2-head v2-head--end"><div class="v2-head-r">${srcPill}${
+        state.lastRefresh ? `<span class="v2-updated">更新于 ${esc(state.lastRefresh)}</span>` : ''
+      }</div></div>`
     : "";
   return `
     <div class="v2-screen v2-dash">
-      ${upd}
+      ${headRight}
       ${staleBanner}
-      ${state.mode !== 'live' ? `<div class="v2-srcrow">${v2SourcePill()}</div>` : ''}
 
       <div class="v2-card v2-soc">
         ${v2Ring(s.soc ?? 0)}
