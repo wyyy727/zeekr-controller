@@ -1,0 +1,153 @@
+{
+ "action-ocr-scan.svg": {
+  "w": "14",
+  "h": "14",
+  "orig": [
+   "#FFF"
+  ]
+ },
+ "avatar-car.svg": {
+  "w": "48",
+  "h": "48",
+  "orig": [
+   "#FFF"
+  ]
+ },
+ "ctrl-charge-start.svg": {
+  "w": "28",
+  "h": "28",
+  "orig": []
+ },
+ "ctrl-climate.svg": {
+  "w": "28",
+  "h": "28",
+  "orig": []
+ },
+ "ctrl-defrost-front.svg": {
+  "w": "28",
+  "h": "28",
+  "orig": []
+ },
+ "ctrl-drive-mode.svg": {
+  "w": "28",
+  "h": "28",
+  "orig": []
+ },
+ "ctrl-find-car.svg": {
+  "w": "28",
+  "h": "28",
+  "orig": []
+ },
+ "ctrl-flash.svg": {
+  "w": "28",
+  "h": "28",
+  "orig": []
+ },
+ "ctrl-frunk.svg": {
+  "w": "28",
+  "h": "28",
+  "orig": []
+ },
+ "ctrl-home.svg": {
+  "w": "28",
+  "h": "28",
+  "orig": []
+ },
+ "ctrl-horn.svg": {
+  "w": "28",
+  "h": "28",
+  "orig": []
+ },
+ "ctrl-lock.svg": {
+  "w": "28",
+  "h": "28",
+  "orig": []
+ },
+ "ctrl-refresh.svg": {
+  "w": "28",
+  "h": "28",
+  "orig": []
+ },
+ "ctrl-seat-heat.svg": {
+  "w": "28",
+  "h": "28",
+  "orig": []
+ },
+ "ctrl-seat-vent.svg": {
+  "w": "28",
+  "h": "28",
+  "orig": []
+ },
+ "ctrl-sentry.svg": {
+  "w": "28",
+  "h": "28",
+  "orig": []
+ },
+ "ctrl-steering-heat.svg": {
+  "w": "28",
+  "h": "28",
+  "orig": []
+ },
+ "ctrl-sunroof.svg": {
+  "w": "28",
+  "h": "28",
+  "orig": []
+ },
+ "ctrl-trip-plan.svg": {
+  "w": "28",
+  "h": "28",
+  "orig": []
+ },
+ "ctrl-trunk.svg": {
+  "w": "28",
+  "h": "28",
+  "orig": []
+ },
+ "ctrl-window-close.svg": {
+  "w": "28",
+  "h": "28",
+  "orig": []
+ },
+ "sheet-handle.svg": {
+  "w": "358",
+  "h": "4",
+  "orig": []
+ },
+ "status-signal-battery.svg": {
+  "w": "44",
+  "h": "11",
+  "orig": []
+ },
+ "switch-track.svg": {
+  "w": "48",
+  "h": "28",
+  "orig": [
+   "#FFF"
+  ]
+ },
+ "tab-charging.svg": {
+  "w": "24",
+  "h": "24",
+  "orig": []
+ },
+ "tab-controls.svg": {
+  "w": "24",
+  "h": "24",
+  "orig": []
+ },
+ "tab-dashboard.svg": {
+  "w": "24",
+  "h": "24",
+  "orig": []
+ },
+ "tab-settings.svg": {
+  "w": "24",
+  "h": "24",
+  "orig": []
+ },
+ "tab-trips.svg": {
+  "w": "24",
+  "h": "24",
+  "orig": []
+ }
+}

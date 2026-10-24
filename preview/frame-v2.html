@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>ZeekrDash v2 · 390×844 预览</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: #DDE3EC;
+    display: flex; align-items: center; justify-content: center;
+    font-family: system-ui, -apple-system, "PingFang SC", sans-serif;
+  }
+  .phone {
+    width: 390px; height: 844px;
+    border-radius: 44px; overflow: hidden;
+    background: #fff;
+    box-shadow: 0 24px 60px rgba(20, 30, 45, .28), 0 2px 0 rgba(255,255,255,.6) inset;
+  }
+  .phone iframe { width: 390px; height: 844px; border: 0; display: block; }
+</style>
+</head>
+<body>
+  <div class="phone"><iframe id="f" title="ZeekrDash v2"></iframe></div>
+<script>
+  // 把外层 ?tab= 透传给 iframe，方便逐屏截图验收。
+  // ?h=<px> 可临时拉高手机壳，用来一次性截完整页（验收用，不影响 390×844 正常尺寸）。
+  const q = new URLSearchParams(location.search);
+  const h = Math.max(844, Number(q.get('h')) || 844);
+  q.delete('h');
+  document.querySelector('.phone').style.height = h + 'px';
+  const f = document.getElementById('f');
+  f.style.height = h + 'px';
+  f.src = 'index-v2.html' + (q.toString() ? '?' + q.toString() : '');
+</script>
+</body>
+</html>
