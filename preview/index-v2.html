@@ -1514,7 +1514,8 @@ canvas { display: block; width: 100%; }
   }
   .dbg-empty { text-align: center; color: var(--text-3); font-size: 12.5px; padding: 28px 0; }
 /* ── 设置屏（P5，按 Ardot 3:51 / 3:97 / 3:102 / 3:108 / 5:1 / 5:12） ── */
-.v2-set-hero { display: flex; align-items: center; gap: 14px; }
+/* 设置屏没有 .v2-screen 包裹，首卡靠这条上距与其它屏对齐到 64 */
+.v2-set-hero { margin-top: 8px; display: flex; align-items: center; gap: 14px; }
 .v2-set-ava { width: 48px; height: 48px; border-radius: 24px; background: #6742E8; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
 .v2-set-ava svg { width: 48px; height: 48px; display: block; color: #6742E8; }
 .v2-set-nm { font-size: 16px; font-weight: 600; color: #1B2233; line-height: 1.3; }
@@ -1716,7 +1717,9 @@ body {
 }
 
 /* ═══ §7 车况屏（数值取自 MCP batch_read 的 2:4 节点树） ═══ */
-.v2-screen { display: flex; flex-direction: column; gap: 16px; padding: 8px 0 24px; }
+/* position: relative 供 .v2-head 绝对定位；首卡从 .wrap 的 56 + 这里的 8 = 64 起，
+   与车况屏首卡同高 */
+.v2-screen { position: relative; display: flex; flex-direction: column; gap: 16px; padding: 8px 0 24px; }
 /* 车况屏例外：Content 2:11 gap=12 pad 8/16/16/16（设计稿唯一 gap12 的屏） */
 .v2-screen.v2-dash { gap: 12px; padding-bottom: 16px; }
 .v2-card {
@@ -1791,9 +1794,11 @@ body {
 
 /* 页面左上角不再放大标题：与底部导航选中项重复，纵向也白占一行。
    剩下的只有右侧的月份 / 数据来源胶囊，所以这一行变成右对齐的窄行。 */
-.v2-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; }
+/* 页头（月份胶囊 / 状态标签）脱离文档流上移到 32~64，首卡才能和车况屏一样从 64 起 */
+.v2-head { position: absolute; top: -36px; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; }
 /* 1877 行的 .v2-head 会覆盖单类选择器，这里用复合选择器保证右对齐 */
 .v2-head.v2-head--end { justify-content: flex-end; }
+.v2-updated { align-self: flex-end; font-size: 11px; font-weight: 500; color: #666F7E; line-height: 16px; }
 .v2-title { margin: 0; font-size: 28px; font-weight: 700; color: #1B2233; line-height: 34px; letter-spacing: -.4px; }
 .v2-pill-src {
   font-size: 11px; font-weight: 500; line-height: 14px; padding: 4px 8px;
@@ -1839,6 +1844,13 @@ body {
   backdrop-filter: blur(18px) saturate(180%); -webkit-backdrop-filter: blur(18px) saturate(180%);
   box-shadow: inset 0 1px 2px rgba(255,255,255,.60), 0 8px 24px rgba(74,87,120,.12); }
 .v2-chart-title { font-size: 14px; font-weight: 600; color: #1B2233; line-height: 20px; }
+.v2-chart-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.v2-leg { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 500; color: #666F7E; line-height: 14px; }
+/* 类名不能叫 .stat：v1 遗留的统计卡 .stat（第 518 行）会给它套 padding 13/14，
+   在 border-box 下把 8px 方块撑成 28x26 */
+.v2-leg i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; flex: 0 0 8px; }
+.v2-leg i.lg-d { background: linear-gradient(180deg, #FFD49A, #F99FB8); }
+.v2-leg i.lg-s { margin-left: 6px; background: linear-gradient(180deg, #B9A5FF, #8E7BFF); }
 .v2-chart-row { display: flex; gap: 8px; overflow: hidden; }
 .v2-yaxis { width: 30px; flex: 0 0 30px; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; }
 .v2-yaxis span { font-size: 10px; font-weight: 500; color: #666F7E; line-height: 13px; }
@@ -1848,20 +1860,28 @@ body {
 .v2-bars { display: flex; align-items: flex-end; gap: 30px; height: 132px; }
 .v2-bar { width: 26px; flex: 0 0 26px; height: 132px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; }
 .v2-bar .vt { font-size: 10px; font-weight: 500; color: #666F7E; line-height: 13px; height: 13px; }
-.v2-bar .b { width: 26px; border-radius: 4px; }
+.v2-bar .b { width: 26px; border-radius: 4px; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; }
+/* 拆分柱：动态在下（橙粉，沿用单柱配色）、静态在上（紫），见 v2BarBody() */
+.v2-bar .b.split { background: none; }
+.v2-bar .b.split .s-dyn { width: 100%; background: linear-gradient(180deg, #FFD49A, #F99FB8); }
+.v2-bar .b.split .s-stat { width: 100%; background: linear-gradient(180deg, #B9A5FF, #8E7BFF); }
 .v2-bar .b.mileage { background: linear-gradient(180deg, #7EDCEE, #B9A5FF); }
 .v2-bar .b.energy { background: linear-gradient(180deg, #FFD49A, #F99FB8); }
 .v2-xaxis { display: flex; }
 .v2-xaxis span { font-size: 11px; font-weight: 500; color: #666F7E; line-height: 16px; }
-/* 7 天：节距 56（柱 26 + 间距 30），标签宽 56 左对齐 */
-.v2-xaxis.d7 span { width: 56px; flex: 0 0 56px; text-align: left; }
+/* 7 天：节距 56（柱 26 + 间距 30）；标签与柱同宽同节距，居中于柱心 */
+.v2-xaxis.d7 { gap: 30px; }
+.v2-xaxis.d7 span { width: 26px; flex: 0 0 26px; text-align: center; }
 /* 30 天：柱等分、间距 3、无柱顶数值、高度 120 */
 .v2-bars.d30 { gap: 3px; height: 120px; }
 .v2-bars.d30 .v2-bar { width: auto; flex: 1 1 0; min-width: 0; height: 120px; }
 .v2-bars.d30 .v2-bar .b { width: 100%; }
 .v2-yaxis.d30 { height: 120px; }
-.v2-xaxis.d30 { gap: 6px; }
-.v2-xaxis.d30 span { flex: 1 1 0; text-align: center; }
+/* 30 天：每根柱一格，只有刻度位填字，居中于柱心 */
+.v2-xaxis.d30 { gap: 3px; }
+.v2-xaxis.d30 span { flex: 1 1 0; min-width: 0; text-align: center; white-space: nowrap; }
+.v2-chart-row.d30 { overflow: visible; }
+.v2-chart-scroll.d30 { overflow: visible; }
 
 /* §2 状态层 */
 .v2-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 16px; text-align: center; }
@@ -3992,9 +4012,9 @@ function v2MonthChip() {
   return `<button class="v2-month-chip" id="monthBtn">${esc(v2MonthLabel())}</button>`;
 }
 
-function v2Foot(extra) {
+function v2Foot(extra, withTime = true) {
   const rows = [];
-  if (state.lastRefresh) rows.push(`更新于 ${esc(state.lastRefresh)}`);
+  if (withTime && state.lastRefresh) rows.push(`更新于 ${esc(state.lastRefresh)}`);
   if (extra) rows.push(extra);
   rows.push('数据来自非官方接口，仅供参考');
   return `<div class="v2-foot">${rows.map((r) => `<div>${r}</div>`).join('')}</div>`;
@@ -4008,6 +4028,24 @@ function v2NiceMax(v) {
     if (m * mag >= v) return Math.round(m * mag * 100) / 100;
   }
   return 10 * mag;
+}
+
+/* 拆分柱：动态在下、静态在上；任一侧没有数据就退回单色柱。
+   静态段给 2px 最小高，否则 0.2 kWh 这种小值在 112px 绘图区里根本看不见；
+   动态段吃掉剩余高度，保证堆叠总高与「总额单柱」完全一致。 */
+function v2BarBody(p, h, cls) {
+  const d = p.d == null ? null : Number(p.d);
+  const s = p.s == null ? null : Number(p.s);
+  if (d == null || s == null || d + s <= 0) {
+    return `<div class="b ${cls}" style="height:${h}px"></div>`;
+  }
+  let hs = s > 0 ? Math.round((s / (d + s)) * h) : 0;
+  hs = s > 0 ? Math.max(2, Math.min(h - 1, hs)) : 0;
+  const hd = h - hs;
+  return `<div class="b split" style="height:${h}px">`
+    + (hs > 0 ? `<div class="s-stat" style="height:${hs}px"></div>` : "")
+    + (hd > 0 ? `<div class="s-dyn" style="height:${hd}px"></div>` : "")
+    + `</div>`;
 }
 
 function v2Chart(cfg) {
@@ -4027,29 +4065,32 @@ function v2Chart(cfg) {
       : (cfg.decimals ? v.toFixed(cfg.decimals) : String(Math.round(v)));
     return `<div class="v2-bar">
       ${d30 ? '' : `<span class="vt">${label}</span>`}
-      ${v == null ? '' : `<div class="b ${cfg.cls}" style="height:${h}px"></div>`}
+      ${v == null ? '' : `${v2BarBody(p, h, cfg.cls)}`}
     </div>`;
   }).join('');
 
   // 7 天：节距 56，横向可滚（最右一根被裁，提示可滑）
   // 30 天：等分、不滚，X 轴取 6 个刻度
+  // 30 天：每根柱一格，只在刻度位填字，标签中心才能落在柱心上
   const xLabels = d30
     ? (() => {
         const n = cfg.points.length;
         const step = Math.max(1, Math.round(n / 6));
-        return cfg.points.filter((_, k) => k % step === 0 && k < n - step / 2)
-          .map((p) => `<span>${p.label}</span>`).join('');
+        return cfg.points.map((p, k) => `<span>${k % step === 0 && k < n - step / 2 ? p.label : ""}</span>`).join("");
       })()
-    : cfg.points.map((p) => `<span>${p.label}</span>`).join('');
+    : cfg.points.map((p) => `<span>${p.label}</span>`).join("");
 
   const width = cfg.points.length * 56 + 46;   // 与规格「7×56+46 = 438」一致
 
   return `<div class="v2-chart-card">
-    <div class="v2-chart-title">${cfg.title}</div>
-    <div class="v2-chart-row">
+    <div class="v2-chart-head">
+      <span class="v2-chart-title">${cfg.title}</span>
+      ${cfg.points.some((q) => q.d != null) ? `<span class="v2-leg"><i class="lg-d"></i>动态<i class="lg-s"></i>静态</span>` : ""}
+    </div>
+    <div class="v2-chart-row${d30 ? " d30" : ""}">
       <div class="v2-yaxis${d30 ? ' d30' : ''}">${ticks.map((t) => `<span>${t}</span>`).join('')}</div>
       <div class="v2-plot">
-        <div class="v2-chart-scroll">
+        <div class="v2-chart-scroll${d30 ? " d30" : ""}">
           <div style="min-width:${d30 ? 0 : width}px">
             <div class="v2-bars${d30 ? ' d30' : ''}">${bars}</div>
             <div class="v2-xaxis ${d30 ? 'd30' : 'd7'}">${xLabels}</div>
@@ -4158,8 +4199,12 @@ function renderDashboard() {
   const wt = weatherTemp();
   const odo = s.odometerKm != null ? Number(s.odometerKm).toLocaleString('zh-CN') : null;
 
+  const upd = state.lastRefresh
+    ? `<div class="v2-head v2-head--end"><span class="v2-updated">更新于 ${esc(state.lastRefresh)}</span></div>`
+    : "";
   return `
     <div class="v2-screen v2-dash">
+      ${upd}
       ${staleBanner}
       ${state.mode !== 'live' ? `<div class="v2-srcrow">${v2SourcePill()}</div>` : ''}
 
@@ -4215,7 +4260,7 @@ function renderDashboard() {
       </div>
 
       ${v2LocCard()}
-      ${v2Foot('')}
+      ${v2Foot('', false)}
     </div>`;
 }
 
@@ -4340,7 +4385,12 @@ function renderTrips() {
       ? String(Number(String(p.date).slice(8, 10)))
       : `${Number(String(p.date).slice(5, 7))}/${Number(String(p.date).slice(8, 10))}`,
   }));
-  const ePoints = series.map((p) => ({ v: p.energyKwh, label: points[series.indexOf(p)].label }));
+  const ePoints = series.map((p) => ({
+    v: p.energyKwh,
+    d: p.dynamicKwh,
+    s: p.staticKwh,
+    label: points[series.indexOf(p)].label,
+  }));
 
   // 历史月份不渲染 7/30 段（§4.6）
   const distRow = `<div class="v2-dist">
@@ -4360,7 +4410,11 @@ function renderTrips() {
         </div>
         <div class="v2-sum-row">
           <div class="v2-sum-cell"><div class="k">动态电耗</div><div class="v">${fmt(month.dynamicEnergyKwh, 1)}<span class="u">kWh</span></div></div>
+          <div class="v2-sum-cell"><div class="k">静态电耗</div><div class="v">${fmt(month.staticEnergyKwh, 1)}<span class="u">kWh</span></div></div>
+        </div>
+        <div class="v2-sum-row">
           <div class="v2-sum-cell"><div class="k">平均动态电耗</div><div class="v">${fmt(month.avgDynamicConsumption, 1)}<span class="u">kWh/100km</span></div></div>
+          <div class="v2-sum-cell"><div class="k">平均电耗</div><div class="v">${fmt(month.avgConsumption, 1)}<span class="u">kWh/100km</span></div></div>
         </div>
       </div>
     </div>
