@@ -135,6 +135,8 @@ CREATE TABLE IF NOT EXISTS energy_daily (
     date        TEXT NOT NULL,          -- 2026-10-23（官方给 2026/10/23，落库前已归一）
     distance_km REAL NOT NULL DEFAULT 0,
     energy_kwh  REAL NOT NULL DEFAULT 0,-- 动态 + 静态（ecy 恒 0，不能用）
+    dynamic_kwh REAL,                   -- 行驶中耗电（官方 dynamicEcY）；NULL = 老数据没有拆分
+    static_kwh  REAL,                   -- 停车时空调/哨兵/待机（官方 staticEcY）；NULL = 没有拆分
     minutes     INTEGER NOT NULL DEFAULT 0,
     consumption REAL,                   -- energy/distance*100，距离为 0 时为 NULL
     updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -191,6 +193,24 @@ class Store:
     def _init_schema(self) -> None:
         with self._connect() as conn:
             conn.executescript(SCHEMA)
+            self._migrate_energy_split(conn)
+
+    @staticmethod
+    def _migrate_energy_split(conn: sqlite3.Connection) -> None:
+        # 给老库的 energy_daily 补上动态/静态两列。
+        #
+        # CREATE TABLE IF NOT EXISTS 对已存在的表是空操作，加列只能显式 ALTER；
+        # 新库走 SCHEMA 已带上两列，所以这里只有老库需要补。
+        # 两列允许 NULL：老数据只有合并值，拆分未知必须与「真的是 0」区分开，
+        # 前端见 null 就退回画合并柱。
+        for ddl in (
+            "ALTER TABLE energy_daily ADD COLUMN dynamic_kwh REAL",
+            "ALTER TABLE energy_daily ADD COLUMN static_kwh REAL",
+        ):
+            try:
+                conn.execute(ddl)
+            except sqlite3.OperationalError:
+                pass  # 列已存在
 
     # MARK: - 充电记录
 
@@ -793,12 +813,16 @@ class Store:
             if len(date) != 10 or date[4] != "-" or date[7] != "-":
                 logger.warning("跳过日期非法的日电耗行：%r", item.get("date"))
                 continue
+            dynamic = item.get("dynamicKwh")
+            static = item.get("staticKwh")
             rows.append(
                 (
                     vin,
                     date,
                     float(item.get("distanceKm") or 0),
                     float(item.get("energyKwh") or 0),
+                    None if dynamic is None else float(dynamic),
+                    None if static is None else float(static),
                     int(item.get("minutes") or 0),
                     item.get("consumption"),
                 )
@@ -811,11 +835,15 @@ class Store:
             conn.executemany(
                 """
                 INSERT INTO energy_daily
-                    (vin, date, distance_km, energy_kwh, minutes, consumption, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    (vin, date, distance_km, energy_kwh, dynamic_kwh, static_kwh,
+                     minutes, consumption, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(vin, date) DO UPDATE SET
                     distance_km = excluded.distance_km,
                     energy_kwh  = excluded.energy_kwh,
+                    -- 只拿到合并值的写入不许把已有拆分抹成 NULL
+                    dynamic_kwh = COALESCE(excluded.dynamic_kwh, energy_daily.dynamic_kwh),
+                    static_kwh  = COALESCE(excluded.static_kwh, energy_daily.static_kwh),
                     minutes     = excluded.minutes,
                     consumption = excluded.consumption,
                     updated_at  = CURRENT_TIMESTAMP
@@ -831,7 +859,8 @@ class Store:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT date, distance_km, energy_kwh, minutes, consumption
+                SELECT date, distance_km, energy_kwh, dynamic_kwh, static_kwh,
+                       minutes, consumption
                 FROM energy_daily
                 WHERE vin = ? AND date >= ?
                 ORDER BY date
@@ -844,6 +873,8 @@ class Store:
                 "date": row["date"],
                 "distanceKm": row["distance_km"],
                 "energyKwh": row["energy_kwh"],
+                "dynamicKwh": row["dynamic_kwh"],
+                "staticKwh": row["static_kwh"],
                 "minutes": row["minutes"],
                 "consumption": row["consumption"],
             }

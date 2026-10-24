@@ -90,15 +90,19 @@ def _energy_from_store(vin: str | None, days: int) -> dict | None:
 
     total_distance = round(sum(r["distanceKm"] for r in rows), 1)
     total_energy = round(sum(r["energyKwh"] for r in rows), 2)
+    split_rows = [r for r in rows if r.get("dynamicKwh") is not None]
+    total_dynamic = round(sum(r["dynamicKwh"] for r in split_rows), 2) if split_rows else None
+    total_static = round(sum(r["staticKwh"] for r in split_rows), 2) if split_rows else None
     return {
         "days": days,
         "startDate": rows[0]["date"],
         "endDate": rows[-1]["date"],
         "distanceKm": total_distance,
         "energyKwh": total_energy,
-        # 库里只存聚合结果，没有动态/静态拆分与充电次数：给 None，
-        # 前端 fmt() 会把 null 显示成「--」，不会崩。
-        "dynamicEnergyKwh": None,
+        # 动态/静态拆分只有新写入的行才有（老行该列是 NULL），
+        # 没有拆分行时给 null，前端 fmt() 显示「--」，不会崩。
+        "dynamicEnergyKwh": total_dynamic,
+        "staticEnergyKwh": total_static,
         "avgConsumption": round(total_energy / total_distance * 100, 1) if total_distance > 0 else None,
         "avgDynamicConsumption": None,
         "fastChargeCount": None,

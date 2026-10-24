@@ -1765,11 +1765,15 @@ class LiveZeekrClient(ZeekrClient):
         for index, raw_day in enumerate(xs):
             day = str(raw_day).zfill(2)
             distance = num(at(mileage_y, index))
-            energy = num(at(dynamic_y, index)) + num(at(static_y, index))
+            dynamic = num(at(dynamic_y, index))
+            static = num(at(static_y, index))
+            energy = dynamic + static
             series.append({
                 "date": f"{year:04d}-{month:02d}-{day}",
                 "distanceKm": round(distance, 1),
                 "energyKwh": round(energy, 2),
+                "dynamicKwh": round(dynamic, 2),
+                "staticKwh": round(static, 2),
                 "minutes": int(num(at(minutes_y, index))),
                 "consumption": round(energy / distance * 100, 1) if distance > 0 else None,
             })
@@ -1784,6 +1788,11 @@ class LiveZeekrClient(ZeekrClient):
             "distanceKm": round(distance_total, 1),
             "energyKwh": round(energy_total, 2),
             "dynamicEnergyKwh": round(num(data.get("dynamicEc")), 2),
+            "staticEnergyKwh": (
+                round(max(0.0, energy_total - num(data.get("dynamicEc"))), 2)
+                if data.get("dynamicEc") is not None
+                else None
+            ),
             # 月报没有直接给「总口径」均耗，自己算，保证 总÷里程 与卡片一致
             "avgConsumption": round(energy_total / distance_total * 100, 1) if distance_total > 0 else 0.0,
             "avgDynamicConsumption": round(num(data.get("dynamicAvgEc")), 1),
@@ -1865,12 +1874,17 @@ class LiveZeekrClient(ZeekrClient):
         series: list[dict[str, Any]] = []
         for index, raw_date in enumerate(xs):
             distance = num(at(mileage_y, index))
-            energy = num(at(dynamic_y, index)) + num(at(static_y, index))
+            dynamic = num(at(dynamic_y, index))
+            static = num(at(static_y, index))
+            energy = dynamic + static
             series.append({
                 # 服务端给的是 `2026/10/06`，统一成 `2026-10-06`，前端好排序与切片
                 "date": str(raw_date).replace("/", "-"),
                 "distanceKm": round(distance, 1),
                 "energyKwh": round(energy, 2),
+                # 拆分给前端画堆叠柱：dynamicKwh + staticKwh == energyKwh
+                "dynamicKwh": round(dynamic, 2),
+                "staticKwh": round(static, 2),
                 "minutes": int(num(at(minutes_y, index))),
                 "consumption": round(energy / distance * 100, 1) if distance > 0 else None,
             })
@@ -1883,6 +1897,15 @@ class LiveZeekrClient(ZeekrClient):
             "distanceKm": round(num(data.get("totalMileage")), 1),
             "energyKwh": round(num(data.get("electricityConsumed")), 2),
             "dynamicEnergyKwh": round(num(data.get("dynamicEc")), 2),
+            # 静态 = 总 - 动态；缺 dynamicEc 就算不出来，给 None（前端显示「--」）
+            "staticEnergyKwh": (
+                round(
+                    max(0.0, num(data.get("electricityConsumed")) - num(data.get("dynamicEc"))),
+                    2,
+                )
+                if data.get("dynamicEc") is not None and data.get("electricityConsumed") is not None
+                else None
+            ),
             # 官方两个口径：avgEc 含静态耗电，avgDynamicEc 只算行驶中（App 展示的是后者）
             "avgConsumption": round(num(data.get("avgEc")), 1),
             "avgDynamicConsumption": round(num(data.get("dynamicAvgEc")), 1),
