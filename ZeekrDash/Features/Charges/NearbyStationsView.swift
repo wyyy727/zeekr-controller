@@ -39,6 +39,8 @@ struct NearbyStationsCard: View {
     @State private var showManualField = false
     /// 卡片内的行内提示（如坐标格式不对），不占用全局 Toast
     @State private var hint: String?
+    /// 待确认的导航目标：点「导航到这里」只落到这里，确认后才真正离开 App
+    @State private var pendingNavigation: ChargingStation?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -53,6 +55,17 @@ struct NearbyStationsCard: View {
         .onChange(of: store.needsLogin) { _, needsLogin in
             // 登出后坐标与列表都不该留着 —— 位置是隐私，不跨会话留存
             if needsLogin { model.clear() }
+        }
+        // 跳外部地图 App 前先确认：列表里的「导航」按钮就在拇指落点附近，
+        // 误触会直接切走 App。文案与 HTML 预览保持一致。
+        .alert("用地图导航？", isPresented: Binding(
+            get: { pendingNavigation != nil },
+            set: { if !$0 { pendingNavigation = nil } }
+        ), presenting: pendingNavigation) { station in
+            Button("取消", role: .cancel) { }
+            Button("打开地图") { openNavigation(station) }
+        } message: { station in
+            Text("将打开地图 App 规划到「\(station.displayName)」的驾车路线，会离开 ZeekrDash。")
         }
     }
 
@@ -516,7 +529,7 @@ struct NearbyStationsCard: View {
                 periodRow(title: "该站点暂时取不到价格", value: "--", isCurrent: false)
             }
 
-            actionButton("导航到这里", filled: false) { openNavigation(station) }
+            actionButton("导航到这里", filled: false) { requestNavigation(station) }
         }
         .padding(.top, 4)
     }
@@ -622,6 +635,21 @@ struct NearbyStationsCard: View {
             guard !accepted, let webURL else { return }
             openURL(webURL)
         }
+    }
+
+    /// 点「导航到这里」只走这里：校验通过后落到 `pendingNavigation` 弹确认框，
+    /// 确认了才调 `openNavigation` 真正离开 App。校验失败直接给行内提示，不弹框。
+    private func requestNavigation(_ station: ChargingStation) {
+        guard let lat = station.lat, let lng = station.lng else {
+            hint = "该站点缺少坐标，无法导航"
+            return
+        }
+        guard (-90...90).contains(lat), (-180...180).contains(lng),
+              lat != 0, lng != 0 else {
+            hint = "该站点坐标异常，无法导航"
+            return
+        }
+        pendingNavigation = station
     }
 
     // MARK: - 小组件
