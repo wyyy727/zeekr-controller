@@ -6,6 +6,8 @@ import logging
 import re
 import time
 
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, HTTPException
 
 from ..adapters import get_client, is_mock
@@ -37,6 +39,73 @@ def _is_cache_fresh(vin: str | None, days: int) -> bool:
     if stamped is None:
         return False
     return (time.monotonic() - stamped) < TRIPS_CACHE_TTL_SEC
+
+
+# MARK: - 逐日电耗落库
+#
+# 官方日统计接口只允许回查 60 天（A010，见 live_client.get_daily_energy），
+# 不落库的话三个月前的逐日里程/电耗就永久丢了。策略：
+#   · 读路径（GET /trips/energy）回源成功后顺手写库，不需要额外操作；
+#   · POST /trips/energy/sync 用于首次安装后一次性补齐，或长期没开 App 时补洞；
+#   · 回源失败时用库里的数据兜底，离线也能看柱图。
+# mock 模式一律不写，避免演示数据污染真库。
+
+
+def _resolve_vin(client, vin: str | None) -> str:
+    """尽力拿到当前车架号：显式参数 > 客户端会话 > 空串。"""
+    if vin:
+        return vin
+    session = getattr(client, "_session", None) or {}
+    if isinstance(session, dict):
+        return str(session.get("active_vin") or "")
+    return ""
+
+
+def _persist_energy_daily(client, vin: str | None, data: dict | None) -> int:
+    """把日统计结果按 (vin, date) 幂等写入；任何失败都不影响本次返回。"""
+    if is_mock():
+        return 0
+    series = (data or {}).get("series") or []
+    target = _resolve_vin(client, vin)
+    if not series or not target:
+        return 0
+    from ..main import store
+
+    try:
+        return store.save_energy_daily(target, series)
+    except Exception:  # noqa: BLE001
+        logger.exception("日电耗落库失败（本次请求照常返回）")
+        return 0
+
+
+def _energy_from_store(vin: str | None, days: int) -> dict | None:
+    """用本地库拼一份和官方接口同形的结果，供回源失败时兜底。"""
+    if not vin:
+        return None
+    from ..main import store
+
+    rows = store.list_energy_daily(vin, days=days)
+    if not rows:
+        return None
+
+    total_distance = round(sum(r["distanceKm"] for r in rows), 1)
+    total_energy = round(sum(r["energyKwh"] for r in rows), 2)
+    return {
+        "days": days,
+        "startDate": rows[0]["date"],
+        "endDate": rows[-1]["date"],
+        "distanceKm": total_distance,
+        "energyKwh": total_energy,
+        # 库里只存聚合结果，没有动态/静态拆分与充电次数：给 None，
+        # 前端 fmt() 会把 null 显示成「--」，不会崩。
+        "dynamicEnergyKwh": None,
+        "avgConsumption": round(total_energy / total_distance * 100, 1) if total_distance > 0 else None,
+        "avgDynamicConsumption": None,
+        "fastChargeCount": None,
+        "slowChargeCount": None,
+        "series": rows,
+        "fromCache": True,
+    }
 
 
 @router.get("/trips")
@@ -124,9 +193,92 @@ async def get_daily_energy(
             vin=vin, days=days, scope=scope, year_month=yearMonth
         )
     except Exception as exc:  # noqa: BLE001
+        # 回源失败：库里有多天数据就先兜底（离线也能看柱图）；实在没有才报错。
+        cached = _energy_from_store(_resolve_vin(client, vin), days)
+        if cached:
+            logger.warning("能耗统计回源失败，改用本地库兜底：%s", exc.__class__.__name__)
+            return {"success": True, "data": cached, "cached": True}
         # 不回显原始异常：网关报文可能含令牌片段
         fail("获取能耗统计失败，请检查服务端日志与登录状态", exc)
 
+    # 回源成功：顺手落库，让 60 天窗口外的历史慢慢攒下来。
+    _persist_energy_daily(client, vin, data)
+    return {"success": True, "data": data}
+
+
+async def sync_energy_window(days: int = 60, vin: str | None = None) -> dict:
+    """把最近 N 天的逐日电耗补齐到本地库。
+
+    官方日统计单次最多 31 个自然日、只允许回查 60 天，所以按 31 天分批，
+    这里的 days 上限也就是 60。written 是写入或更新的行数 —— 重复调用
+    同一天是覆盖而不是累加（表主键是 vin + date）。
+
+    抽成模块级函数而不是只留在路由里，是为了让 core/scheduler.py 的保底
+    任务复用同一段逻辑，避免"HTTP 端点与定时任务各写一份"。参数或登录态
+    有问题抛 ValueError，上游失败仍走 fail()，由调用方决定怎么包装。
+    """
+    if not 1 <= days <= 60:
+        raise ValueError("days 取值范围为 1–60（官方日统计只允许回查 60 天）")
+
+    if is_mock():
+        return {"mode": "mock", "written": 0, "days": days, "batches": 0}
+
+    client = get_client()
+    target = _resolve_vin(client, vin)
+    if not target:
+        raise ValueError("未找到车辆 VIN，请先登录并选择车辆")
+
+    from ..main import store
+
+    # 从今天 23:59:59 往回数，每批最多 31 天
+    end = datetime.now().replace(hour=23, minute=59, second=59, microsecond=0)
+    remaining = days
+    written = 0
+    batches = 0
+    earliest: str | None = None
+
+    while remaining > 0:
+        span = min(remaining, 31)
+        start = (end - timedelta(days=span - 1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        try:
+            data = await client.get_daily_energy(
+                vin=target,
+                days=span,
+                start_ms=int(start.timestamp() * 1000),
+                end_ms=int(end.timestamp() * 1000),
+            )
+        except Exception as exc:  # noqa: BLE001
+            fail("补齐日电耗失败，请检查服务端日志与登录状态", exc)
+
+        rows = (data or {}).get("series") or []
+        written += store.save_energy_daily(target, rows)
+        batches += 1
+        if rows:
+            earliest = rows[0]["date"]
+
+        remaining -= span
+        # 下一批的终点 = 本批起点前一天 23:59:59
+        end = start - timedelta(seconds=1)
+
+    return {
+        "vin": target,
+        "days": days,
+        "batches": batches,
+        "written": written,
+        "earliest": earliest,
+        "latest": store.energy_daily_latest(target),
+    }
+
+
+@router.post("/trips/energy/sync")
+async def sync_energy_daily(days: int = 60, vin: str | None = None) -> dict:
+    """手动补齐端点：与后台保底任务共用 sync_energy_window。"""
+    try:
+        data = await sync_energy_window(days, vin)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"success": True, "data": data}
 
 

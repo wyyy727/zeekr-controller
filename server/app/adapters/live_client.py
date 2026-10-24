@@ -1648,6 +1648,8 @@ class LiveZeekrClient(ZeekrClient):
         days: int = 30,
         scope: str = "window",
         year_month: str | None = None,
+        start_ms: int | None = None,
+        end_ms: int | None = None,
     ) -> dict[str, Any]:
         """官方「行程与能耗」日统计。
 
@@ -1673,23 +1675,37 @@ class LiveZeekrClient(ZeekrClient):
         now_ms = int(time.time() * 1000)
         current_month = time.strftime("%Y-%m", time.localtime(now_ms / 1000))
 
-        if year_month and year_month not in ("currentMonth", "current") and year_month != current_month:
+        if start_ms is not None and end_ms is not None:
+            # 显式毫秒区间：增量同步要精确补「某一天」或「某一段」时走这条。
+            # 上限仍受 ENERGY_MAX_DAYS 约束（超了服务端报 A008；这里先挡掉，
+            # 让调用方拿到明确的错误码，而不是网关原文）。
+            start_ms = int(start_ms)
+            end_ms = int(end_ms)
+            span = (end_ms - start_ms) // 86_400_000 + 1
+            if span < 1 or span > ENERGY_MAX_DAYS:
+                raise ZeekrAPIError(
+                    "bad_window", f"start/end 需落在 1–{ENERGY_MAX_DAYS} 个自然日内"
+                )
+            days = int(span)
+        elif (
+            year_month
+            and year_month not in ("currentMonth", "current")
+            and year_month != current_month
+        ):
             # 历史月份：日统计接口只允许回查 60 天（A010），改用月度报告接口。
             return await self.get_month_energy(year_month=year_month, vin=target_vin)
-
-        if year_month or scope == "month":
+        elif year_month or scope == "month":
             # 「本月」= 当月 1 日 00:00 起 —— 官方 App 行程统计页用的就是这个区间，
             # 想和 App 的数字对上就必须用这个，而不是「近 N 天」。
             local = time.localtime(now_ms / 1000)
             start_ms = int(time.mktime((local.tm_year, local.tm_mon, 1, 0, 0, 0, 0, 0, -1)) * 1000)
             end_ms = now_ms
+            # 按实际区间反算天数：本月可能是 28/30/31 天，传进来的 days 不作数
+            days = max(1, min((end_ms - start_ms) // 86_400_000 + 1, ENERGY_MAX_DAYS))
         else:
             days = max(1, min(int(days), ENERGY_MAX_DAYS))
             start_ms = self._day_start_ms(now_ms) - (days - 1) * 86_400_000
             end_ms = now_ms
-
-        # 按实际区间反算天数：历史月可能是 28/30/31 天，传进来的 days 不作数
-        days = max(1, min((end_ms - start_ms) // 86_400_000 + 1, ENERGY_MAX_DAYS))
 
         payload = await self._request_gw3(
             "POST",

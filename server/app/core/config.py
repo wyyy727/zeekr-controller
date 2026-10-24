@@ -174,6 +174,21 @@ class AppConfig:
     poll_interval_idle: int = field(default_factory=lambda: _env_int("POLL_INTERVAL_IDLE", 300))
     poll_interval_charging: int = field(default_factory=lambda: _env_int("POLL_INTERVAL_CHARGING", 60))
 
+    # 日电耗保底同步（小时）。0 = 关闭。
+    #
+    # 为什么需要：逐日电耗原本只在"用户打开行程页"时回源落库（GET
+    # /api/trips/energy 成功后 upsert），连续几天不打开页面就攒不下数据。
+    # 官方日统计只允许回查 60 天，真丢的风险不高，但用户要的是"不用管也在攒"，
+    # 于是加一个进程内定时任务兜底。默认 6 小时一次，每次只打一个官方接口
+    # （7 天窗口落在单次 ≤31 天的限制内），写入是覆盖，重复跑没有副作用。
+    energy_sync_interval_hours: float = field(
+        default_factory=lambda: _env_float("ENERGY_SYNC_INTERVAL_HOURS", 6.0)
+    )
+    # 保底任务每次回看的自然日数（1–31，只用一批）。7 天足够覆盖"周五没打开、
+    # 周一才打开"这种间隔，又不会把单次请求拖慢。
+    energy_sync_days: int = field(default_factory=lambda: _env_int("ENERGY_SYNC_DAYS", 7))
+
+
     database: Path = field(default_factory=lambda: DATA_DIR / "zeekr.db")
 
     # ── 浩汉充电（第三方网关）─────────────────────────────────

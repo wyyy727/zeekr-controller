@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 from contextlib import asynccontextmanager
@@ -36,7 +37,26 @@ async def lifespan(app: FastAPI):
     logger.info("ZeekrDash 服务启动，端口 %s", config.port)
     if config.use_mock:
         logger.info("当前为模拟数据模式（未配置极氪账号或显式指定）")
+
+    # 日电耗保底同步：只在真实数据模式下启动（mock 没有真正的逐日电耗可拉）。
+    # 为什么需要：逐日电耗原本只在"用户打开行程页"时回源落库，连续几天不打开
+    # 页面就攒不下数据。详见 core/scheduler.py 的说明。
+    sync_task: asyncio.Task | None = None
+    if not config.use_mock and config.energy_sync_interval_hours > 0:
+        from .core.scheduler import energy_sync_loop
+
+        sync_task = asyncio.create_task(
+            energy_sync_loop(config.energy_sync_interval_hours, config.energy_sync_days)
+        )
+
     yield
+
+    if sync_task is not None:
+        sync_task.cancel()
+        try:
+            await sync_task
+        except asyncio.CancelledError:
+            pass
 
     # 释放 HTTP 连接
     from .adapters import get_client

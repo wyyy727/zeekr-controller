@@ -128,6 +128,19 @@ CREATE TABLE IF NOT EXISTS snapshots (
 );
 
 CREATE INDEX IF NOT EXISTS idx_snapshot_vin_time ON snapshots(vin, created_at DESC);
+-- 官方「行程统计」的逐日电耗。存在的意义是把 60 天窗口外的历史留下来：
+-- 日统计接口只允许回查 60 天（A010），不落库的话三个月前的逐日数据就永久没了。
+CREATE TABLE IF NOT EXISTS energy_daily (
+    vin         TEXT NOT NULL,
+    date        TEXT NOT NULL,          -- 2026-10-23（官方给 2026/10/23，落库前已归一）
+    distance_km REAL NOT NULL DEFAULT 0,
+    energy_kwh  REAL NOT NULL DEFAULT 0,-- 动态 + 静态（ecy 恒 0，不能用）
+    minutes     INTEGER NOT NULL DEFAULT 0,
+    consumption REAL,                   -- energy/distance*100，距离为 0 时为 NULL
+    updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (vin, date)
+);
+
 
 -- 逆地理编码结果缓存。坐标不变就不该重复向腾讯请求 ——
 -- 既省免费额度，也减少"车的位置被发给第三方"的次数（这是实打实的隐私收益）。
@@ -758,6 +771,92 @@ class Store:
             }
             for row in rows
         ]
+
+    # MARK: - 日电耗（官方「行程统计」逐日数据）
+
+    def save_energy_daily(self, vin: str, series: list[dict[str, Any]]) -> int:
+        """按 (vin, date) 幂等写入逐日电耗。
+
+        官方日统计的 X 轴只含「有数据的日期」，同一天重查会得到同样的值，
+        所以重复拉取必须覆盖而不是累加。
+
+        distance_km 为 0 的行也要写：实测 10-18 返回了 0 km，那是「车有上报但
+        当天没开」，与「完全没有记录」不是一回事，不能都当没数据。
+        """
+        if not series:
+            return 0
+
+        rows = []
+        for item in series:
+            date = str(item.get("date") or "").strip()
+            # 主键的一部分，格式错会污染整张表，宁可跳过
+            if len(date) != 10 or date[4] != "-" or date[7] != "-":
+                logger.warning("跳过日期非法的日电耗行：%r", item.get("date"))
+                continue
+            rows.append(
+                (
+                    vin,
+                    date,
+                    float(item.get("distanceKm") or 0),
+                    float(item.get("energyKwh") or 0),
+                    int(item.get("minutes") or 0),
+                    item.get("consumption"),
+                )
+            )
+
+        if not rows:
+            return 0
+
+        with self._connect() as conn:
+            conn.executemany(
+                """
+                INSERT INTO energy_daily
+                    (vin, date, distance_km, energy_kwh, minutes, consumption, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(vin, date) DO UPDATE SET
+                    distance_km = excluded.distance_km,
+                    energy_kwh  = excluded.energy_kwh,
+                    minutes     = excluded.minutes,
+                    consumption = excluded.consumption,
+                    updated_at  = CURRENT_TIMESTAMP
+                """,
+                rows,
+            )
+        return len(rows)
+
+    def list_energy_daily(self, vin: str, days: int = 30) -> list[dict[str, Any]]:
+        """读最近 N 天（含今天）的逐日电耗，按日期升序。"""
+        days = max(1, int(days))
+        cutoff = (datetime.now() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT date, distance_km, energy_kwh, minutes, consumption
+                FROM energy_daily
+                WHERE vin = ? AND date >= ?
+                ORDER BY date
+                """,
+                (vin, cutoff),
+            ).fetchall()
+
+        return [
+            {
+                "date": row["date"],
+                "distanceKm": row["distance_km"],
+                "energyKwh": row["energy_kwh"],
+                "minutes": row["minutes"],
+                "consumption": row["consumption"],
+            }
+            for row in rows
+        ]
+
+    def energy_daily_latest(self, vin: str) -> str | None:
+        """库里最新一天是哪天；没有数据返回 None。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT MAX(date) AS latest FROM energy_daily WHERE vin = ?", (vin,)
+            ).fetchone()
+        return row["latest"] if row and row["latest"] else None
 
     # MARK: - 状态快照
 
