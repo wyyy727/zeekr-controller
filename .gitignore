@@ -85,3 +85,8 @@ zeekr-dashboard-设计预览.html
 # 万一再出现，在 CMD 里手动删（需要 \\?\ 前缀绕过设备名）：
 #     del "\\?\<仓库根>\nul"
 nul
+
+# 服务端本地运行产物（日志、pid）：每台机器都会生成，内容含请求路径，不落库
+server/.server.log*
+server/.server.err.log
+server/.server.pid
