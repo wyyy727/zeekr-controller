@@ -20,6 +20,10 @@ struct RootView: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(AppStore.self) private var store
 
+    /// 进出前后台统一在这里处理。不能下放到页面：页面随 tab 重建，
+    /// 用户停在别的 tab 时车况页不在树里，它的监听根本不会触发。
+    @Environment(\.scenePhase) private var scenePhase
+
     /// 当前 Tab 由 AppStore 持有 —— 车况页的登录引导要能把用户送到「设置」页
     private var selectedTab: AppTab { store.selectedTab }
 
@@ -102,6 +106,18 @@ struct RootView: View {
         .onChange(of: store.isCharging) { wasCharging, isCharging in
             if wasCharging && !isCharging {
                 ChargeSyncStamp.markCharged()
+            }
+        }
+        /* 进出前后台：只有从 .background 回到 .active 才算「重新打开」，
+           .inactive（下拉通知中心 / 来电）之后回前台不补刷。 */
+        .onChange(of: scenePhase) { previous, phase in
+            switch phase {
+            case .active:
+                store.appDidBecomeActive(fromBackground: previous == .background)
+            case .background:
+                store.appDidEnterBackground()
+            default:
+                break
             }
         }
         .alert(

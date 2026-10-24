@@ -394,6 +394,35 @@ final class AppStore {
 
     // MARK: - 轮询
 
+    /// 回前台 / 进后台的统一入口（由 `RootView` 监听 scenePhase 调用）。
+    ///
+    /// 为什么不交给各页面自己监听：页面由 `RootView.activeScreen` 按
+    /// `selectedTab` 重建，停在别的 tab 时车况页根本不在视图树里，它的
+    /// scenePhase 监听不会触发 —— 于是 `stopPolling` 没执行、轮询任务还活着，
+    /// 切回车况时 `startPolling` 又被 `guard pollTask == nil` 挡掉，
+    /// 只能等下一个轮询点（充电中 60 秒 / 平时 5 分钟）才有新数据。
+    ///
+    /// - Parameter fromBackground: 只有**真正从后台回来**才补刷一次；
+    ///   `.inactive`（下拉通知中心 / 来电 / Face ID 解锁）不算，
+    ///   否则每次抬起屏幕都要多打两个请求。
+    func appDidBecomeActive(fromBackground: Bool) {
+        // 模拟数据模式下没有可查的后端，与 `startPolling` 保持同一条边界
+        guard !settings.prefersMockData else { return }
+        if pollTask == nil {
+            startPolling()          // 内部第一步就是 refresh，不必再补
+            return
+        }
+        if fromBackground {
+            // 轮询还活着（典型：停在别的 tab 时进的场）——
+            // startPolling 会被 guard 挡住，这里单独补一次
+            Task { [weak self] in await self?.refresh() }
+        }
+    }
+
+    func appDidEnterBackground() {
+        stopPolling()
+    }
+
     /// 启动轮询（App 进入前台时调用；重复调用安全）
     ///
     /// 模拟数据模式下没有可轮询的后端，直接不启动 —— 既省电，也避免

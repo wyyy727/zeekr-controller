@@ -14,7 +14,6 @@ struct DashboardView: View {
 
     @Environment(AppStore.self) private var store
     @Environment(\.colorScheme) private var scheme
-    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         // 页面标题与底部导航重复，已移除；顶部右上角为数据来源徽标
@@ -59,15 +58,9 @@ struct DashboardView: View {
             .toolbar(.hidden, for: .navigationBar)
             .refreshable { await store.refresh() }
         }
+        // 进后台停轮询、回前台补刷，统一由 RootView 处理（页面随 tab 重建，
+        // 自己监听在「不在这页」时会失效）。这里只管切回本页时把轮询接上。
         .onAppear { store.startPolling() }
-        .onChange(of: scenePhase) { _, phase in
-            // 后台停止轮询省电，回前台恢复
-            switch phase {
-            case .active: store.startPolling()
-            case .background: store.stopPolling()
-            default: break
-            }
-        }
     }
 
     // MARK: - 顶部：电量与续航
