@@ -167,6 +167,16 @@ class AppConfig:
     # 运行"，没有任何技术强制手段。
     api_token: str = field(default_factory=lambda: _env("API_TOKEN"))
 
+    # 允许的跨域来源，逗号分隔。**留空则放开 `*`**（保持 file:// 预览、远程
+    # 部署、iOS 原生三种既有用法不变）。收紧后只允许列出的来源。
+    # 为什么要能收紧：`*` 下任何网页都能读本服务的响应，与空令牌叠加就是
+    # 完全不设防；正经部署时应只允许自己那台预览页。
+    cors_origins: list[str] = field(
+        default_factory=lambda: [
+            item.strip() for item in _env("CORS_ORIGINS").split(",") if item.strip()
+        ]
+    )
+
     # 数据源：auto（配置齐全走真实接口，否则回落 mock）/ mock / live
     data_source: str = field(default_factory=lambda: _env("DATA_SOURCE", "auto"))
 

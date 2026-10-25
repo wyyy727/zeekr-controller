@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from ..adapters import get_client, is_mock
@@ -81,6 +81,14 @@ async def send_command(payload: CommandRequest) -> dict:
     安全约束：需在服务端配置 `ALLOW_COMMANDS=true` 才允许下发，
     默认关闭 —— 避免误操作。
     """
+    # 指令白名单先挡：参数不合法就该是 400，与车控开关是否打开无关。
+    # 适配器层（live / mock）同样会拒，但那是返回 success:false、HTTP 仍是 200，
+    # 错误只能从 message 里读；这里给出明确的 400，且不依赖某个适配器的实现。
+    from ..adapters.zeekr_signing import COMMAND_MAP
+
+    if payload.command not in COMMAND_MAP:
+        raise HTTPException(status_code=400, detail=f"不支持的指令：{payload.command}")
+
     if not config.allow_commands:
         return {
             "success": False,
@@ -163,7 +171,7 @@ async def get_command_result(
 
 
 @router.get("/snapshots")
-async def get_snapshots(vin: str, limit: int = 200) -> dict:
+async def get_snapshots(vin: str, limit: int = Query(200, ge=1, le=1000)) -> dict:
     """获取电量历史快照。"""
     from ..main import store
 

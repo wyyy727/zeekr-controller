@@ -1787,7 +1787,11 @@ class LiveZeekrClient(ZeekrClient):
             "endDate": f"{year}年{month:02d}月{calendar.monthrange(year, month)[1]:02d}日",
             "distanceKm": round(distance_total, 1),
             "energyKwh": round(energy_total, 2),
-            "dynamicEnergyKwh": round(num(data.get("dynamicEc")), 2),
+            "dynamicEnergyKwh": (
+                round(num(data.get("dynamicEc")), 2)
+                if data.get("dynamicEc") is not None
+                else None
+            ),
             "staticEnergyKwh": (
                 round(max(0.0, energy_total - num(data.get("dynamicEc"))), 2)
                 if data.get("dynamicEc") is not None
@@ -1894,9 +1898,23 @@ class LiveZeekrClient(ZeekrClient):
             "days": days,
             "startDate": data.get("startDate"),
             "endDate": data.get("endDate"),
-            "distanceKm": round(num(data.get("totalMileage")), 1),
-            "energyKwh": round(num(data.get("electricityConsumed")), 2),
-            "dynamicEnergyKwh": round(num(data.get("dynamicEc")), 2),
+            # 汇总字段区分「字段缺失」与「真的是 0」：官方没给这一项时返回
+            # None，前端显示「--」而不是假的 0 km / 0 kWh。
+            "distanceKm": (
+                round(num(data.get("totalMileage")), 1)
+                if data.get("totalMileage") is not None
+                else None
+            ),
+            "energyKwh": (
+                round(num(data.get("electricityConsumed")), 2)
+                if data.get("electricityConsumed") is not None
+                else None
+            ),
+            "dynamicEnergyKwh": (
+                round(num(data.get("dynamicEc")), 2)
+                if data.get("dynamicEc") is not None
+                else None
+            ),
             # 静态 = 总 - 动态；缺 dynamicEc 就算不出来，给 None（前端显示「--」）
             "staticEnergyKwh": (
                 round(

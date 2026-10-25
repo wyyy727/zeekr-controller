@@ -13,6 +13,10 @@ from fastapi import APIRouter, HTTPException
 from ..adapters import get_client, is_mock
 from . import fail
 
+
+class EnergyWindowError(ValueError):
+    """窗口或参数错误：文案可以安全回给前端（不含内部实现细节）。"""
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -222,7 +226,7 @@ async def sync_energy_window(days: int = 60, vin: str | None = None) -> dict:
     有问题抛 ValueError，上游失败仍走 fail()，由调用方决定怎么包装。
     """
     if not 1 <= days <= 60:
-        raise ValueError("days 取值范围为 1–60（官方日统计只允许回查 60 天）")
+        raise EnergyWindowError("days 取值范围为 1–60（官方日统计只允许回查 60 天）")
 
     if is_mock():
         return {"mode": "mock", "written": 0, "days": days, "batches": 0}
@@ -230,7 +234,7 @@ async def sync_energy_window(days: int = 60, vin: str | None = None) -> dict:
     client = get_client()
     target = _resolve_vin(client, vin)
     if not target:
-        raise ValueError("未找到车辆 VIN，请先登录并选择车辆")
+        raise EnergyWindowError("未找到车辆 VIN，请先登录并选择车辆")
 
     from ..main import store
 
@@ -281,8 +285,12 @@ async def sync_energy_daily(days: int = 60, vin: str | None = None) -> dict:
     """手动补齐端点：与后台保底任务共用 sync_energy_window。"""
     try:
         data = await sync_energy_window(days, vin)
-    except ValueError as exc:
+    except EnergyWindowError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        # 其他异常（网关超时、签名失败……）只回通用文案，细节进日志：
+        # str(exc) 可能带内网地址、令牌片段甚至 SQL。
+        fail("补齐逐日电耗失败，请检查服务端日志与登录状态", exc)
     return {"success": True, "data": data}
 
 

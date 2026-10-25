@@ -30,11 +30,30 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 store = Store(config.database)
 
+# 令牌为空时的信任范围：只认本机来源。
+# Uvicorn 在 0.0.0.0 上监听时，本机访问的 client.host 是 127.0.0.1
+# （IPv6 双栈下可能是 ::ffff:127.0.0.1）；TestClient 是 "testclient"。
+_LOOPBACK_CLIENTS = {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
+def _is_loopback_client(host: str) -> bool:
+    if not host:
+        return False
+    if host in _LOOPBACK_CLIENTS:
+        return True
+    return host.rsplit(":", 1)[-1] in _LOOPBACK_CLIENTS
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理。"""
     logger.info("ZeekrDash 服务启动，端口 %s", config.port)
+    if not config.api_token and config.host not in ("127.0.0.1", "localhost", "::1"):
+        logger.warning(
+            "监听 %s 且未设置 API_TOKEN：非本机来源的 /api/* 将被拒绝。"
+            "若要用真机 App 或远程访问，请在 .env 里设置 API_TOKEN 后重启。",
+            config.host,
+        )
     if config.use_mock:
         logger.info("当前为模拟数据模式（未配置极氪账号或显式指定）")
 
@@ -82,7 +101,9 @@ app = FastAPI(
 # credentials 即可，语义正确且不影响 iOS 原生请求。
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # 留空 = `*`（默认，兼容既有三种用法）；填了 CORS_ORIGINS 就只允许列出的来源。
+    # file:// 页面的 Origin 是字符串 "null"，必须显式加进去，否则本地预览会被拦。
+    allow_origins=(config.cors_origins + ["null"]) if config.cors_origins else ["*"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -122,6 +143,24 @@ async def enforce_api_token(request: Request, call_next):
                 status_code=401,
                 content={
                     "detail": "服务端已启用 API 令牌鉴权，请在 App「设置」中填写令牌"
+                },
+            )
+    elif path.startswith("/api/") and path != "/api/health":
+        # 令牌为空时的兜底：只信任本机来源。
+        # 为什么需要：API_TOKEN 留空是默认值、APP_HOST 默认 0.0.0.0 —— 也就是
+        # "默认配置下同一局域网内任何人都能 DELETE /api/charges/records 清库、
+        # POST /api/vehicle/command 解锁"。这里把空令牌的信任范围收回回环，
+        # 不改变本机联调（含 iOS 模拟器）的使用方式。
+        client_host = request.client.host if request.client else ""
+        if not _is_loopback_client(client_host):
+            return JSONResponse(
+                status_code=403,
+                headers={"access-control-allow-origin": "*"},
+                content={
+                    "detail": (
+                        "服务端未设置 API_TOKEN，只接受本机访问。"
+                        "若要在局域网内使用（如真机 App），请在 .env 里设置 API_TOKEN 后重启。"
+                    )
                 },
             )
 

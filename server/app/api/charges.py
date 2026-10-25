@@ -495,7 +495,18 @@ def _persist_payments(
 
         target = row.get("sessionId")
         if isinstance(target, str) and target:
-            store.link_payment(target, payment["paymentId"], "manual", "high")
+            try:
+                store.link_payment(target, payment["paymentId"], "manual", "high")
+            except KeyError:
+                # 前端指定的 sessionId 在库里不存在（另一台设备刚清过数据、
+                # 或重启后换了库）。这只是"这一笔没绑上"，不该让整批 500 ——
+                # 前面 save_payments 已经提交，500 会让客户端以为全失败。
+                logger.warning("截图指定的流水 %s 不存在，跳过该笔绑定", target)
+                unmatched += 1
+                store.set_payment_status(
+                    payment["paymentId"], "unmatched", "指定的充电流水已不存在"
+                )
+                continue
             linked += 1
             continue
 
@@ -621,6 +632,12 @@ async def ocr_receipt_debug(file: UploadFile = File(..., description="充电订�
     ⚠️ **只许本机调试**：这两样可能含 prompt 没拦住的 VIN / 手机号 / 完整订单号
     —— 不入库、不进日志、不进正式链路；正式入口永远是 `/receipts/ocr`。
     """
+    if not config.debug:
+        # 默认关闭：raw 里可能含 prompt 没拦住的 VIN / 手机号 / 完整订单号，
+        # 而这是唯一一个"原样回传模型输出"的入口。要评测识别质量时，
+        # 在 .env 里设 APP_DEBUG=true 重启即可。
+        raise HTTPException(status_code=404, detail="Not Found")
+
     result = await _read_and_ocr(file, include_raw=True)
     return {"success": True, "data": result}
 
