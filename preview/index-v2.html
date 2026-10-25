@@ -2461,7 +2461,6 @@ const state = {
   chargeSyncPending: false,  // 充电结束后已排队一次同步，别重复排
   chargeLoadError: false,   // 首屏读流水失败（显示错误态 + 重试，而不是永久骨架）
   chargeSyncing: false,
-  chargeLoading: false,
   /* ── 金额补录 ──
      官方只有电量没有金额，金额靠「截图识别（主线）/ 手工录入（零依赖）」补。
      三条约定：
@@ -2559,6 +2558,11 @@ const state = {
   /* 车况读取失败：与"本来就没数据"分开（否则用户以为车没连上） */
   statusError: '',
   chargeLoading: false,
+  /* 当前 state.charge 属于哪个月：标题跟的是 chargeMonth，数字跟的是 charge，
+     两者必须能对上，否则会出现「10 月的标题 + 9 月的数字」。 */
+  chargeYm: 'currentMonth',
+  /* 这个月读失败了（标题已切换、数字没拿到）：渲染时进「读不到」态，而不是拿旧数字充数 */
+  chargeYmFailed: null,
   energyLoading: false,
   /* 行程/能耗读取失败（与"本来就没有数据"是两回事，得分开显示） */
   energyError: '',
@@ -3110,8 +3114,12 @@ const MOCK = {
 const $ = (s) => document.querySelector(s);
 
 function fmt(v, d = 0, fallback = '--') {
-  if (v === null || v === undefined || Number.isNaN(v)) return fallback;
-  return Number(v).toFixed(d);
+  /* 判据用 Number.isFinite 而不是 Number.isNaN：后者对字符串恒 false，
+     于是 Number('--').toFixed() 会渲染出字面量 "NaN"；溢出成 Infinity 也一并挡掉。 */
+  if (v === null || v === undefined || v === '') return fallback;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return n.toFixed(d);
 }
 function fmtDist(km) {
   // 里程一律显示原始公里数 —— 不做「万」换算：15545 被压成「1.6 万」后
@@ -3211,12 +3219,37 @@ function dbgRecord(entry) {
   if (typeof renderDebugPanel === 'function') renderDebugPanel();
 }
 
-/* 给 <img> 这类无法携带请求头的标签用：服务端同时接受 ?token= 查询参数。
-   地图缩略图走这条路 —— 图片由后端代取，腾讯的 key 不会出现在前端。 */
-function authedUrl(path) {
-  const url = API_SOURCE + path;
-  if (!QUERY_TOKEN) return url;
-  return url + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(QUERY_TOKEN);
+/* 地图缩略图：<img> 不能带请求头，所以**不能**把令牌拼进 URL ——
+   那会留在浏览历史、Referer 与任何中间代理日志里。
+   改成先 fetch（带和 api() 同样的 Authorization 头）拿 blob，再挂 objectURL，
+   URL 里只有一个路径。令牌放在请求头里，不进地址栏。 */
+const AUTH_IMG_CACHE = new Map();   // path → objectURL；切 tab 回来不必重取
+function authImgTag(path, cls, alt) {
+  const cached = AUTH_IMG_CACHE.get(path);
+  return `<img class="${cls}" alt="${alt}" data-authsrc="${esc(path)}"${
+    cached ? ` src="${cached}"` : ' style="display:none"'}>`;
+}
+async function hydrateAuthImages() {
+  const imgs = document.querySelectorAll('img[data-authsrc]');
+  for (const el of imgs) {
+    const path = el.dataset.authsrc;
+    if (!path || el.dataset.authdone === '1') continue;
+    el.dataset.authdone = '1';
+    const cached = AUTH_IMG_CACHE.get(path);
+    if (cached) { el.src = cached; el.style.display = ''; continue; }
+    try {
+      const headers = {};
+      if (API_TOKEN) headers.Authorization = 'Bearer ' + API_TOKEN;
+      const res = await fetch(API_SOURCE + path, { headers });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const url = URL.createObjectURL(await res.blob());
+      AUTH_IMG_CACHE.set(path, url);
+      if (el.isConnected) { el.src = url; el.style.display = ''; }
+    } catch (e) {
+      console.warn('地图缩略图加载失败', e);
+      el.style.display = 'none';
+    }
+  }
 }
 
 /* ── 全局请求指示器 ──
@@ -3717,9 +3750,7 @@ function vehicleLocationCard() {
       </span>
     </div>
     ${showMap
-      ? `<img class="loc-map" alt="车辆位置地图"
-             src="${authedUrl('/api/vehicle/location/map.png?width=600&height=260&zoom=16')}"
-             onerror="this.style.display='none'">`
+      ? authImgTag('/api/vehicle/location/map.png?width=600&height=260&zoom=16', 'loc-map', '车辆位置地图')
       : ''}
     <div class="loc-addr">${title ? esc(title) : (loc.mapAvailable === true ? '地址暂时取不到' : '未配置地图服务')}</div>
     ${addr && addr.address && addr.recommend && addr.recommend !== addr.address
@@ -3979,7 +4010,7 @@ function v2LocCard() {
   }
 
   return `<div class="v2-card v2-loc">${head}
-    ${showMap ? `<img class="v2-loc-map" alt="车辆位置地图" src="${authedUrl('/api/vehicle/location/map.png?width=600&height=260&zoom=16')}" onerror="this.style.display='none'">` : ''}
+    ${showMap ? authImgTag('/api/vehicle/location/map.png?width=600&height=260&zoom=16', 'v2-loc-map', '车辆位置地图') : ''}
     <div class="v2-loc-addr${line ? '' : ' dim'}">${esc(mainText)}</div>
     ${sub ? `<div class="v2-loc-sub">${esc(sub)}</div>` : ''}
     <div class="v2-loc-tip">${esc(tip)}</div>
@@ -4103,7 +4134,10 @@ function v2Chart(cfg) {
 }
 
 function v2Ring(pct, size = 100, lw = 8) {
-  const v = Math.max(0, Math.min(100, Number(pct) || 0));
+  /* soc 缺失不能画成 0%：0% 是「电量耗尽」的正常读数，
+     「没读到」必须显示 --，否则用户会以为车趴窝了。 */
+  const known = pct !== null && pct !== undefined && Number.isFinite(Number(pct));
+  const v = known ? Math.max(0, Math.min(100, Number(pct))) : 0;
   const r = (size - lw) / 2;
   const c = 2 * Math.PI * r;
   const off = c * (1 - v / 100);
@@ -4117,11 +4151,11 @@ function v2Ring(pct, size = 100, lw = 8) {
         </linearGradient>
       </defs>
       <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="rgba(27,34,51,.05)" stroke-width="${lw}"/>
-      <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="url(#v2SocGrad)" stroke-width="${lw}"
+      ${known ? `<circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="url(#v2SocGrad)" stroke-width="${lw}"
               stroke-linecap="round" stroke-dasharray="${c.toFixed(2)}" stroke-dashoffset="${off.toFixed(2)}"
-              transform="rotate(-90 ${size / 2} ${size / 2})"/>
+              transform="rotate(-90 ${size / 2} ${size / 2})"/>` : ''}
     </svg>
-    <div class="v2-ring-txt"><b>${Math.round(v)}%</b></div>
+    <div class="v2-ring-txt"><b>${known ? Math.round(v) + '%' : '--'}</b></div>
   </div>`;
 }
 
@@ -4193,7 +4227,8 @@ function renderDashboard() {
   const metric = (k, v, u) => `<div class="v2-metric"><div class="k">${k}</div><div class="v">${v}${u ? `<span class="u">${u}</span>` : ''}</div></div>`;
 
   const tyre = (label, v) => {
-    const badV = v !== null && v !== undefined && (v < 240 || v > 320);
+    const nv = Number(v);
+    const badV = v !== null && v !== undefined && Number.isFinite(nv) && (nv < 240 || nv > 320);
     return `<div class="v2-tyre-col${badV ? ' warn' : ''}"><div class="k">${label}</div><div class="v">${fmt(v, 0)}</div></div>`;
   };
 
@@ -4215,10 +4250,10 @@ function renderDashboard() {
       ${staleBanner}
 
       <div class="v2-card v2-soc">
-        ${v2Ring(s.soc ?? 0)}
+        ${v2Ring(s.soc)}
         <div class="v2-soc-col">
           ${s.plateNo ? `<div class="v2-plate">${esc(s.plateNo)}</div>` : ''}
-          <div class="v2-kv">续航 ${s.rangeKm ? `<span>${Math.round(s.rangeKm)}</span><span class="u">km</span>` : '<span>--</span>'}</div>
+          <div class="v2-kv">续航 ${Number.isFinite(Number(s.rangeKm)) ? `<span>${Math.round(Number(s.rangeKm))}</span><span class="u">km</span>` : '<span>--</span>'}</div>
           <div class="v2-kv sub">总里程 ${odo ? `<span>${odo}</span><span class="u">km</span>` : '<span>--</span>'}</div>
         </div>
       </div>
@@ -4386,11 +4421,15 @@ function renderTrips() {
 
   const series = (windowStats && windowStats.series) || [];
   const days = state.days === 7 ? 7 : 30;
-  const points = series.map((p) => ({
-    v: p.distanceKm, label: days === 7
-      ? String(Number(String(p.date).slice(8, 10)))
-      : `${Number(String(p.date).slice(5, 7))}/${Number(String(p.date).slice(8, 10))}`,
-  }));
+  /* 日期缺失/格式不对时，别让 X 轴渲染出 "NaN/NaN"。 */
+  const dayLabel = (raw) => {
+    const t = String(raw || '');
+    const mo = Number(t.slice(5, 7));
+    const dd = Number(t.slice(8, 10));
+    if (!Number.isFinite(mo) || !Number.isFinite(dd) || !mo || !dd) return '';
+    return days === 7 ? String(dd) : `${mo}/${dd}`;
+  };
+  const points = series.map((p) => ({ v: p.distanceKm, label: dayLabel(p.date) }));
   const ePoints = series.map((p) => ({
     v: p.energyKwh,
     d: p.dynamicKwh,
@@ -4466,13 +4505,15 @@ function openMonthSheet(cfg) {
     }
   });
 
-  const years = Array.from(new Set(Object.keys(map).map((k) => Number(k.split('-')[0]))))
+  const years = Array.from(new Set(Object.keys(map)
+    .map((k) => Number(String(k).split('-')[0]))
+    .filter((y) => Number.isFinite(y) && y > 0)))
     .sort((a, b) => b - a);
 
   const currentKey = current === 'currentMonth'
     ? `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`
     : current;
-  let pickYear = Number(currentKey.split('-')[0]) || now.getFullYear();
+  let pickYear = Number(String(currentKey).split('-')[0]) || now.getFullYear();
 
   const body = () => {
     const yearRow = years
@@ -4603,13 +4644,20 @@ function renderCharges() {
         <button class="v2-month-chip" id="chargeMonthBtn">${esc(monthLabel)}</button></div>
     </div>`;
 
-  if (!c) {
-    const body = state.chargeLoading
+  /* 标题跟的是 chargeMonth，数字跟的是 state.charge —— 切月期间（请求在飞）
+     以及「该月读失败」时两者会对不上，不能让旧数字挂在新标题下。 */
+  const ymMismatch = !!c && !!state.chargeYm && state.chargeYm !== state.chargeMonth;
+  const ymFailed = !!c && state.chargeYmFailed === state.chargeMonth;
+
+  if (!c || ymMismatch || ymFailed) {
+    /* ymFailed：标题已是新月份、数字没拿到，显示「读不到」比显示别人的数字诚实。
+       ymMismatch：请求还在飞，先给骨架。 */
+    const body = (state.chargeLoading || (ymMismatch && !ymFailed))
       ? `<div class="v2-card"><div class="v2-cardhead"><span class="v2-card-t">本月充入电量</span><span class="v2-chip-mute">加载中</span></div>
            <div class="v2-skel-row" style="width:70%"></div>
            <div class="v2-skel-row" style="width:35%"></div>
            <div class="v2-skel-row" style="width:55%"></div></div>`
-      : state.chargeLoadError
+      : (state.chargeLoadError || ymFailed)
         ? `<div class="v2-card"><div class="v2-empty">
              <div class="t">充电流水没有读到</div>
              <div class="d">后端可能正在重启，或登录状态已失效</div>
@@ -4655,7 +4703,7 @@ function renderCharges() {
 
   const listCard = `<div class="v2-card">
       <div class="v2-cardhead"><span class="v2-card-t">充电记录</span></div>
-      <div class="v2-rec-list">${c.records.map(chargeSessionItem).join('')}</div>
+      <div class="v2-rec-list">${(Array.isArray(c.records) ? c.records : []).map(chargeSessionItem).join('')}</div>
     </div>`;
 
   return `<div class="v2-screen">${head}${sumCard}${nearby}${listCard}${costCard(c)}${v2Foot('')}</div>`;
@@ -4770,9 +4818,12 @@ function chargeSessionItem(r) {
   const kind = isDc ? '直流快充' : (isAc ? '交流慢充' : '充电');
   const station = r.stationName ? `${esc(r.stationName)}<span class="dot">·</span><span class="ty">${kind}</span>` : `<span class="ty">${kind}</span>`;
 
-  const power = (r.energyKwh && r.durationMin)
-    ? (r.energyKwh / (r.durationMin / 60))
+  /* durationMin 是分钟数：为 0 或非数字时这个除法会给出 Infinity / NaN，
+     直接 fmt 出来就是「均 Infinity kW」。 */
+  const rawPower = (r.energyKwh && r.durationMin)
+    ? (Number(r.energyKwh) / (Number(r.durationMin) / 60))
     : null;
+  const power = Number.isFinite(rawPower) && rawPower > 0 ? rawPower : null;
 
   const when = `${fmtTime(r.startTime)}${r.durationMin ? ' · ' + fmtDuration(r.durationMin) : ''}`;
   const chips = [
@@ -5586,7 +5637,7 @@ function nearbyStationsCard() {
         : (state.locError ? esc(state.locError) : '附近没有查到充电站。')}</div>
       <div class="st-actions">
         ${activeFilter
-          ? '<button class="st-btn" id="stFilterReset">清除筛选</button>'
+          ? '<button class="st-btn" data-streset="empty">清除筛选</button>'
           : '<button class="st-btn ghost" onclick="locate(true)">重新定位</button>'}
       </div>
     </div>`;
@@ -6191,7 +6242,14 @@ async function authLogout() {
     toast('已退出登录');
     // 退出后清掉已加载的数据 —— 否则页面上还留着上一位用户的车辆信息
     state.status = null; state.trips = []; state.trend = [];
-    state.charge = null; state.chargeMonths = []; state.chargeMonth = 'currentMonth'; state.health = null;
+    state.charge = null; state.chargeMonths = []; state.chargeMonth = 'currentMonth';
+    state.chargeYm = 'currentMonth'; state.chargeYmFailed = null; state.health = null;
+    /* 行程侧也有「月份筛选 / 天数切换 / 推荐位高亮 / 权限展开」这些展示态，
+       都是上一位用户点出来的，换人登录不该继承。 */
+    state.yearMonth = 'currentMonth'; state.energy = null; state.energyWindow = null;
+    state.energyError = ''; state.days = 7;
+    state.pickKey = 'self';
+    state.permExpanded = false;
     /* 补录的金额与核对中的截图同样是个人数据，退出即清 */
     state.payments = []; state.ocrRows = null; state.ocrPick = {}; state.ocrImageSha = '';
     state.chargeHasData = false;
@@ -6417,13 +6475,24 @@ function render() {
     return;
   }
 
-  const html = {
-    dash: renderDashboard,
-    trips: renderTrips,
-    charges: renderCharges,
-    ctrl: renderControls,
-    settings: renderSettings,
-  }[state.tab]();
+  /* 单个渲染器抛错会让整页白屏（view.innerHTML 根本不会被赋值），
+     比「少一块卡」严重得多：兜住异常，栈打到控制台，页面上给一条能看懂的提示。 */
+  let html = '';
+  try {
+    html = {
+      dash: renderDashboard,
+      trips: renderTrips,
+      charges: renderCharges,
+      ctrl: renderControls,
+      settings: renderSettings,
+    }[state.tab]();
+  } catch (e) {
+    console.error('渲染失败', state.tab, e);
+    html = `<div class="v2-card"><div class="v2-empty">
+      <div class="t">这一页没有渲染出来</div>
+      <div class="d">${esc((e && e.message) ? String(e.message) : '未知错误')}。刷新页面可以重试。</div>
+    </div></div>`;
+  }
 
   // 内层列表的滚动位置要在重建 DOM 前记下来。
   // 展开态的站点列表靠"滚到底"翻页，而翻页会 render() 一次 ——
@@ -6468,6 +6537,9 @@ function render() {
     }
     if (state.tab === 'charges') watchStationsSentinel();
   });
+
+  /* 地图缩略图：URL 里不带令牌，改成 fetch 带 Authorization 头取回再挂 objectURL */
+  hydrateAuthImages();
 }
 
 /* ═══════════════════════════════════════════════
@@ -6573,23 +6645,30 @@ async function loadTrips() {
      - 本月：汇总卡用「本月」，图表用「近 N 天」（默认 7 天，可切 30 天）
      - 历史月份：卡片与图表都只显示该月
      逐次行程明细（/api/trips）不请求：服务端没落库，回落模拟时会长出假行程。 */
-  const isCurrent = !state.yearMonth || state.yearMonth === 'currentMonth';
-  const monthQuery = isCurrent ? '' : '&yearMonth=' + encodeURIComponent(state.yearMonth);
+  /* 发请求时把月份记下来：快速连切月份时先发的可能后到，
+     直接赋值会把上个月的数字挂在新标题下（和 loadChargeSessions 同一个坑）。 */
+  const want = state.yearMonth || 'currentMonth';
+  const isCurrent = want === 'currentMonth';
+  const monthQuery = isCurrent ? '' : '&yearMonth=' + encodeURIComponent(want);
 
   state.energyLoading = true;
   state.energyError = '';
   try {
-    state.energy = await api('/api/trips/energy?scope=month' + monthQuery);
+    const monthData = await api('/api/trips/energy?scope=month' + monthQuery);
+    let windowData = monthData;
     if (isCurrent) {
       const energyDays = Math.min(state.days, 31);   // 官方上限 31 个自然日（A008）
-      state.energyWindow =
-        (await api('/api/trips/energy?days=' + energyDays).catch(() => null)) || state.energy;
-    } else {
-      state.energyWindow = state.energy;   // 历史月：图表就是这一个月
+      windowData = (await api('/api/trips/energy?days=' + energyDays).catch(() => null)) || monthData;
     }
+    /* 两次 await 之间用户可能又切了月份：这份结果已作废，
+       既不能写进 state，也不能把加载态当成结果。 */
+    if ((state.yearMonth || 'currentMonth') !== want) return null;
+    state.energy = monthData;
+    state.energyWindow = isCurrent ? windowData : monthData;   // 历史月：图表就是这一个月
     return true;
   } catch (e) {
     console.warn('能耗统计加载失败', e);
+    if ((state.yearMonth || 'currentMonth') !== want) return null;   // 作废的请求不该把页面标成失败
     state.energy = null;
     state.energyWindow = null;
     // 记下失败原因：界面要区分"没数据"和"没读到"
@@ -6659,14 +6738,18 @@ async function loadChargeSessions() {
   try {
     const q = want === 'currentMonth' ? '' : '?yearMonth=' + encodeURIComponent(want);
     const data = await api('/api/charges/sessions' + q);
-    if (state.chargeMonth !== want) return false;   // 期间又切了月份，这份结果作废
+    if (state.chargeMonth !== want) return null;   // 期间又切了月份：作废（既不写 state 也不弹 toast）
     state.charge = data;
+    state.chargeYm = want;              // 记下这份数据属于哪个月，渲染时与标题对齐
+    state.chargeYmFailed = null;
     state.chargeLoadError = false;
     return true;
   } catch (e) {
     console.warn('充电流水加载失败', e);
     // 从没成功读到过才标错误态（已有数据时保留旧数据，别把页面清空）
     if (!state.charge) state.chargeLoadError = true;
+    // 记下「这个月确实读失败了」：标题已经换成新月份，就不能再挂着旧月份的数字
+    state.chargeYmFailed = state.chargeMonth === want ? want : null;
     return false;
   }
 }
@@ -6750,6 +6833,9 @@ async function loadCharges() {
     return false;
   } finally {
     state.chargeLoading = false;
+    /* 必须在这里补一次 render：调用点（重试按钮）是 `render(); loadCharges();`，
+       不带 .then(render) —— 只清标志不重绘，页面会永远停在「加载中」骨架上。 */
+    render();
   }
 }
 
@@ -6981,21 +7067,28 @@ async function ensureTabData(tab, force = false) {
      但那是排在 render 之后的，等它们置位时这一帧已经画完了，
      首屏就会显示「尚未获取到车辆数据 / 请确认服务已启动」，明明后端是好的。 */
   state.loading = true;
-  if (keys.has('status')) state.statusLoading = true;
-  if (keys.has('charges')) state.chargeLoading = true;
-  if (keys.has('trips')) state.energyLoading = true;
+  /* 只给「本次真的要发」的 key 置加载态：已经在飞的那一份由它自己那批负责清，
+     这里置了却没人清，页面就会永远停在骨架屏。 */
+  if (keys.has('status') && !loadingKeys.has('status')) state.statusLoading = true;
+  if (keys.has('charges') && !loadingKeys.has('charges')) state.chargeLoading = true;
+  if (keys.has('trips') && !loadingKeys.has('trips')) state.energyLoading = true;
   render();
 
   const failed = new Set();
+  /* 本次真正发出请求的 key。被 loadingKeys 挡掉的那些（同一份数据在别处飞）
+     既不能算成功去清标志，也不能算失败去判离线 —— 否则一次抢先返回的空批次
+     就会把整页判成「后端挂了」。 */
+  const started = new Set();
   try {
     await Promise.all(todo.map(async (key) => {
       // 同一份数据正在加载就别重复打（快速来回切 tab 时会发生）
       if (loadingKeys.has(key)) return;
       loadingKeys.add(key);
+      started.add(key);
       try {
         const ok = await DATA_LOADERS[key]();
         if (ok === false) failed.add(key);
-        else loadedKeys.add(key);   // undefined 视为成功：该 loader 自己吞了异常
+        else if (ok !== null) loadedKeys.add(key);   // undefined 成功（loader 自己吞了异常）；null = 请求已作废
       } catch (e) {
         console.warn('加载失败', key, e);
         failed.add(key);
@@ -7006,14 +7099,15 @@ async function ensureTabData(tab, force = false) {
   } finally {
     state.loading = false;
     /* 兜住"未登录早退 / 抛错"的分支：早退时各 loader 根本没跑，
-       不清就会永远停在「正在读取…」。 */
-    state.statusLoading = false;
-    state.chargeLoading = false;
-    state.energyLoading = false;
+       不清就会永远停在「正在读取…」。只清本次真的置过位的标志 ——
+       否则会把「还在飞的那一次」的加载态一起抹掉，页面先空后错。 */
+    if (started.has('status')) state.statusLoading = false;
+    if (started.has('charges')) state.chargeLoading = false;
+    if (started.has('trips')) state.energyLoading = false;
 
     /* 只有这次真的问了"后端通不通"（车况那批），才做可达性判断 ——
        其它 tab 不碰 status/health，不该因为自己没问就判后端死了。 */
-    if (keys.has('status') || keys.has('health')) {
+    if (started.has('status') || started.has('health')) {
       if (failed.has('status') || failed.has('health')) {
         /* 有真数据时**不要**用演示数据覆盖：seedMock 会把车况/充电/行程/位置
            整套换成演示值，而它连金额和站名都有 —— 用户会把这些当成自己的账。
@@ -7112,8 +7206,9 @@ document.addEventListener('click', (e) => {
     toggleStationFilter(filterChip.dataset.f, filterChip.dataset.v);
     return;
   }
-  // 清除筛选（列表里和空态里各有一个同 id 按钮，行为一致）
-  if (e.target.closest('#stFilterReset')) {
+  // 清除筛选（列表里与空态里各一个按钮；空态那个用 data-streset 标记，
+  // 避免同一个 id 出现两次 —— 重复 id 是非法 HTML，DOM 查询也有歧义）
+  if (e.target.closest('#stFilterReset, [data-streset]')) {
     state.stationFilter = { connector: '', maxPrice: null, selfOnly: false, parkFree: false };
     loadStations().then(render);
     return;
