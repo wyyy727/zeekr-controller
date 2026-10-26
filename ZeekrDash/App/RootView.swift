@@ -32,20 +32,22 @@ struct RootView: View {
 
     /// 悬浮胶囊下沿距**屏幕底边**的留白。
     ///
-    /// 注意基准是屏幕底边，不是安全区上沿 —— `tabBar` 上挂了
+    /// 注意基准是屏幕底边，不是安全区上沿 —— `body` 里那层 `ZStack` 挂了
     /// `ignoresSafeArea(.container, edges: .bottom)`，让它越过 34pt 的系统
-    /// 安全区、直接贴住屏幕底部。这样在任何机型上都成立：没有底部安全区的
+    /// 安全区、一直铺到屏幕底部。这样在任何机型上都成立：没有底部安全区的
     /// 设备（Home 键机型）会退化成普通的 14pt 下边距，不会跑到屏幕外面去。
     private static let tabBarBottomGap: CGFloat = 14
 
-    /// Toast 距**安全区上沿**的间距（Toast 仍按安全区排版，不走 ignoresSafeArea）。
+    /// Toast 距**屏幕底边**的间距（与胶囊同一基准，见上）。
     ///
     /// 需紧贴底部导航胶囊上方，而不是让 Toast 落在内容区 ——
     /// 车控面板是车况页最后一张卡片，若 Toast 浮在屏幕中部偏下的位置，
     /// 滚到底部时两者会占据同一区域而互相遮挡。
     ///
-    /// 数值 = 胶囊上沿距屏幕底（下留白 14 + 胶囊 64 = 78）+ 间隙 8 − 系统安全区 34 = 52。
-    private static let toastBottomInset: CGFloat = 52
+    /// 数值 = 胶囊上沿距屏幕底（下留白 14 + 胶囊 64 = 78）+ 间隙 8 = 86。
+    /// 不再减系统安全区：外层 ZStack 已忽略底部安全区，Toast 与胶囊共用
+    /// 「屏幕底边」这一个基准。
+    private static let toastBottomInset: CGFloat = 86
 
     var body: some View {
         // 这里刻意**不使用** `GlassEffectContainer`。
@@ -83,6 +85,13 @@ struct RootView: View {
 
             tabBar
         }
+        // 整层越过底部安全区，一直铺到屏幕底边 —— 底部胶囊与 Toast 的定位基准
+        // 因此从「安全区上沿」变成「屏幕底边」。
+        //
+        // 为什么挂在这里而不是挂在 tabBar 上：tabBar 是内容自适应尺寸的视图，
+        // 它自己挂 ignoresSafeArea 只放开绘制边界、不会把视图往下挪，胶囊下方
+        // 仍会留下安全区那 34pt（实机量到约 40pt 空隙，正是本 bug）。
+        .ignoresSafeArea(.container, edges: .bottom)
         .tint(Theme.accent(scheme))
         // 全局请求指示条（对应网页顶部的 #netBar）。
         //
@@ -224,10 +233,9 @@ struct RootView: View {
         .padding(.vertical, 7)
         .glassEffect(.regular, in: .capsule)
         .padding(.horizontal, Self.tabBarSideInset)
-        // 两侧留 14pt，整体悬浮而非通栏；
-        // 再越过系统安全区，让胶囊真正贴近屏幕底边（详见 tabBarBottomGap）。
+        // 两侧留 14pt，整体悬浮而非通栏；底部 14pt 由外层 ZStack 的
+        // ignoresSafeArea 保证是「距屏幕底边」（详见 tabBarBottomGap）。
         .padding(.bottom, Self.tabBarBottomGap)
-        .ignoresSafeArea(.container, edges: .bottom)
     }
 
     private func tabItem(_ tab: AppTab) -> some View {
