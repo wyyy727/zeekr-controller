@@ -174,9 +174,13 @@ enum Metrics {
     /// 胶囊贴住屏幕底边后，自屏幕底边往上各段距离是：
     ///   下留白 14 → 胶囊 64（padding 7×2 + item minHeight 50）→ 胶囊上沿落在 78。
     /// 内容下边缘取「胶囊上沿 + 27」，与预览页的内容留白比例一致 → 105。
-    /// 其中系统安全区（约 34）由 `safeAreaBar` 自动叠加、卡片自带的
-    /// `.padding(.bottom, 24)` 也已计入，所以这里只写剩下的 47。
+    /// 卡片自带的 `.padding(.bottom, 24)` 已计入，所以这里写剩下的 81。
+    ///
+    /// **不再**减系统安全区：`RootView` 的 ZStack 已
+    /// `ignoresSafeArea(.container, edges: .bottom)`，ScrollView 的底部安全区
+    /// 因此是 0，`safeAreaBar` 不会再自动叠加那 34pt。先前这里是 47（47 + 34
+    /// 的自动叠加），一旦外层忽略安全区就会少留 34pt、最后一张卡片被胶囊压住。
     ///
     /// 若不预留，最后一张卡片（快捷车控）会永远停在胶囊后面滚不上来。
-    static let tabBarClearance: CGFloat = 47
+    static let tabBarClearance: CGFloat = 81
 }
