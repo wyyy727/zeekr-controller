@@ -51,6 +51,7 @@ struct SettingsView: View {
                     accountSection
                 }
 
+                webShellSection
                 diagnosticsSection
                 aboutSection
             }
@@ -377,6 +378,43 @@ struct SettingsView: View {
 
     private var canSendCode: Bool {
         !model.isSending && model.phone.count == 11 && model.phone.allSatisfy(\.isNumber)
+    }
+
+    // MARK: - Web 版界面（实验）
+
+    /// B 档验证入口：把网页版界面（preview/index-v2.html）用 WKWebView 整页嵌进来。
+    /// 与原生五屏是**并列**的两条路径，开关关闭时原生路径一个字节都不受影响。
+    private var webShellSection: some View {
+        SettingsCard(title: "Web 版界面（实验）") {
+            VStack(spacing: 8) {
+                Toggle(isOn: Bindable(settings).webShellEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("用网页版界面显示")
+                            .font(.system(size: 14))
+                            .foregroundStyle(Theme.textPrimary(scheme))
+                        Text("整页加载 preview/index-v2.html，视觉与动效和网页完全一致；网页改了不用重新打包")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.textTertiary(scheme))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .tint(Theme.accent(scheme))
+
+                if settings.webShellEnabled {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("需要电脑后端在线，且上面的地址填的是电脑局域网 IP（不是 127.0.0.1 —— 那在手机上指向手机自己）。")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.textTertiary(scheme))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("网页里点左上角「原生」可随时切回；定位在 http 页面会被系统拒绝，附近充电站需手动填坐标。")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.textTertiary(scheme))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
     }
 
     // MARK: - 车控

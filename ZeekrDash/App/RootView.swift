@@ -20,6 +20,9 @@ struct RootView: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(AppStore.self) private var store
 
+    /// B 档：打开后整个根视图换成 WKWebView（网页版界面），关闭时走下面的原生五屏
+    @Environment(SettingsStore.self) private var settings
+
     /// 进出前后台统一在这里处理。不能下放到页面：页面随 tab 重建，
     /// 用户停在别的 tab 时车况页不在树里，它的监听根本不会触发。
     @Environment(\.scenePhase) private var scenePhase
@@ -48,6 +51,17 @@ struct RootView: View {
     private static let toastBottomInset: CGFloat = 52
 
     var body: some View {
+        Group {
+            if settings.webShellEnabled {
+                WebShellView()
+            } else {
+                nativeBody
+            }
+        }
+    }
+
+    /// 原生五屏 —— Web 版界面关闭时的默认路径，行为与加入开关之前完全一致。
+    private var nativeBody: some View {
         // 这里刻意**不使用** `GlassEffectContainer`。
         //
         // 该容器会按「两个玻璃形状的距离小于 spacing」把它们合并成同一个形状。

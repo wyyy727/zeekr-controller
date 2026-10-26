@@ -18,6 +18,7 @@ final class SettingsStore {
         static let baseURL        = "settings.baseURL"
         static let commandsEnabled = "settings.commandsEnabled"
         static let apiToken       = "settings.apiToken"
+        static let webShellEnabled = "settings.webShellEnabled"
     }
 
     // MARK: - 服务端地址
@@ -64,6 +65,17 @@ final class SettingsStore {
         }
     }
 
+    // MARK: - Web 版界面（实验，默认关）
+
+    /// 打开后用 WKWebView 显示网页版界面（preview/index-v2.html），
+    /// 关闭时仍走原生五屏。默认关 —— 这条路径依赖电脑后端在线，
+    /// 不适合作为默认，只用于「看效果」与后续对比。
+    var webShellEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(webShellEnabled, forKey: Key.webShellEnabled)
+        }
+    }
+
     // MARK: - 极氪账号（预留，仅本地记录手机号）
 
     var zeekrPhone: String {
@@ -76,6 +88,7 @@ final class SettingsStore {
         baseURL = d.string(forKey: Key.baseURL) ?? APIClient.defaultBaseURL
         commandsEnabled = d.bool(forKey: Key.commandsEnabled)
         apiToken = d.string(forKey: Key.apiToken) ?? ""
+        webShellEnabled = d.bool(forKey: Key.webShellEnabled)
 
         APIClient.shared.baseURL = baseURL
         // didSet 在 init 期间不会触发，这里显式同步一次
