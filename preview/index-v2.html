@@ -229,7 +229,7 @@ body::before {
   position: fixed; inset: -10%;
   z-index: -1;
   pointer-events: none;
-  /* v2：光斑改由 .screen 按设计稿坐标绘制（300×300 @180,-60 等），
+  /* v2：光斑改由 .screen 按设计稿坐标绘制（300×300 @170,-70 等），
      这一层是 v1 的百分比定位版，已停用 —— 否则两层叠在一起永远对不上。 */
   display: none;
   background:
@@ -1631,22 +1631,29 @@ body { background: transparent; }
   border-radius: 44px;
   background: linear-gradient(180deg, #F7F8FC 0%, #EEF2FA 50%, #E8EEF7 100%);
 }
-.screen::before {                      /* 紫斑：300×300 @(180,-60)，车况帧是 @(170,-70) */
+/* BlobViolet 300×300 @(170,-70)。
+   注意 gradientTransform [[0.5,0,0.5],[0,0.5,0.5]] 在这个引擎里的语义是：
+   渐变圆心落在节点左上顶点，半径 = 边长（300px），而不是常见的「圆心居中、半径一半」。
+   两者差别极大 —— 按后者写会把紫色团缩小一半并挪错位置，白紫对比全糊掉。 */
+.screen::before {
   content: ''; position: absolute; pointer-events: none;
-  width: 300px; height: 300px; left: 180px; top: -60px;
-  background: radial-gradient(circle at 50% 50%,
+  width: 300px; height: 300px; left: 170px; top: -70px;
+  border-radius: 50%;        /* 设计稿是 ELLIPSE 节点，填充被椭圆裁边，左上角是弧不是方角 */
+  background: radial-gradient(circle 300px at 0 0,
     rgba(196,181,253,.40) 0%,
     rgba(196,181,253,.18) 55%,
     rgba(196,181,253,.04) 80%,
     rgba(196,181,253,0)   100%);
 }
-.screen::after {                       /* 青斑（左下）+ 珊瑚斑（右下）叠一层 */
+/* BlobCyan 260×260 @(-90,540)，同一语义。
+   BlobCoral（200×200 @(250,610) 粉橙团）已移除：它落在屏幕下三分之一，
+   每个页面底部都会糊一片暖色，跟「冷灰蓝底 + 玻璃」的基调打架。 */
+.screen::after {
   content: ''; position: absolute; inset: 0; pointer-events: none;
   background:
-    radial-gradient(circle 130px at 40px 670px,
-      rgba(165,232,245,.35) 0%, rgba(165,232,245,.157) 55%, rgba(165,232,245,.035) 80%, transparent 100%),
-    radial-gradient(circle 100px at 350px 710px,
-      rgba(255,211,220,.35) 0%, rgba(255,211,220,.157) 55%, rgba(255,211,220,.035) 80%, transparent 100%);
+    radial-gradient(circle 260px at 0 0,
+      rgba(165,232,245,.35) 0%, rgba(165,232,245,.157) 55%, rgba(165,232,245,.035) 80%, transparent 100%)
+      no-repeat -90px 540px / 260px 260px;
 }
 
 /* 字体：规格只用 Inter 六档 */
@@ -1840,10 +1847,20 @@ body {
 .v2-seg button.on { background: rgba(255,255,255,.95); color: #1B2233; font-weight: 600; box-shadow: 0 2px 6px rgba(74,87,120,.16); }
 
 /* 图表卡 */
-.v2-chart-card { display: flex; flex-direction: column; gap: 8px; padding: 16px; border-radius: 20px;
+.v2-chart-card { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 16px; border-radius: 20px;
   background: rgba(255,255,255,.55); border: 1px solid rgba(255,255,255,.90);
   backdrop-filter: blur(18px) saturate(180%); -webkit-backdrop-filter: blur(18px) saturate(180%);
   box-shadow: inset 0 1px 2px rgba(255,255,255,.60), 0 8px 24px rgba(74,87,120,.12); }
+/* 柱顶数值：7 天直接画在柱上，30 天缺口时点柱子弹出这一根的日期与读数 */
+.v2-chart-tip { position: absolute; z-index: 4; padding: 5px 9px; border-radius: 9px;
+  background: rgba(23,28,44,.90); color: #fff; font-size: 11px; font-weight: 500; line-height: 15px;
+  white-space: nowrap; pointer-events: none; box-shadow: 0 6px 16px rgba(15,23,41,.20); }
+.v2-chart-tip::after { content: ''; position: absolute; left: 50%; bottom: -3.5px; width: 7px; height: 7px;
+  margin-left: -3.5px; background: inherit; transform: rotate(45deg); border-radius: 1.5px; }
+/* 柱太高、气泡被钳到标题下方时，三角就不再指向柱顶了，藏掉 */
+.v2-chart-tip.tip-clamped::after { display: none; }
+.v2-bar[data-i] { cursor: pointer; }
+.v2-bar.is-sel .b { box-shadow: 0 0 0 2px rgba(103,66,232,.50); }
 .v2-chart-title { font-size: 14px; font-weight: 600; color: #1B2233; line-height: 20px; }
 .v2-chart-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .v2-leg { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 500; color: #666F7E; line-height: 14px; }
@@ -1866,23 +1883,47 @@ body {
 .v2-bar .b.split { background: none; }
 .v2-bar .b.split .s-dyn { width: 100%; background: linear-gradient(180deg, #FFD49A, #F99FB8); }
 .v2-bar .b.split .s-stat { width: 100%; background: linear-gradient(180deg, #B9A5FF, #8E7BFF); }
+/* 缺数据的那天：画一根虚线空槽，而不是什么都不画 —— 否则图表会「跳日」，
+   看着像中间几天不存在。真 0 值走的是 2px 渐变最小柱，两者必须能区分。 */
+.v2-bar .b.ph { height: 8px; background: rgba(27,34,51,.035); border: 1px dashed rgba(27,34,51,.2); border-radius: 4px; }
 .v2-bar .b.mileage { background: linear-gradient(180deg, #7EDCEE, #B9A5FF); }
 .v2-bar .b.energy { background: linear-gradient(180deg, #FFD49A, #F99FB8); }
+/* 首次进入行程页：柱状图生长入场。
+   只有 renderTrips 判定为「本屏首次真正画出数据」时才给 .v2-chart-card 加 .anim，
+   因为 render() 是整体 innerHTML 替换，光靠 CSS 会在每次重绘时重播。
+   --d 由每根柱的内联变量给（错峰），--base 由整张图给（第二张延后一点）。 */
+@keyframes v2BarGrow { from { height: 0; } }
+@keyframes v2BarIn   { from { opacity: 0; } }
+.v2-chart-card.anim .v2-bar .b {
+  animation: v2BarGrow 520ms cubic-bezier(.22,.61,.36,1) backwards;
+  animation-delay: calc(var(--d, 0ms) + var(--base, 0ms));
+}
+.v2-chart-card.anim .v2-bar .vt {
+  animation: v2BarIn 360ms ease-out backwards;
+  animation-delay: calc(var(--d, 0ms) + var(--base, 0ms) + 120ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  .v2-chart-card.anim .v2-bar .b,
+  .v2-chart-card.anim .v2-bar .vt { animation: none; }
+}
 .v2-xaxis { display: flex; }
 .v2-xaxis span { font-size: 11px; font-weight: 500; color: #666F7E; line-height: 16px; }
 /* 7 天：节距 56（柱 26 + 间距 30）；标签与柱同宽同节距，居中于柱心 */
 .v2-xaxis.d7 { gap: 30px; }
 .v2-xaxis.d7 span { width: 26px; flex: 0 0 26px; text-align: center; }
 /* 30 天：柱等分、间距 3、无柱顶数值、高度 120 */
-.v2-bars.d30 { gap: 3px; height: 120px; }
-.v2-bars.d30 .v2-bar { width: auto; flex: 1 1 0; min-width: 0; height: 120px; }
-.v2-bars.d30 .v2-bar .b { width: 100%; }
+/* 30 天不再等分铺满：等分后一根只有 6.6px，挤成一团又不能滑。改成固定节距 28（柱 16 + 缝 12），
+   整月 30 根 = 828px，横向可滑，一屏约 10 根。 */
+.v2-bars.d30 { gap: 12px; height: 120px; }
+.v2-bars.d30 .v2-bar { width: 20px; flex: 0 0 20px; height: 120px; }
+.v2-bars.d30 .v2-bar .b { width: 20px; }
 .v2-yaxis.d30 { height: 120px; }
 /* 30 天：每根柱一格，只有刻度位填字，居中于柱心 */
-.v2-xaxis.d30 { gap: 3px; }
-.v2-xaxis.d30 span { flex: 1 1 0; min-width: 0; text-align: center; white-space: nowrap; }
+.v2-xaxis.d30 { gap: 12px; }
+.v2-xaxis.d30 span { width: 20px; flex: 0 0 20px; text-align: center; white-space: nowrap; }
 .v2-chart-row.d30 { overflow: visible; }
-.v2-chart-scroll.d30 { overflow: visible; }
+/* 30 天也走横向滚动（原来 overflow:visible 锁死了不可滑） */
+.v2-chart-scroll.d30 { overflow-x: auto; overflow-y: hidden; }
 
 /* §2 状态层 */
 .v2-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 16px; text-align: center; }
@@ -2437,6 +2478,8 @@ const state = {
      - energyWindow : 近 N 天     → 下方两张每日图表（默认 7 天，可切 30 天） */
   energy: null,
   energyWindow: null,
+  tripsChartAnim: false,          // 行程两张图表是否已播过入场动画（本屏首次）
+  chartSel: -1,                   // 图表里当前选中的柱索引（-1 = 没选）；render 会重建 DOM，每次复位
   /* 可选月份（官方 mileageBaseInfo.existingMonth）与当前选中项
      'currentMonth' = 本月；其余形如 '2026-09' */
   months: [],
@@ -2649,17 +2692,26 @@ function mockEnergy(n) {
     // 7 天沿用设计稿里的那组数；30 天用确定性伪随机，避免 7 个值循环出花纹
     const jitter = (k) => { const x = Math.sin(k * 12.9898) * 43758.5453; return x - Math.floor(x); };
     const dist = n === 30 ? +(9 + jitter(i + 1) * 47).toFixed(1) : base[(n - 1 - i) % base.length];
+    const kwh = +(dist * 0.2).toFixed(2);
+    /* 演示数据也给动态/静态拆分（真实接口是 dynamicEcY / staticEcY 两条序列）。
+       静态占每度电的 8%~14%，随天微抖 —— 否则 30 天图里第二色会是一条死板的平行条。 */
+    const dyn = +(kwh * (0.92 - jitter(i + 7) * 0.06)).toFixed(2);
     series.push({
       date: `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`,
       distanceKm: dist,
-      energyKwh: +(dist * 0.2).toFixed(2),
+      energyKwh: kwh,
+      dynamicKwh: dyn,
+      staticKwh: +(kwh - dyn).toFixed(2),
       minutes: Math.round(dist * 1.35),
       consumption: 20.0,
     });
   }
   const totalKm = series.reduce((a, x) => a + x.distanceKm, 0);
   const totalKwh = series.reduce((a, x) => a + x.energyKwh, 0);
-  const dynamicKwh = +(totalKwh * 0.9).toFixed(2);
+  /* 汇总由逐日拆分相加得出，而不是再按固定比例算一遍 ——
+     否则卡片上「动态 + 静态 ≠ 总电耗」，也会和下面两张图对不上。 */
+  const dynamicKwh = +series.reduce((a, x) => a + x.dynamicKwh, 0).toFixed(2);
+  const staticKwh = +(totalKwh - dynamicKwh).toFixed(2);
   return {
     days: series.length,
     startDate: series[0].date.replace(/-/g, '/'),
@@ -2667,6 +2719,7 @@ function mockEnergy(n) {
     distanceKm: +totalKm.toFixed(1),
     energyKwh: +totalKwh.toFixed(2),
     dynamicEnergyKwh: dynamicKwh,
+    staticEnergyKwh: staticKwh,
     avgConsumption: +((totalKwh / totalKm) * 100).toFixed(1),
     avgDynamicConsumption: +((dynamicKwh / totalKm) * 100).toFixed(1),
     fastChargeCount: Math.max(1, Math.round(n / 5)),
@@ -4090,14 +4143,23 @@ function v2Chart(cfg) {
     return Number.isInteger(r) || max >= 10 ? String(Math.round(r)) : r.toFixed(1);
   });
 
-  const bars = cfg.points.map((p) => {
+  // 入场错峰：7 天每根 44ms（0~264ms），30 天每根 8ms 且封顶 240ms。
+  // 30 天原来 16ms、封顶 420ms —— 但一屏只有 9 根（初始还停最右，是第 21~29 根），
+  // 按全局索引错峰会让眼前那几根干等 0.3~0.4 秒才起身，看着像卡住。
+  const stag = d30 ? 0 : 44;
+  const stagger = (i) => (cfg.animate ? Math.min(i * stag, 300) : 0);
+  const bars = cfg.points.map((p, i) => {
     const v = p.v == null ? null : Number(p.v);
     const h = v == null ? 0 : Math.max(2, Math.round((v / max) * avail));
     const label = v == null ? '--'
       : (cfg.decimals ? v.toFixed(cfg.decimals) : String(Math.round(v)));
-    return `<div class="v2-bar">
+    /* 30 天的柱宽只有约 10px、顶上也没有数值 —— 把这根的日期与读数挂到 DOM 上，
+       点柱子时由 toggleChartTip 取出来显示（7 天用不上，靠 data-days 关掉）。 */
+    const dAttr = p.d == null ? '' : Number(p.d).toFixed(1);
+    const sAttr = p.s == null ? '' : Number(p.s).toFixed(1);
+    return `<div class="v2-bar" style="--d:${stagger(i)}ms" data-i="${i}" data-lb="${esc(p.full || p.label)}" data-v="${v == null ? '' : v}" data-d="${dAttr}" data-s="${sAttr}">
       ${d30 ? '' : `<span class="vt">${label}</span>`}
-      ${v == null ? '' : `${v2BarBody(p, h, cfg.cls)}`}
+      ${v == null ? '<div class="b ph"></div>' : `${v2BarBody(p, h, cfg.cls)}`}
     </div>`;
   }).join('');
 
@@ -4107,14 +4169,18 @@ function v2Chart(cfg) {
   const xLabels = d30
     ? (() => {
         const n = cfg.points.length;
-        const step = Math.max(1, Math.round(n / 6));
+        const step = Math.max(1, Math.round(n / 10));
         return cfg.points.map((p, k) => `<span>${k % step === 0 && k < n - step / 2 ? p.label : ""}</span>`).join("");
       })()
     : cfg.points.map((p) => `<span>${p.label}</span>`).join("");
 
-  const width = cfg.points.length * 56 + 46;   // 与规格「7×56+46 = 438」一致
+  /* 内容宽 = n 根 × 柱宽 + (n-1) 个 gap：7 天 26+30 → n*56-30（=362）；
+     30 天 16+12 → n*28-12（30 根 = 828），一屏约 10 根，可横向滑动看整月。 */
+  const pitch = d30 ? 32 : 56;
+  const barW = d30 ? 20 : 26;
+  const width = Math.max(barW, cfg.points.length * pitch - (pitch - barW));
 
-  return `<div class="v2-chart-card">
+  return `<div class="v2-chart-card${cfg.animate ? ' anim' : ''}" data-days="${cfg.days}" data-unit="${cfg.unit || ''}" style="--base:${cfg.base || 0}ms">
     <div class="v2-chart-head">
       <span class="v2-chart-title">${cfg.title}</span>
       ${cfg.points.some((q) => q.d != null) ? `<span class="v2-leg"><i class="lg-d"></i>动态<i class="lg-s"></i>静态</span>` : ""}
@@ -4123,7 +4189,7 @@ function v2Chart(cfg) {
       <div class="v2-yaxis${d30 ? ' d30' : ''}">${ticks.map((t) => `<span>${t}</span>`).join('')}</div>
       <div class="v2-plot">
         <div class="v2-chart-scroll${d30 ? " d30" : ""}">
-          <div style="min-width:${d30 ? 0 : width}px">
+          <div style="min-width:${width}px">
             <div class="v2-bars${d30 ? ' d30' : ''}">${bars}</div>
             <div class="v2-xaxis ${d30 ? 'd30' : 'd7'}">${xLabels}</div>
           </div>
@@ -4132,6 +4198,111 @@ function v2Chart(cfg) {
     </div>
   </div>`;
 }
+
+/* 点 30 天视图的柱子 → **两张图表同一天**的柱子一起弹气泡、一起高亮：
+   只看一张时另一张的数值要靠来回点才能对照，联动才看得懂「这天跑了多少、耗了多少」。
+   再点同一根收起；7 天视图本来就有柱顶数值，不参与。 */
+function clearChartTips() {
+  document.querySelectorAll('.v2-chart-tip').forEach((t) => t.remove());
+  document.querySelectorAll('.v2-bar.is-sel').forEach((b) => b.classList.remove('is-sel'));
+}
+
+function paintChartTip(card, bar) {
+  bar.classList.add('is-sel');
+  const unit = card.dataset.unit || '';
+  const v = bar.dataset.v;
+  const d = bar.dataset.d;
+  const s = bar.dataset.s;
+  const parts = [bar.dataset.lb || '', v === '' ? '无数据' : `${v} ${unit}`.trim()];
+  if (d !== '' && s !== '' && d != null && s != null) parts.push(`动态 ${d} · 静态 ${s}`);
+  const tip = document.createElement('div');
+  tip.className = 'v2-chart-tip';
+  tip.dataset.i = bar.dataset.i;
+  tip.textContent = parts.filter(Boolean).join(' · ');
+  card.appendChild(tip);
+
+  placeChartTip(card, bar, tip);
+}
+
+/* 把气泡摆到柱体顶上方居中；柱很高时上方放不下，就钳到卡片标题下方（并藏掉小三角，
+   否则三角指的是空气）。横向滚动时气泡不会自己跟着柱子跑，得单独调它重摆。 */
+function placeChartTip(card, bar, tip) {
+  const body = bar.querySelector('.b') || bar;
+  const cr = card.getBoundingClientRect();
+  const br = body.getBoundingClientRect();
+  const tw = tip.offsetWidth;
+  const th = tip.offsetHeight;
+  const headEl = card.querySelector('.v2-chart-head');
+  const minTop = (headEl ? headEl.getBoundingClientRect().bottom - cr.top : 0) + 6;
+  const left = Math.max(8, Math.min(cr.width - tw - 8, br.left - cr.left + br.width / 2 - tw / 2));
+  let top = br.top - cr.top - th - 8;
+  const clamped = top < minTop;
+  if (clamped) top = minTop;
+  tip.classList.toggle('tip-clamped', clamped);
+  tip.style.left = left + 'px';
+  tip.style.top = top + 'px';
+}
+
+function repaintChartTipPositions() {
+  document.querySelectorAll('.v2-chart-card').forEach((c) => {
+    const tip = c.querySelector('.v2-chart-tip');
+    if (!tip) return;
+    const b = c.querySelector(`.v2-bar[data-i="${tip.dataset.i}"]`);
+    if (b) placeChartTip(c, b, tip);
+  });
+}
+
+function selectChartBar(i) {
+  clearChartTips();
+  state.chartSel = i;
+  document.querySelectorAll('.v2-chart-card').forEach((c) => {
+    const b = c.querySelector(`.v2-bar[data-i="${i}"]`);
+    if (b) paintChartTip(c, b);
+  });
+}
+
+function toggleChartTip(bar) {
+  const i = Number(bar.dataset.i);
+  if (state.chartSel === i) {
+    state.chartSel = -1;
+    clearChartTips();
+    return;
+  }
+  selectChartBar(i);
+}
+
+/* 7 天视图横向可滚：选中后往左/右滑，让选中跟到视口中心那根柱 ——
+   手指滑过去了还盯着三天前那根，数值对不上看到的柱子。30 天等分不滚，直接跳过。 */
+let chartScrollRaf = 0;
+function onChartScroll() {
+  if (chartScrollRaf || state.chartSel < 0) return;
+  chartScrollRaf = requestAnimationFrame(() => {
+    chartScrollRaf = 0;
+    if (state.chartSel < 0) return;
+    const card = document.querySelector('.v2-chart-card');
+    if (!card) return;
+    const box = card.querySelector('.v2-chart-scroll');
+    const bars = [...card.querySelectorAll('.v2-bar[data-i]')];
+    if (!box || !bars.length || box.scrollWidth <= box.clientWidth) return;
+    const mid = box.getBoundingClientRect().left + box.clientWidth / 2;
+    let best = -1;
+    let bestD = Infinity;
+    bars.forEach((b) => {
+      const r = b.getBoundingClientRect();
+      const d = Math.abs(r.left + r.width / 2 - mid);
+      if (d < bestD) { bestD = d; best = Number(b.dataset.i); }
+    });
+    if (best < 0) return;
+    if (best !== state.chartSel) selectChartBar(best);
+    else repaintChartTipPositions();          // 选中的还是这根，只把气泡挪过去
+  });
+}
+
+/* scroll 不冒泡，用捕获阶段接；只认图表自己的横向滚动容器 */
+document.addEventListener('scroll', (e) => {
+  const t = e.target;
+  if (t && t.classList && t.classList.contains('v2-chart-scroll')) onChartScroll();
+}, true);
 
 function v2Ring(pct, size = 100, lw = 8) {
   /* soc 缺失不能画成 0%：0% 是「电量耗尽」的正常读数，
@@ -4420,7 +4591,9 @@ function renderTrips() {
   }
 
   const series = (windowStats && windowStats.series) || [];
-  const days = state.days === 7 ? 7 : 30;
+  /* 历史月份只有「整月逐日」一种视图、没有 7/30 段控件，布局固定按 30 天等分；
+     否则本月选过 7 天后切历史月会变成整月柱子按 56px 窄柱横滑，却没有入口能改回来。 */
+  const days = (isCurrent && state.days === 7) ? 7 : 30;
   /* 日期缺失/格式不对时，别让 X 轴渲染出 "NaN/NaN"。 */
   const dayLabel = (raw) => {
     const t = String(raw || '');
@@ -4429,13 +4602,25 @@ function renderTrips() {
     if (!Number.isFinite(mo) || !Number.isFinite(dd) || !mo || !dd) return '';
     return days === 7 ? String(dd) : `${mo}/${dd}`;
   };
-  const points = series.map((p) => ({ v: p.distanceKm, label: dayLabel(p.date) }));
+  /* X 轴 7 天只写日号、30 天写 M/D；气泡要能定位到具体哪天，另存一份完整日期 */
+  const fullDay = (raw) => {
+    const s = String(raw || '');
+    const mo = Number(s.slice(5, 7));
+    const dd = Number(s.slice(8, 10));
+    return mo > 0 && dd > 0 ? `${mo}/${dd}` : '';
+  };
+  const points = series.map((p) => ({ v: p.distanceKm, label: dayLabel(p.date), full: fullDay(p.date) }));
   const ePoints = series.map((p) => ({
     v: p.energyKwh,
     d: p.dynamicKwh,
     s: p.staticKwh,
     label: points[series.indexOf(p)].label,
+    full: points[series.indexOf(p)].full,
   }));
+
+  // 图表入场动画只播一次：本屏第一次真正有数据时才播，之后切 tab / 切 7-30 天都不再重播
+  const chartAnim = points.length > 0 && !state.tripsChartAnim;
+  if (chartAnim) state.tripsChartAnim = true;
 
   // 历史月份不渲染 7/30 段（§4.6）
   const distRow = `<div class="v2-dist">
@@ -4464,8 +4649,8 @@ function renderTrips() {
       </div>
     </div>
     ${distRow}
-    ${v2Chart({ title: '每日里程 (km)', points, days, decimals: 0, cls: 'mileage' })}
-    ${v2Chart({ title: '每日电耗 (kWh)', points: ePoints, days, decimals: 1, cls: 'energy' })}
+    ${v2Chart({ title: '每日里程 (km)', points, days, decimals: 0, cls: 'mileage', unit: 'km', animate: chartAnim })}
+    ${v2Chart({ title: '每日电耗 (kWh)', points: ePoints, days, decimals: 1, cls: 'energy', unit: 'kWh', animate: chartAnim, base: 120 })}
   `, head);
 }
 
@@ -6466,6 +6651,9 @@ function renderSettings() {
    渲染调度
    ═══════════════════════════════════════════════ */
 function render() {
+  /* 气泡直接挂在 DOM 上，render 会整段重建 → 顺手把「选中哪根柱」复位，
+     否则滚动事件会拿着旧索引去找一根已经不存在的气泡。 */
+  state.chartSel = -1;
   const view = $('#view');
 
   // 未登录：除「设置」（登录表单在那里）外一律显示登录引导，
@@ -6522,6 +6710,11 @@ function render() {
       /* 两张图的横向滚动联动：滑任意一张，另一张同步 —— 核对同一天的里程与电耗。
          syncing 标记避免互相触发形成死循环。 */
       const scrollers = Array.from(document.querySelectorAll('.v2-chart-scroll'));
+      /* 默认停在最右：7 天视图横向滚动，左边是最旧的，进来先看最新的几天。
+         30 天是收紧不滚的（overflow: visible），scrollWidth == clientWidth，自动跳过。 */
+      scrollers.forEach((box) => {
+        if (box.scrollWidth > box.clientWidth) box.scrollLeft = box.scrollWidth;
+      });
       if (scrollers.length === 2) {
         let syncing = false;
         scrollers.forEach((box, index) => {
@@ -6996,6 +7189,9 @@ function goTab(name) {
   /* 首次进充电页时自动请求一次定位 —— **只自动做一次**：
      被拒绝后反复弹权限框是骚扰，之后交给用户点「重试定位」。 */
   if (name === 'charges' && state.locStatus === 'idle') locate();
+  /* 每次点开行程页都重播图表入场动画：清掉「本次已播」标记，
+     页内的切 7/30 天、切月份走的是 loadTrips + render，不会再复位，所以不会重播。 */
+  if (name === 'trips') state.tripsChartAnim = false;
   render();
   // 切到哪个 tab 才取哪个 tab 的数据（已取过的不会重复打）
   ensureTabData(name);
@@ -7171,6 +7367,9 @@ document.addEventListener('change', (e) => {
 });
 
 document.addEventListener('click', (e) => {
+  // 30 天图表：点柱子看这一根的日期与读数（7 天视图在 toggleChartTip 内部跳过）
+  const chartBar = e.target.closest('.v2-bar[data-i]');
+  if (chartBar) { toggleChartTip(chartBar); return; }
   // 附近充电站：导航按钮在卡片行**内部**，必须先于整行展开判断，
   // 否则点「导航」会连带把详情也收起来。
   const navBtn = e.target.closest('[data-nav]');
@@ -7300,6 +7499,9 @@ document.addEventListener('click', (e) => {
   const seg = e.target.closest('button[data-days]');
   if (seg) {
     state.days = parseInt(seg.dataset.days, 10);
+    /* 7 天 ↔ 30 天是两套柱数/柱宽，换过去要重播一次入场动画，
+       否则柱子是「啪」地整片换掉的。标志清掉，renderTrips 里就会重新带 .anim。 */
+    state.tripsChartAnim = false;
     if (state.mode !== 'live') {
       // 演示数据没有服务端，按新区间现生成一份，否则切到 30 天仍是 7 天的柱子
       state.energyWindow = mockEnergy(state.days);
