@@ -2442,6 +2442,9 @@ function writeFlag(key, on) {
 
 const QUERY_DEBUG = new URLSearchParams(location.search).get('debug');
 const QUERY_OPEN = new URLSearchParams(location.search).get('open');
+/* 只连后端、不显示调试台。给 iOS 的 WebView 套壳用：真机上不能给用户看调试台，
+   但又必须发真实请求。**不写** localStorage 的 enabled 开关，所以不会被记住。 */
+const QUERY_CONNECT = new URLSearchParams(location.search).get('connect') === '1';
 if (QUERY_DEBUG === '1') writeFlag(DBG_LS_ENABLED, true);
 if (QUERY_DEBUG === '0') writeFlag(DBG_LS_ENABLED, false);
 
@@ -2451,7 +2454,7 @@ const DEBUG_UI = QUERY_DEBUG === '1'
 
 /* 是否连后端：**必须同时**打开调试台和连接开关。
    两个条件都满足才发请求，避免「URL 里带个 ?debug=1 就悄悄联网」。 */
-let CONNECT_BACKEND = DEBUG_UI && readFlag(DBG_LS_CONNECT, false);
+let CONNECT_BACKEND = QUERY_CONNECT || (DEBUG_UI && readFlag(DBG_LS_CONNECT, false));
 
 /* 不连后端 ⇒ 数据走内置模拟、车控也走本地模拟。
    连后端 ⇒ 如实发请求、失败就报错（**不做 mock 兜底**），

@@ -49,6 +49,9 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         # 允许访问本地网络的明文 HTTP（连接自有 Python 服务）
         INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking: YES
+        # WKWebView 里的内容有独立的 ATS 开关：只放开 web content 的 http，
+        # 不用 NSAllowsArbitraryLoads（那会连带放开 URLSession，与既有安全口径冲突）
+        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoadsInWebContent: YES
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: 用于连接您本机的 ZeekrDash 数据服务，读取车辆状态与充电记录
         # 查找附近充电站时需要一次定位；位置只用于本次查询，不上传、不留存
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: 用于查找附近的充电站（位置仅用于本次查询，不会上传）

@@ -47,21 +47,31 @@ struct WebShellView: View {
             topBar
         }
         .background(Color(red: 0.96, green: 0.97, blue: 0.99))
+        .task {
+            // 地址本身不成立时（没填 / 填了 127.0.0.1）不要白屏，直接给原因
+            if shellURL == nil { errorText = urlProblemHint }
+        }
     }
 
     // MARK: - 目标地址
 
     /// 把设置页里的服务端地址拼成网页入口。
     ///
-    /// 用 `?debug=1&api=...` 而不是依赖同源推断：网页版默认「不请求后端」，
-    /// 必须显式打开才发真实请求（见 index-v2.html 的 defaultApiSource）。
+    /// 用 `?connect=1&api=...` 而不是依赖同源推断：网页版默认「不请求后端」，
+    /// 必须显式打开才发真实请求（见 index-v2.html 的 CONNECT_BACKEND）。
+    ///
+    /// 这里**不能**用 `?debug=1` —— 那会把调试台浮层（含「远程 ECS」切换与令牌输入框）
+    /// 永久写进 localStorage，真机上不该给用户看到这些东西。
     private var shellURL: URL? {
         let base = settings.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !base.isEmpty, var comps = URLComponents(string: base) else { return nil }
         guard let scheme = comps.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
+        // 回环地址在手机上指向手机自己，一定会失败，直接不给加载（原因见 urlProblemHint）
+        let host = (comps.host ?? "").lowercased()
+        guard !["localhost", "127.0.0.1", "::1", "[::1]"].contains(host) else { return nil }
         comps.path = "/preview/index-v2.html"
         var items = [
-            URLQueryItem(name: "debug", value: "1"),
+            URLQueryItem(name: "connect", value: "1"),
             URLQueryItem(name: "api", value: base),
         ]
         let token = settings.apiToken.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -70,6 +80,24 @@ struct WebShellView: View {
         }
         comps.queryItems = items
         return comps.url
+    }
+
+    /// `shellURL` 为 nil 时给用户看的原因 —— 白屏是最难排的，宁可直接说清楚。
+    private var urlProblemHint: String {
+        let base = settings.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if base.isEmpty {
+            return "还没填服务端地址。请填电脑的局域网地址，例如 http://192.168.1.10:8765，并确认电脑与手机连同一个 Wi-Fi。"
+        }
+        if let comps = URLComponents(string: base), let scheme = comps.scheme?.lowercased() {
+            if scheme != "http", scheme != "https" {
+                return "地址要以 http:// 开头：\(base)"
+            }
+            let host = (comps.host ?? "").lowercased()
+            if ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host) {
+                return "地址是 \(host)，在手机上它指向手机自己，连不到电脑。请改成电脑的局域网 IP（如 http://192.168.1.10:8765），电脑与手机连同一个 Wi-Fi。"
+            }
+        }
+        return "地址不可用：\(base)。请填电脑的局域网地址，例如 http://192.168.1.10:8765。"
     }
 
     // MARK: - 顶部常驻操作条
@@ -174,6 +202,8 @@ private struct WebContainer: UIViewRepresentable {
         private let onError: (String?) -> Void
         /// 已发起过的「地址 + 重载序号」，避免 SwiftUI 每次刷新都重新 load
         private var lastKey = ""
+        /// 主文档已经用过 HTTP 错误码（4xx/5xx）—— 用来阻止 didFinish 把错误面板清掉
+        private var sawHTTPError = false
 
         init(onError: @escaping (String?) -> Void) {
             self.onError = onError
@@ -187,6 +217,7 @@ private struct WebContainer: UIViewRepresentable {
             let key = url.absoluteString + "#" + String(tick)
             guard key != lastKey else { return }
             lastKey = key
+            sawHTTPError = false
             web.load(URLRequest(url: url))
         }
 
@@ -196,8 +227,22 @@ private struct WebContainer: UIViewRepresentable {
 
         // MARK: 加载结果
 
+        /// 主文档返回 4xx/5xx 也要报出来：WKWebView 这种情况照样 didFinish，
+        /// 不拦的话错误面板会被清空，用户只看到一段裸 JSON（StaticFiles 的 404 就是这样）。
+        func webView(_ webView: WKWebView,
+                     decidePolicyFor navigationResponse: WKNavigationResponse,
+                     decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+            if navigationResponse.isForMainFrame,
+               let http = navigationResponse.response as? HTTPURLResponse,
+               http.statusCode >= 400 {
+                sawHTTPError = true
+                report("服务端返回 " + String(http.statusCode) + "：/preview/index-v2.html 可能不存在，或后端版本对不上。请确认后端已更新到带 preview/index-v2.html 的版本。")
+            }
+            decisionHandler(.allow)
+        }
+
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            report(nil)
+            if !sawHTTPError { report(nil) }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
