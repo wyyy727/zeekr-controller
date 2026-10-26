@@ -215,8 +215,8 @@ body {
      自屏幕底往上：下留白 14 → 胶囊 59 → 胶囊上沿 73 → 与内容间隙 32 → 105。
      iOS 侧用同一组数字（胶囊 64pt）：14 + 64 = 78，间隙 27，同样落在 105。
      即 105 是两端共同的锚点，胶囊高度差 5px 由间隙吸收。
-     105 − 系统安全区 34 = 71。 */
-  padding-bottom: calc(71px + env(safe-area-inset-bottom));
+     （注意：本条的底部内距已被下方 v2 规则改为 0，实际留白由 .wrap 负责。） */
+  padding-bottom: 0;
   transition: background .2s;
   position: relative;
   overflow-x: hidden;
@@ -955,7 +955,7 @@ body.is-scrolled .topbar::before {
 .tabbar {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
   display: flex;
-  padding: 12px 21px calc(env(safe-area-inset-bottom) + 21px);
+  padding: 12px 21px 14px;
   background: transparent;
   pointer-events: none;
 }
@@ -1349,11 +1349,10 @@ canvas { display: block; width: 100%; }
    若提示条浮在屏幕中部偏下，滚到底部时会与之重叠而被挡住。 */
 .toast {
   position: fixed; left: 50%;
-  /* tabbar 上沿 = safe-area + padding 14px + 胶囊 59px = safe-area + 73px，
-     此处再留 8px 间隙 = safe-area + 81px。
-     取 52 与 iOS 侧的 toastBottomInset 语义对齐 —— iOS 的 52 是相对安全区上沿计的，
-     换算到屏幕底即 52 + 34 = 86 ≈ 81（差额来自两边胶囊高度 64pt / 59px）。 */
-  bottom: calc(env(safe-area-inset-bottom) + 52px);
+  /* tabbar 上沿 = 下留白 14 + 胶囊 59 = 73；此处再留 8px 间隙 = 81（距屏幕底）。
+     与 iOS 侧的 toastBottomInset 同源：那边胶囊 64pt → 78 + 8 = 86。
+     差额来自两边胶囊高度（64pt / 59px），语义一致。 */
+  bottom: 81px;
   transform: translateX(-50%) translateY(12px);
   background: var(--glass-bg);
   /* 与 tabbar / 卡片共用同一档模糊，同屏并置时质感才一致 */
@@ -1432,8 +1431,8 @@ canvas { display: block; width: 100%; }
 
 /* ── 浮动入口按钮 ── */
 .dbg-fab {
-  /* 完全落在底栏上方：底栏高 95 + 安全区；100 留 5px 呼吸位 */
-  position: fixed; right: 14px; bottom: calc(100px + env(safe-area-inset-bottom)); z-index: 200;
+  /* 完全落在底栏上方：底栏上沿 73，100 再留 27px 呼吸位（距屏幕底） */
+  position: fixed; right: 14px; bottom: 100px; z-index: 200;
   height: 40px; padding: 0 16px; border-radius: 999px; border: none; cursor: pointer;
   font: inherit; font-size: 13px; font-weight: 600;
   background: var(--accent); color: #fff;
@@ -1680,7 +1679,7 @@ body {
 .card::before { display: none; }          /* 旧的高光扫线，规格里没有 */
 /* ── §3 底栏：390×90 容器 / 348×62 Pill / 5×62×54 项 / r36 ── */
 .tabbar {
-  padding: 12px 21px calc(env(safe-area-inset-bottom) + 21px);
+  padding: 12px 21px 14px;
 }
 .tabbar-inner {
   height: 62px;
@@ -1795,8 +1794,11 @@ body {
 .v2-loc-map { width: 100%; border-radius: 16px; margin-top: 8px; display: block; }
 
 /* ═══ §4 行程图表 + §2 状态层组件（数值取自 MCP batch_read） ═══ */
-/* 底内距 = 底栏实际高 95（12+62+21）+ iOS 安全区；内容滚到底时正好贴上底栏上沿，不留空 */
-.wrap { padding: 56px 16px calc(95px + env(safe-area-inset-bottom)); }
+/* 底内距 = 105px，锚点是「距屏幕底」而不是「距安全区上沿」。
+   自屏幕底往上：下留白 14 → 胶囊 59 → 胶囊上沿 73 → 与内容间隙 32 → 105。
+   与 iOS 侧 Metrics.tabBarClearance 的重算同源（那边 81 + 卡片自带 24 = 105）。
+   这里不再叠 env(safe-area-inset-bottom)：底栏已经压过安全区贴住屏幕底边。 */
+.wrap { padding: 56px 16px 105px; }
 .topbar { display: none; }
 
 /* 页面左上角不再放大标题：与底部导航选中项重复，纵向也白占一行。
