@@ -27,6 +27,13 @@ final class ChargesViewModel {
 
     /// 截图识别是否可用。`nil` = 还没问过服务端（此时不显示任何降级提示）。
     var ocrConfigured: Bool?
+    /// 识别失败的原因（界面在「金额补录」卡里就地显示，不只靠 Toast ——
+    /// Toast 一秒就没了，用户回头想看清为什么失败时已经找不到）
+    var ocrErrorMessage: String?
+
+    /// 识别完成的时刻（核对框副标题「已识别 N 张 · HH:MM」用）
+    var ocrAt: Date?
+
     /// 识别结果（**未入库**），核对弹窗的数据源
     var ocrResult: OcrPayload?
     /// 金额证据列表（含已绑定的 —— 绑错了要能撤）
@@ -166,7 +173,15 @@ final class ChargesViewModel {
         // 这里补一次，否则月份行永远显示"· 更新中"、首屏骨架永不消失。
         isLoading = false
         loadGeneration += 1
-        await loadSessions(generation: loadGeneration)
+        let generation = loadGeneration
+
+        /* 切月期间把旧月份的汇总清掉。
+           `loadSessions` 是异步的，不清就会出现「新月份的标题 + 上个月的数字」——
+           HTML 用 `ymMismatch` 专门挡这个（4819 行），这里用骨架顶住同样的窗口。 */
+        stat = nil
+        isLoading = true
+        await loadSessions(generation: generation)
+        if generation == loadGeneration { isLoading = false }
     }
 
     /// 单月流水。**只读本地库**，不打网关 —— 每次切月份都去打官方接口既慢又容易被风控。
@@ -288,6 +303,7 @@ final class ChargesViewModel {
     func runOcr(fileURL: URL) async {
         guard !isOcrBusy else { return }
         isOcrBusy = true
+        ocrErrorMessage = nil
         defer { isOcrBusy = false }
 
         do {
@@ -298,15 +314,19 @@ final class ChargesViewModel {
             )
             if let rows = payload.rows, !rows.isEmpty {
                 ocrResult = payload
+                // 副标题要显示「已识别 N 张 · HH:MM」，记下这一刻
+                ocrAt = Date()
             } else {
                 ocrResult = nil
                 showToast("没从这张图里认出金额，换一张清楚点的试试")
             }
         } catch let error as ApiError {
             ocrResult = nil
-            showToast(error.errorDescription ?? "截图识别失败")
+            ocrErrorMessage = error.errorDescription ?? "截图识别失败"
+            showToast(ocrErrorMessage ?? "截图识别失败")
         } catch {
             ocrResult = nil
+            ocrErrorMessage = error.localizedDescription
             showToast("截图识别失败：\(error.localizedDescription)")
         }
     }

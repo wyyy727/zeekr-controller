@@ -2,27 +2,27 @@
 //  ChargesView.swift
 //  ZeekrDash
 //
-//  充电页：充入电量（官方流水）+ 金额补录（截图识别 / 手工录入）
+//  充电页（v2）
+//
+//  真源：`preview/index-v2.html` 的 `renderCharges()`（4812–4885）与 `costCard()`（4886–4980），
+//  样式块 1945–1990。卡片顺序：充入电量 → 附近充电站 → 充电记录 → 金额补录。
 //
 
 import Foundation
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 /// 充电页
 ///
-/// 与 `preview/index.html` 的充电页一一对应，卡片顺序与口径都保持一致：
-///   1. 统计月份（筛选器，在数据上面 —— 先选范围、再看数）；
-///   2. **充入电量**：一张卡 = 月度大数（左电量 / 右当月与累计金额）+ 直/交流电量；
-///   3. 附近充电站（实时、要定位）；
+/// 与 `preview/index-v2.html` 的充电屏一一对应：
+///   1. 右上角月份胶囊（浮层，与数据来源徽标同一行）；
+///   2. **充入电量**：左电量大数 / 右当月金额与累计，底部「N 次充电 · 均值 X kW」；
+///   3. 附近充电站（实时、要定位，三行推荐位）；
 ///   4. 充电记录（逐笔）；
-///   5. 金额补录（金额只能靠截图识别 / 手工补录，**不显示估算数字**）。
-///
-/// ⚠️ 充入电量卡里**不再有逐次图**（柱=本次电量、折线=本次时长）：
-/// 下面的「充电记录」逐笔列了同样的信息，图在这里是重复的。
+///   5. 金额补录（截图识别 / 手工录入，**不显示估算金额**）。
 struct ChargesView: View {
 
-    @Environment(\.colorScheme) private var scheme
     @Environment(AppStore.self) private var store
     @State private var model = ChargesViewModel()
 
@@ -31,61 +31,40 @@ struct ChargesView: View {
     @State private var showOcrReview = false
     @State private var showManualEntry = false
     @State private var showPayments = false
+    /// 从核对框里点「重选截图 / 手写录入」时记下的意图，等弹层退场后再执行
+    @State private var pendingOcrExit: OcrExitAction?
 
-    /// 首次加载中（还没拿到任何月度汇总）。
-    ///
-    /// 提成计算属性是因为这个条件在 body 里要用两次（充入电量卡、记录列表），
-    /// 写两遍的话改一处忘一处就会出现"卡片转圈但列表已经在跑"的怪状态。
+    /// 核对框的两种「退出后去哪」
+    private enum OcrExitAction {
+        case reselect
+        case manual
+    }
+
+    /// 关闭核对框并记下接下来要打开的入口
+    private func exitOcr(_ action: OcrExitAction) {
+        pendingOcrExit = action
+        showOcrReview = false
+    }
+
+    /// 首次加载中（还没拿到任何月度汇总）
     private var isFirstLoad: Bool {
         model.isLoading && model.stat == nil
     }
 
     var body: some View {
         NavigationStack {
-            ScreenContainer(modeText: store.modeBadgeText) {
-                /* 顺序：**统计月份 → 充入电量 → 附近充电站 → 充电记录 → 金额补录**。
-                   筛选器在数据上面 —— 先选范围、再看数。
-                   充入电量是"我自己的历史"，附近站是"我现在能去哪" ——
-                   历史在前、实时在后，打开先看自己的账，再看附近可充的。
-
-                   附近站与充入电量是**两块独立的数据**（前者实时、后者是本地历史），
-                   所以它必须在充入电量的空态判断**之外**渲染 ——
-                   没充过电，不代表看不到"附近哪能充、现在多少钱"。
-
-                   未登录时不显示：服务端会拒绝 /api/stations，放出卡片只会
-                   诱导用户点一个必然失败的按钮，那比不显示更糟。 */
-                monthRow
-
-                if isFirstLoad {
-                    LoadingView(text: "正在读取充电流水")
-                        .padding(.top, 60)
-                } else {
-                    energyCard
+            ScreenContainer(
+                modePill: store.modePill,
+                trailingAccessory: {
+                    if !store.needsLogin { monthChip }
                 }
-
-                if let errorMessage = model.errorMessage {
-                    ErrorBanner(message: errorMessage) {
-                        Task { await model.load() }
-                    }
-                }
-
-                if !store.needsLogin {
-                    NearbyStationsCard()
-                }
-
-                if !isFirstLoad {
-                    if !model.records.isEmpty {
-                        recordList
-                    }
-                    costCard
-                }
+            ) {
+                content
             }
             .toolbar(.hidden, for: .navigationBar)
             // 下拉 = 现在就去拉一次（原生手势替代已移除的「同步」按钮）
             .refreshable { await model.refresh() }
         }
-        // 提示不再在这里渲染 —— 统一走全局 Toast（RootView 呈现），
-        // 位置与其它页面一致（见 ChargesViewModel.showToast）。
         .task { await model.load() }
         /* 充电中 → 未充电：这是唯一会产生新充电流水的时刻。
            车况轮询间隔本来就跟着充电状态走（充电中 60 秒一次），跳变一定抓得到。 */
@@ -94,8 +73,7 @@ struct ChargesView: View {
                 Task { await model.syncAfterChargeEnd() }
             }
         }
-
-        // 月份选择：与行程页共用同一个滚轮（MonthPickerSheet）
+        // 月份选择：与行程页共用同一个原生滚轮
         .sheet(isPresented: $showMonthPicker) {
             MonthPickerSheet(months: model.monthOptions, selection: model.selectedMonth) { picked in
                 Task { await model.select(month: picked) }
@@ -113,14 +91,35 @@ struct ChargesView: View {
                 if model.ocrResult != nil { showOcrReview = true }
             }
         }
-        .sheet(isPresented: $showOcrReview) {
+        // 核对弹层用自绘面板（不是系统 sheet）：与 v2 的圆角/遮罩/把手一致
+        .fullScreenCover(isPresented: $showOcrReview) {
             if let payload = model.ocrResult {
-                OcrReviewSheet(payload: payload) { rows in
+                OcrReviewSheet(
+                    payload: payload,
+                    records: model.records,
+                    recognizedAt: model.ocrAt,
+                    // 没匹配到流水时的两个兜底：退出核对框后再打开各自的入口
+                    onReselectImage: { exitOcr(.reselect) },
+                    onManualEntry: { exitOcr(.manual) }
+                ) { rows in
                     await model.commitOcr(imageSha8: payload.imageSha8, rows: rows)
                 }
             }
         }
-        .sheet(isPresented: $showManualEntry) {
+        /* 兜底入口不能在 cover 还没退场时就 present 下一个 —— 会丢。
+           先记下意图，等 `showOcrReview` 落成 false 再延时 0.4s 打开。 */
+        .onChange(of: showOcrReview) { _, presented in
+            guard !presented, let action = pendingOcrExit else { return }
+            pendingOcrExit = nil
+            Task {
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                switch action {
+                case .reselect: showImporter = true
+                case .manual:   showManualEntry = true
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showManualEntry) {
             ManualPaymentSheet { amount, paidAt, energyKwh, stationName in
                 await model.addManual(
                     amount: amount,
@@ -130,7 +129,7 @@ struct ChargesView: View {
                 )
             }
         }
-        .sheet(isPresented: $showPayments) {
+        .fullScreenCover(isPresented: $showPayments) {
             PaymentsSheet(payments: model.payments) { paymentId, sessionId in
                 await model.link(paymentId: paymentId, sessionId: sessionId)
             } onUnlink: { paymentId in
@@ -139,312 +138,369 @@ struct ChargesView: View {
         }
     }
 
-    // MARK: - 月份行
+    // MARK: - 月份胶囊（`.v2-month-chip`）
 
-    /// 左侧「统计月份」+ 右侧「同步时间小字 + 月份按钮」。
-    ///
-    /// **没有同步按钮**：时机全自动（空库 / 跨天 / 充电结束），
-    /// 所以这行小字是唯一的数据新鲜度线索，必须看得见；
-    /// 想立刻刷新就下拉（原生手势，不占界面位置）。
-    private var monthRow: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "calendar")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textTertiary(scheme))
-            Text("统计月份")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textTertiary(scheme))
-            if model.isLoading {
-                Text("· 更新中")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textTertiary(scheme))
+    private var monthChip: some View {
+        Button {
+            showMonthPicker = true
+        } label: {
+            Text(model.selectedMonthLabel)
+                .v2Text(.month13, color: V2Color.accent)
+                .padding(.horizontal, 14)
+                .frame(minWidth: V2Metrics.monthChipMinWidth, minHeight: V2Metrics.monthChipHeight)
+                .glassSurface(cornerRadius: V2Metrics.monthChipRadius)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("充入电量月份 \(model.selectedMonthLabel)")
+    }
+
+    // MARK: - 内容分派
+
+    @ViewBuilder
+    private var content: some View {
+        if store.needsLogin {
+            V2LoginWall { store.selectedTab = .settings }
+        } else {
+            VStack(spacing: V2Metrics.screenGap) {
+                if isFirstLoad {
+                    skeleton
+                } else if let stat = model.stat {
+                    if (stat.count ?? 0) > 0 {
+                        sumCard(stat)
+                    } else {
+                        emptyMonth
+                    }
+                } else if model.errorMessage != nil {
+                    errorCard
+                } else {
+                    emptyMonth
+                }
+
+                if let message = model.errorMessage, model.stat != nil {
+                    V2StaleBanner(
+                        text: "这一轮没读到最新流水，下面是上次读到的数据",
+                        detail: message
+                    ) { Task { await model.load() } }
+                }
+
+                /* 附近站与充入电量是**两块独立的数据**（前者实时、后者是本地历史），
+                   所以它必须在充入电量的空态判断之外渲染 —— 没充过电，
+                   不代表看不到"附近哪能充、现在多少钱"。 */
+                NearbyStationsCard()
+
+                if !isFirstLoad, let stat = model.stat, (stat.count ?? 0) > 0 {
+                    recordCard
+                    costCard
+                }
+
+                footNote
+            }
+        }
+    }
+
+    // MARK: - 充入电量（`.v2-cc-*`）
+
+    private func sumCard(_ stat: ChargeMonthStat) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("本月充入电量")
+                        .v2Text(.label12, color: V2Color.text2)
+                    HStack(alignment: .firstTextBaseline, spacing: 3) {
+                        Text(number(stat.totalKwh, 1))
+                            .v2Text(.hero34)
+                            .v2Numeric()
+                        Text("kWh")
+                            .v2Text(.body14m, color: V2Color.text2)
+                    }
+                    .padding(.top, 12)
+                }
+
+                Spacer(minLength: 0)
+
+                VStack(alignment: .trailing, spacing: 14) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("本月金额")
+                            .v2Text(.label12, color: V2Color.text2)
+                            .frame(width: 52, alignment: .leading)
+                        amountChip(stat.amountTotal)
+                    }
+
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("累计")
+                            .v2Text(.label12, color: V2Color.text2)
+                            .frame(width: 52, alignment: .leading)
+                        Text(totalAmountText)
+                            .v2Text(.body14m, color: V2Color.text3)
+                            .v2Numeric()
+                    }
+
+                    // 有金额、也有没补的笔数时说明"合计里不含这几笔"
+                    if (stat.amountCount ?? 0) > 0, (stat.unpricedCount ?? 0) > 0 {
+                        Text("含 \(stat.unpricedCount ?? 0) 笔未补录")
+                            .v2Text(.label11, color: V2Color.text3)
+                            .padding(.top, -6)
+                    }
+                }
             }
 
-            Spacer(minLength: 8)
+            HStack(spacing: 24) {
+                Text("\(stat.count ?? 0) 次充电")
+                    .v2Text(.stat15, color: V2Color.info)
+                Text("均值 \(number(stat.avgPowerKw, 1)) kW")
+                    .v2Text(.stat15, color: V2Color.text1)
+            }
+            .padding(.top, 10)
+        }
+        .v2Card()
+    }
 
-            Text(model.isSyncing ? "同步中…" : model.lastSyncText)
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.textTertiary(scheme))
-                .monospacedDigit()
+    /// 本月金额：没有金额时是「未补录」胶囊，不是 ¥0.00
+    @ViewBuilder
+    private func amountChip(_ amount: Double?) -> some View {
+        if let amount {
+            Text("¥" + String(format: "%.2f", amount))
+                .v2Text(.amt19)
+                .v2Numeric()
+        } else {
+            Text("未补录")
+                .v2Text(.label11, color: V2Color.warn)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(V2Color.tintWarn)
+                .clipShape(Capsule())
+        }
+    }
 
-            Button {
-                showMonthPicker = true
-            } label: {
-                HStack(spacing: 3) {
-                    Text(model.selectedMonthLabel)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.textPrimary(scheme))
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(Theme.textTertiary(scheme))
+    /// 所有可查月份的金额之和；没有一个月带金额时给 `--`
+    private var totalAmountText: String {
+        let sum = model.months.reduce(0.0) { $0 + ($1.amount ?? 0) }
+        return sum > 0 ? "¥" + String(format: "%.2f", sum) : "--"
+    }
+
+    // MARK: - 加载骨架 / 读失败 / 空态
+
+    private var skeleton: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("本月充入电量").v2Text(.title14)
+                Spacer(minLength: 0)
+                Text("加载中")
+                    .v2Text(.label11, color: V2Color.text2)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(V2Color.tintMuted)
+                    .clipShape(Capsule())
+            }
+            GeometryReader { proxy in
+                VStack(alignment: .leading, spacing: 12) {
+                    SkeletonBar(width: proxy.size.width * 0.70)
+                    SkeletonBar(width: proxy.size.width * 0.35)
+                    SkeletonBar(width: proxy.size.width * 0.55)
                 }
-                .padding(.horizontal, 12)
-                .frame(minHeight: Metrics.minTouchTarget)
-                .contentShape(Rectangle())
+                .padding(.top, 8)
+            }
+            .frame(height: 66 + 8)
+        }
+        .v2Card()
+        .accessibilityLabel("正在读取充电流水")
+    }
+
+    private var errorCard: some View {
+        VStack(spacing: 0) {
+            // 注意：HTML 的充电页空态/错误态**没有图标**（只有行程页有 SVG.chart），别自己加
+            Text("充电流水没有读到")
+                .v2Text(.emptyTitle)
+                .padding(.top, 12)
+            Text("后端可能正在重启，或登录状态已失效")
+                .v2Text(.emptyDesc, color: V2Color.text3)
+                .padding(.top, 6)
+            Button {
+                Task { await model.load() }
+            } label: {
+                Text("重试")
+                    .v2Text(.button14, color: V2Color.accent)
+                    .frame(height: 32)
+                    .padding(.horizontal, 20)
+                    .background(V2Color.tintAccent)
+                    .clipShape(Capsule())
             }
             .buttonStyle(.plain)
+            .padding(.top, 16)
         }
-    }
-
-    // MARK: - 充入电量（一张卡）
-
-    /// 大数 + 月度趋势图合成**一张卡**。
-    ///
-    /// 原来这是两张卡，但它们是同一笔账的两个切面：分开摆，最右边那根柱子和
-    /// 上面的大数看着像两个数。合进一张卡后，把所选月份那根柱子高亮、其余压暗 ——
-    /// "大数对应哪根"不用再靠月份标签去对。
-    private var energyCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("充入电量")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary(scheme))
-                Spacer(minLength: 8)
-                Text(model.selectedMonthLabel)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textTertiary(scheme))
-            }
-
-            if let stat = model.stat, (stat.count ?? 0) > 0 {
-                heroBlock(stat)
-                Divider().overlay(Theme.separator(scheme))
-                subBlock(stat)
-                splitLine(stat)
-            } else {
-                // 这个月没记录：只留空态
-                emptyMonthBlock
-            }
-        }
-        .padding(Metrics.cardPadding)
-        .background(Theme.surface(scheme))
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
-    }
-
-    /// 左边电量、右边金额 —— 这两个数是同一笔账的两面：
-    /// "充了 182 度"和"花了 234 块"分开摆会让人以为是两件事。
-    /// 金额只能来自截图识别 / 手工录入，没补录时写「未补录」，绝不编。
-    private func heroBlock(_ stat: ChargeMonthStat) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("\(model.selectedMonthLabel) · 共 \(stat.count ?? 0) 次")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textSecondary(scheme))
-
-                HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text(fmt(stat.totalKwh, 1))
-                        .font(.system(size: 33, weight: .medium, design: .rounded))
-                        .foregroundStyle(Theme.textPrimary(scheme))
-                        .monospacedDigit()
-                    Text("度")
-                        .font(.system(size: 15, weight: .regular))
-                        .foregroundStyle(Theme.textSecondary(scheme))
-                }
-            }
-
-            Spacer(minLength: 8)
-
-            moneyBlock(stat)
-        }
-    }
-
-    /// 金额区：一行一条「标签 + 数字」。
-    /// 拆成"数字一行、标签一行"要多扫一眼才知道那个数是什么，所以放同一行。
-    private func moneyBlock(_ stat: ChargeMonthStat) -> some View {
-        VStack(alignment: .trailing, spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("\(model.selectedMonthLabel)金额")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(Theme.textTertiary(scheme))
-                if let amount = stat.amountTotal {
-                    Text("¥" + String(format: "%.2f", amount))
-                        .font(.system(size: 21, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Theme.textPrimary(scheme))
-                        .monospacedDigit()
-                } else {
-                    // 0 会被读成"这个月一分没花"，所以写「未补录」
-                    Text("未补录")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Theme.textTertiary(scheme))
-                }
-            }
-
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("累计")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(Theme.textTertiary(scheme))
-                Text(model.totalAmountText)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Theme.textSecondary(scheme))
-                    .monospacedDigit()
-            }
-        }
-    }
-
-    /// 三个副数字**必须同框**：只给总量，"这个月充得多"到底是单次充得满、
-    /// 还是充得勤，看不出来。
-    private func subBlock(_ stat: ChargeMonthStat) -> some View {
-        HStack(spacing: 0) {
-            subItem("平均单次", value: fmt(stat.avgKwh, 1), unit: "度")
-            subItem("总时长", value: durationText(stat.totalMinutes), unit: nil)
-            subItem("平均功率", value: fmt(stat.avgPowerKw, 1), unit: "kW")
-        }
-    }
-
-    private func subItem(_ title: String, value: String, unit: String?) -> some View {
-        VStack(spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(value)
-                    .font(.system(size: 16, weight: .medium, design: .rounded))
-                    .foregroundStyle(Theme.textPrimary(scheme))
-                    .monospacedDigit()
-                if let unit {
-                    Text(unit)
-                        .font(.system(size: 10))
-                        .foregroundStyle(Theme.textTertiary(scheme))
-                }
-            }
-            Text(title)
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.textTertiary(scheme))
-        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 22)
         .frame(maxWidth: .infinity)
+        .v2Card()
     }
 
-    private var emptyMonthBlock: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "bolt.slash")
-                .font(.system(size: 26, weight: .light))
-                .foregroundStyle(Theme.textTertiary(scheme))
+    private var emptyMonth: some View {
+        VStack(spacing: 0) {
             Text("\(model.selectedMonthLabel)没有充电记录")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(Theme.textSecondary(scheme))
-            Text("换个日期看看；新流水会在充完电 / 跨天后的自动同步里出现")
-                .font(.system(size: 11.5))
-                .foregroundStyle(Theme.textTertiary(scheme))
+                .v2Text(.emptyTitle)
+            Text("换个月份看看；新流水会在充完电或跨天后的同步里出现")
+                .v2Text(.emptyDesc, color: V2Color.text3)
+                .multilineTextAlignment(.center)
+                .padding(.top, 6)
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 22)
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
+        .v2Card()
     }
 
-    /// 直流 / 交流只留电量，不再各列一次「几次」：
-    /// 快充几次 + 慢充几次 = 上面的「共 N 次」，换个说法重复一遍而已。
-    /// 但"快充充了多少度、慢充充了多少度"是新信息，压成图下面一行。
-    private func splitLine(_ stat: ChargeMonthStat) -> some View {
-        let dc = stat.dcKwh ?? 0
-        let ac = stat.acKwh ?? 0
-        guard dc > 0 || ac > 0 else { return AnyView(EmptyView()) }
+    // MARK: - 充电记录（`.v2-rec`）
 
-        return AnyView(
-            Text("直流快充 \(fmt(stat.dcKwh, 1)) 度 · 交流慢充 \(fmt(stat.acKwh, 1)) 度")
-                .font(.system(size: 11.5))
-                .foregroundStyle(Theme.textTertiary(scheme))
-                .monospacedDigit()
-                .frame(maxWidth: .infinity, alignment: .leading)
-        )
-    }
-
-
-    // MARK: - 充电记录
-
-    private var recordList: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("充电记录")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary(scheme))
-
-            ForEach(model.records) { record in
-                ChargeSessionRow(record: record)
-                if record.id != model.records.last?.id {
-                    Divider().overlay(Theme.separator(scheme))
+    private var recordCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("充电记录").v2Text(.title14)
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(model.records) { record in
+                    ChargeRecordRow(record: record)
                 }
             }
+            .padding(.top, 4)
         }
-        .padding(Metrics.cardPadding)
-        .background(Theme.surface(scheme))
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .v2Card()
     }
 
-    // MARK: - 金额补录
+    // MARK: - 金额补录（`costCard()`，4886–4980）
 
-    /// 金额数字已经搬进上面的「充入电量」卡（当月 + 累计），这里**不再重复摆数字**，
-    /// 只留三件补录入口 + 一句状态 —— 一块放数、一块放操作，各自只有一件事。
-    ///
-    /// 立场不变：**一个编出来的数字都不显示**。
-    /// 官方接口只给电量（车不知道电价），金额只能来自截图识别 / 手工录入。
     private var costCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("金额补录")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary(scheme))
-                Spacer(minLength: 8)
-                Text(costBadge)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textTertiary(scheme))
-            }
+        let stat = model.stat
+        let priced = stat?.amountCount ?? 0
+        let unpriced = stat?.unpricedCount ?? 0
+        let estimated = stat?.estimatedCount ?? 0
+        let totalBills = priced + unpriced + estimated
+        let badge: String = {
+            if priced == 0 { return "未补录" }
+            return totalBills > priced ? "已补录 \(priced)/\(totalBills) 笔" : "已补全"
+        }()
+        let pending = model.pendingCount
 
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(costNotes, id: \.self) { note in
-                    Text(note)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.textTertiary(scheme))
-                }
-            }
-
-            // 三个入口。「截图识别」不是"识别完就完事"：识别结果会弹出核对框，
-            // 金额 / 电量 / 归属哪次充电都能改 —— 模型把服务费原价当金额是常事。
+        return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                costButton("截图识别", systemImage: "doc.text.viewfinder", primary: true) {
-                    showImporter = true
-                }
-                .disabled(!model.canWrite || model.isOcrBusy)
+                Text("金额补录").v2Text(.title14)
+                Spacer(minLength: 0)
+                Text(badge)
+                    .v2Text(.chip11, color: V2Color.accent)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(V2Color.accent.opacity(0.12))
+                    .clipShape(Capsule())
+            }
 
-                costButton("手写录入", systemImage: "pencil", primary: false) {
-                    showManualEntry = true
-                }
-                .disabled(!model.canWrite)
-
-                if model.pendingCount > 0 {
-                    costButton("待确认 \(model.pendingCount)", systemImage: "questionmark.circle", primary: false) {
-                        showPayments = true
-                    }
-                    .disabled(!model.canWrite)
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(costNotes.enumerated()), id: \.offset) { _, note in
+                    Text(note)
+                        .v2Text(.note11b, color: V2Color.text3)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .padding(.top, 8)
+
+            if let error = model.ocrErrorMessage {
+                Text("识别失败：\(error)，可以手写录入")
+                    .v2Text(.note11b, color: V2Color.bad)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(V2Color.tintBad)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .padding(.top, 8)
+            }
+
+            // 三个入口：截图识别 / 手写录入 / 待确认
+            HStack(spacing: 8) {
+                Button {
+                    showImporter = true
+                } label: {
+                    HStack(spacing: 5) {
+                        if model.isOcrBusy {
+                            ProgressView().controlSize(.mini).tint(.white)
+                        } else {
+                            Image("ic-scan")
+                                .renderingMode(.template)
+                                .resizable()
+                                .frame(width: 14, height: 14)
+                        }
+                        Text(model.isOcrBusy ? "识别中…" : "截图识别")
+                    }
+                    .v2Text(.text12, color: .white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(V2Color.accent)
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(!model.canWrite || model.isOcrBusy)
+                .opacity(model.canWrite && !model.isOcrBusy ? 1 : 0.45)
+
+                Button {
+                    showManualEntry = true
+                } label: {
+                    HStack(spacing: 5) {
+                        Image("ic-money")
+                            .renderingMode(.template)
+                            .resizable()
+                            .frame(width: 14, height: 14)
+                        Text("手写录入")
+                    }
+                    .v2Text(.text12, color: V2Color.text1)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(Color.white.opacity(0.50))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.90), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .disabled(!model.canWrite)
+                .opacity(model.canWrite ? 1 : 0.45)
+
+                if pending > 0 {
+                    Button {
+                        showPayments = true
+                    } label: {
+                        Text("待确认 \(pending)")
+                            .v2Text(.text12, color: V2Color.warn)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(V2Color.tintWarn)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!model.canWrite)
+                    .opacity(model.canWrite ? 1 : 0.45)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 12)
         }
-        .padding(Metrics.cardPadding)
-        .background(Theme.surface(scheme))
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .v2Card()
     }
 
-    private var costBadge: String {
-        guard let stat = model.stat else { return "未补录" }
-        let priced = stat.amountCount ?? 0
-        if priced == 0 { return "未补录" }
-        let unpriced = stat.unpricedCount ?? 0
-        return unpriced > 0 ? "已补录 \(priced)/\(priced + unpriced) 笔" : "已补全"
-    }
-
+    /// 补录说明。**三态**：一笔都没补 / 补了一部分 / 全部补齐。
     private var costNotes: [String] {
+        let stat = model.stat
+        let priced = stat?.amountCount ?? 0
+        let unpriced = stat?.unpricedCount ?? 0
         var notes: [String] = []
-        let priced = model.stat?.amountCount ?? 0
-        let unpriced = model.stat?.unpricedCount ?? 0
 
         if priced == 0 {
-            notes.append("极氪只给电量，不给金额 —— 车不知道电价，站点也不在充电记录里。"
-                         + "补录后上面的「当月金额 / 累计」才会有数。")
+            notes.append("极氪只给电量，不给金额 —— 车不知道电价，站点也不在充电记录里。补录后上面的「当月金额 / 累计」才会有数。")
         } else {
-            let unit = model.stat?.unitPrice == nil
-                ? ""
-                : "，每度约 ¥\(fmt(model.stat?.unitPrice, 2))"
+            let unit = stat?.unitPrice.map { "，每度约 ¥" + String(format: "%.2f", $0) } ?? ""
             if unpriced > 0 {
-                notes.append("已补录 \(priced) 笔\(unit)；还有 \(unpriced) 笔"
-                             + "（\(fmt(model.stat?.unpricedKwh, 1)) 度）没补，单价只按已补录的算。")
+                notes.append("已补录 \(priced) 笔\(unit)；还有 \(unpriced) 笔（\(number(stat?.unpricedKwh, 1)) 度）没补，单价只按已补录的算。")
             } else {
                 notes.append("已补录 \(priced) 笔，全部有金额\(unit)。")
             }
         }
-        if let estimated = model.stat?.estimatedCount, estimated > 0 {
+
+        if let estimated = stat?.estimatedCount, estimated > 0 {
             notes.append("另有 \(estimated) 笔为电价估算，未计入合计与单价。")
         }
         if model.pendingCount > 0 {
@@ -453,103 +509,106 @@ struct ChargesView: View {
         if !model.canWrite {
             notes.append("当前是演示/离线数据，补录入口不可用（没有真实流水可配对）。")
         } else if model.ocrConfigured == false {
-            notes.append("截图识别未开启：服务端 .env 填 DEEPSEEK_API_KEY 并重启后可用；"
-                         + "在那之前先用手写录入。")
+            notes.append("截图识别未开启：服务端 .env 填 DEEPSEEK_API_KEY 并重启后可用；在那之前先用手写录入。")
         }
         return notes
     }
 
-    private func costButton(
-        _ title: String,
-        systemImage: String,
-        primary: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(.system(size: 13, weight: .semibold))
-                .frame(maxWidth: .infinity)
-                .frame(minHeight: Metrics.minTouchTarget)
-                .foregroundStyle(primary ? Color.white : Theme.textPrimary(scheme))
-                .background(primary ? Theme.accent(scheme) : Theme.surfaceAlt(scheme))
-                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+    // MARK: - 页脚
+
+    private var footNote: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let last = store.lastRefresh {
+                Text("更新于 \(last.formatted(date: .omitted, time: .shortened))")
+            }
+            Text("数据来自非官方接口，仅供参考")
         }
-        .buttonStyle(.plain)
-        .opacity(primary && !model.canWrite ? 0.45 : 1)
+        .v2Text(.foot11, color: V2Color.text3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 8)
     }
 
-    // MARK: - 格式化
+    // MARK: - 小工具
 
-    private func fmt(_ value: Double?, _ digits: Int) -> String {
+    private func number(_ value: Double?, _ digits: Int) -> String {
         guard let value else { return "--" }
         return String(format: "%.\(digits)f", value)
     }
-
-    /// 平均时长按"是否超过 1 小时"换单位：统一成分钟会出现 "183"，
-    /// 统一成小时又会出现 0.4 这种读不出量级的数。
-    private func durationText(_ minutes: Double?) -> String {
-        guard let minutes, minutes > 0 else { return "--" }
-        let total = Int(minutes.rounded())
-        if total < 60 { return "\(total) 分" }
-        let h = total / 60
-        let m = total % 60
-        return m == 0 ? "\(h) 小时" : "\(h) 小时 \(m) 分"
-    }
 }
 
-// MARK: - 单条充电流水
+// MARK: - 一条充电流水（`chargeSessionItem()`，5002–5031）
 
-private struct ChargeSessionRow: View {
+private struct ChargeRecordRow: View {
 
     let record: ChargeSession
 
-    @Environment(\.colorScheme) private var scheme
-
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(record.titleText)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.textPrimary(scheme))
-                Text(record.shortTimeText)
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.textTertiary(scheme))
-                    .monospacedDigit()
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(whenText)
+                    .v2Text(.label12, color: V2Color.text3)
+                Spacer(minLength: 0)
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(String(format: "%.1f", record.energyKwh ?? 0))
+                        .v2Text(.body15)
+                        .v2Numeric()
+                    Text("kWh")
+                        .v2Text(.label11, color: V2Color.text3)
+                }
             }
 
-            Spacer(minLength: 0)
+            HStack(alignment: .center, spacing: 8) {
+                Text(record.stationName ?? record.kindText)
+                    .v2Text(.label12, color: V2Color.text1)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
 
-            VStack(alignment: .trailing, spacing: 3) {
-                Text("\(String(format: "%.1f", record.energyKwh ?? 0)) 度")
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundStyle(Theme.textPrimary(scheme))
-                    .monospacedDigit()
+                Spacer(minLength: 0)
 
-                HStack(spacing: 6) {
-                    if let minutes = record.durationMin, minutes > 0 {
-                        Text("\(Int(minutes.rounded())) 分钟")
-                    }
-                    if let power = record.powerKw {
-                        Text(String(format: "%.0f kW", power))
-                    }
-                    // 金额只在这笔补录过才有 —— 没补录就不显示，绝不填 0
-                    if let amount = record.amount {
-                        Text("¥" + String(format: "%.2f", amount))
-                            .foregroundStyle(Theme.accent(scheme))
-                    }
+                if let power = averagePower {
+                    chip("均 \(String(format: "%.0f", power)) kW")
                 }
-                .font(.system(size: 10))
-                .foregroundStyle(Theme.textTertiary(scheme))
+                if let amount = record.amount {
+                    chip("¥" + String(format: "%.2f", amount) + (record.amountSource == "estimate" ? " 估算" : ""))
+                }
             }
         }
-        .padding(.vertical, 9)
+        .padding(.vertical, 4)
+    }
+
+    /// `startTime · 时长`；时长为 0 时只留时间
+    private var whenText: String {
+        let start = record.startTime ?? "--"
+        guard let minutes = record.durationMin, minutes > 0 else { return start }
+        return "\(start) · \(durationText(minutes))"
+    }
+
+    /// 均值功率。时长缺失/为 0 时这个除法会给出 Infinity，必须挡掉
+    private var averagePower: Double? {
+        guard let energy = record.energyKwh, let minutes = record.durationMin, minutes > 0 else { return nil }
+        let power = energy / (minutes / 60)
+        return power.isFinite && power > 0 ? power : nil
+    }
+
+    private func durationText(_ minutes: Double) -> String {
+        let total = Int(minutes.rounded())
+        if total < 60 { return "\(total) 分钟" }
+        let hours = total / 60
+        let rest = total % 60
+        return rest == 0 ? "\(hours) 小时" : "\(hours) 小时 \(rest) 分"
+    }
+
+    private func chip(_ text: String) -> some View {
+        Text(text)
+            .v2Text(.label11, color: V2Color.warn)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(V2Color.tintWarn)
+            .clipShape(Capsule())
     }
 }
 
-// MARK: - 截图识别核对弹窗
-
-/// 识别结果**不直接入库**：金额 / 电量 / 时间 / 站点都能改，
-/// 还能指定它属于哪次充电。唯一候选才预选，多候选一律留空让人挑。
 private struct OcrRowDraft: Identifiable {
     let id: String
     var amountText: String
@@ -565,7 +624,9 @@ private struct OcrRowDraft: Identifiable {
         self.startText = row.startAt ?? ""
         self.stationText = row.stationName ?? ""
         let candidates = row.candidates ?? []
-        self.chosenSessionId = candidates.count == 1 ? candidates[0].sessionId : nil
+        /* 默认选**第一笔**候选：后端已按匹配强度排好序，让用户从"确认"开始，
+           而不是每次都要自己下拉挑一遍。HTML 在核对弹层里也是默认选中第一笔。 */
+        self.chosenSessionId = candidates.first?.sessionId
     }
 
     /// 交给服务端的 JSON 体。字段缺失就不写 —— 让服务端按"没有"处理，
@@ -588,147 +649,475 @@ private struct OcrRowDraft: Identifiable {
 private struct OcrReviewSheet: View {
 
     let payload: OcrPayload
+    /// 当月充电流水：用来判断候选那笔是不是**已经补录过**
+    var records: [ChargeSession] = []
+    /// 识别时刻（副标题「已识别 N 张 · 21:34」用）
+    var recognizedAt: Date?
     let onCommit: ([[String: Any]]) async -> Bool
+    /// 没匹配到流水时的两个兜底入口（HTML `data-ocr-again` / `data-ocr-manual`）
+    var onReselectImage: () -> Void = {}
+    var onManualEntry: () -> Void = {}
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var scheme
 
     @State private var drafts: [OcrRowDraft]
     @State private var isSaving = false
+    /// 用户**亲手点过**候选的行（HTML `state.ocrUserPicked`）——
+    /// 这些行再改时间/电量也不撤销绑定，那是用户自己的判断。
+    @State private var userPicked: Set<Int> = []
+    /// 改过时间/电量、原自动匹配已作废的行（HTML `.ocr-rebind`）
+    @State private var rebinding: Set<Int> = []
 
-    init(payload: OcrPayload, onCommit: @escaping ([[String: Any]]) async -> Bool) {
+    init(
+        payload: OcrPayload,
+        records: [ChargeSession] = [],
+        recognizedAt: Date? = nil,
+        onReselectImage: @escaping () -> Void = {},
+        onManualEntry: @escaping () -> Void = {},
+        onCommit: @escaping ([[String: Any]]) async -> Bool
+    ) {
         self.payload = payload
+        self.records = records
+        self.recognizedAt = recognizedAt
+        self.onReselectImage = onReselectImage
+        self.onManualEntry = onManualEntry
         self.onCommit = onCommit
         _drafts = State(initialValue: (payload.rows ?? []).map { OcrRowDraft(row: $0) })
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("确认下面的金额，改完再保存 —— 识别只是草稿。")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.textTertiary(scheme))
-
-                    ForEach(drafts.indices, id: \.self) { index in
-                        draftRow(index)
-                    }
-                }
-                .padding(16)
-            }
-            .navigationTitle("核对识别结果")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        Task { await save() }
-                    } label: {
-                        Text(isSaving ? "保存中…" : "保存 \(validCount) 笔")
-                    }
-                    .disabled(isSaving || validCount == 0)
+        /* 全部按 `index-v2.html`：
+           · 标题「识别充电小票」16/600，右侧副标题「已识别 N 张 · HH:MM」；
+           · 面板没有把手、没有右上按钮，圆角 18，白底，遮罩黑 28%；
+           · 高度随内容，正文区封顶内滚（`.ocr-body` = max-height:min(58vh,430)）；
+           · 取消 / 确认补录 固定在底部（`.ocr-actions`），48 高、r12。 */
+        V2BottomSheet(
+            title: "识别充电小票",
+            subtitle: subtitleText,
+            titleType: .ocrTitle16,
+            closeTitle: nil,
+            onClose: { dismiss() },
+            hugContent: true,
+            showsGrip: false,
+            headerInset: 12,
+            cornerRadius: 18,
+            panelBackground: .white,
+            maskColor: Color.black.opacity(0.28),
+            footer: AnyView(footerBar)
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(drafts.indices, id: \.self) { index in
+                    draftCard(index)
                 }
             }
+            .padding(.horizontal, 12)
+            .padding(.top, 4)
+            .padding(.bottom, 2)
         }
+    }
+
+    // MARK: - 顶部副标题
+
+    private var subtitleText: String {
+        let time: String
+        if let recognizedAt {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "HH:mm"
+            time = formatter.string(from: recognizedAt)
+        } else {
+            time = "--"
+        }
+        return "已识别 \(drafts.count) 张 · \(time)"
     }
 
     private var validCount: Int {
         drafts.filter { $0.isValid }.count
     }
 
-    private func draftRow(_ index: Int) -> some View {
+    // MARK: - 单张小票（`.ocr-row`）
+
+    private func draftCard(_ index: Int) -> some View {
         let row = (payload.rows ?? [])[safe: index]
         let candidates = row?.candidates ?? []
+        let multi = drafts.count > 1
 
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("第 \(index + 1) 笔")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary(scheme))
-                Spacer(minLength: 8)
-                if row?.needsReview == true, let note = row?.reviewNote {
-                    Text(note)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(ChineseColor.tiSe)
-                }
-            }
+        return VStack(alignment: .leading, spacing: 0) {
+            rowHeader(index: index, row: row, multi: multi)
 
-            fieldRow("金额（元）", text: $drafts[index].amountText, numeric: true)
-            fieldRow("电量（度）", text: $drafts[index].energyText, numeric: true)
-            fieldRow("时间", text: $drafts[index].startText, numeric: false)
-            fieldRow("站点", text: $drafts[index].stationText, numeric: false)
-
-            if !candidates.isEmpty {
-                Menu {
-                    Button("不指定") { drafts[index].chosenSessionId = nil }
-                    ForEach(candidates) { candidate in
-                        Button {
-                            drafts[index].chosenSessionId = candidate.sessionId
-                        } label: {
-                            Text("\(candidate.startTime ?? "--") · \(String(format: "%.1f", candidate.energyKwh ?? 0)) 度 · \(candidate.kindText)")
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Text(chosenLabel(index, candidates: candidates))
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.textSecondary(scheme))
-                            .lineLimit(1)
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Theme.textTertiary(scheme))
-                    }
-                    .padding(.horizontal, 10)
-                    .frame(minHeight: Metrics.minTouchTarget)
+            if row?.needsReview == true {
+                Text(reviewText(row))
+                    .v2Text(.ocrWarn115, color: V2Color.ocrWarnText)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.surfaceAlt(scheme))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(V2Color.ocrWarnFill)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .padding(.bottom, 8)
+            }
+
+            fieldsGrid(index: index)
+
+            if candidates.isEmpty {
+                noCandidateBlock
             } else {
-                Text("时间附近没有充电流水，可能是停车费 / 占位费，或这笔是别人付的。先留着，别删。")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(Theme.textTertiary(scheme))
+                Text("对应哪次充电")
+                    .v2Text(.note11, color: V2Color.text3)
+                    .padding(.top, 10)
+                    .padding(.bottom, 2)
+            }
+
+            VStack(spacing: 6) {
+                ForEach(Array(candidates.enumerated()), id: \.offset) { _, candidate in
+                    candidateRow(
+                        index: index,
+                        target: candidate.sessionId,
+                        main: "\(Self.clock(candidate.startTime)) · \(String(format: "%.1f", candidate.energyKwh ?? 0)) kWh",
+                        side: Self.dayDiffText(from: row?.startAt, to: candidate.startTime),
+                        duplicated: isDuplicate(row: row, candidate: candidate),
+                        forcedOn: nil
+                    )
+                }
+
+                /* 没有候选时这一行的文案变成「仍要保存这笔金额」，
+                   而且**不高亮**（HTML：只有存在候选且没选时才 `on`）。 */
+                candidateRow(
+                    index: index,
+                    target: nil,
+                    main: candidates.isEmpty ? "仍要保存这笔金额" : "暂不绑定（放进待确认）",
+                    side: "",
+                    duplicated: false,
+                    forcedOn: candidates.isEmpty ? false : nil
+                )
+            }
+
+            if rebinding.contains(index) {
+                Text("时间和电量改过了，原来那次自动匹配不再作数 —— 请重新选一次对应哪次充电")
+                    .v2Text(.ocrWarn115, color: V2Color.ocrWarnText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(V2Color.ocrWarnFill)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .padding(.top, 6)
             }
         }
-        .padding(12)
-        .background(Theme.surfaceAlt(scheme).opacity(0.55))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // `.ocr-row`：白 .45 底 + 1px 分隔线 + r16
+        .background(V2Color.softFill)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(V2Color.separator, lineWidth: 1)
+        )
+        /* 改了「开始时间 / 电量」→ 自动匹配作废（HTML 的 input 监听）：
+           用户自己点过候选的行不动；本来就没绑的也不用提示。 */
+        .onChange(of: drafts[index].startText) { _, _ in handleRebind(index) }
+        .onChange(of: drafts[index].energyText) { _, _ in handleRebind(index) }
     }
 
-    private func chosenLabel(_ index: Int, candidates: [OcrCandidate]) -> String {
-        guard let chosen = drafts[index].chosenSessionId,
-              let hit = candidates.first(where: { $0.sessionId == chosen }) else {
-            return "属于哪次充电：不指定"
+    /// `.ocr-row-top`：左「第 N 笔」、中站名 13/600、右「置信度 N%」胶囊
+    private func rowHeader(index: Int, row: OcrRow?, multi: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            if multi {
+                Text("第 \(index + 1) 笔")
+                    .v2Text(.ocrRowTop12, color: V2Color.text2)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            Text(stationText(row))
+                .v2Text(.ocrStation13)
+                .lineLimit(1)
+
+            if let conf = confidenceText(row) {
+                Text(conf)
+                    .v2Text(.ocrConf11, color: V2Color.confText)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(V2Color.confFill)
+                    .clipShape(Capsule())
+            }
         }
-        return "属于哪次充电：\(hit.startTime ?? "--") · \(String(format: "%.1f", hit.energyKwh ?? 0)) 度"
+        .padding(.bottom, 7)
     }
 
-    private func fieldRow(
-        _ title: String,
+    /// `.ocr-fields`：两列等分、gap 8
+    private func fieldsGrid(index: Int) -> some View {
+        LazyVGrid(
+            columns: [
+                GridItem(.flexible(), spacing: 8),
+                GridItem(.flexible(), spacing: 8),
+            ],
+            alignment: .leading,
+            spacing: 8
+        ) {
+            field("金额", text: $drafts[index].amountText, unit: "元",
+                  placeholder: "", keyboard: .decimalPad)
+            field("充电量", text: $drafts[index].energyText, unit: "kWh",
+                  placeholder: "", keyboard: .decimalPad)
+            field("开始时间", text: $drafts[index].startText, unit: nil,
+                  placeholder: "2026-10-16 22:10", keyboard: .numbersAndPunctuation)
+            field("站点名", text: $drafts[index].stationText, unit: nil,
+                  placeholder: "选填", keyboard: .default)
+        }
+    }
+
+    /// `.ocr-field`：标签 10.5 在输入框上方；输入框 38 高、r10、无边框 + 内白环；
+    /// 单位浮在右侧（HTML `.ocr-unit`），不占 label。
+    private func field(
+        _ label: String,
         text: Binding<String>,
-        numeric: Bool
+        unit: String?,
+        placeholder: String,
+        keyboard: UIKeyboardType
     ) -> some View {
-        HStack(spacing: 8) {
-            Text(title)
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textTertiary(scheme))
-                .frame(width: 78, alignment: .leading)
-            TextField("", text: text)
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.textPrimary(scheme))
-                .keyboardType(numeric ? .decimalPad : .default)
-                .multilineTextAlignment(.trailing)
-                .frame(minHeight: Metrics.minTouchTarget)
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .v2Text(.ocrLabel105, color: V2Color.text3)
+                .padding(.leading, 2)
+
+            ZStack(alignment: .trailing) {
+                TextField(placeholder, text: text)
+                    .v2Text(.ocrInput14, color: V2Color.text1)
+                    .keyboardType(keyboard)
+                    .padding(.leading, 9)
+                    .padding(.trailing, unit == nil ? 9 : 34)
+                    .frame(height: 38)
+                    .background(V2Color.inputFill)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.90), lineWidth: 1)
+                    )
+
+                if let unit {
+                    Text(unit)
+                        .v2Text(.ocrUnit12, color: V2Color.text3)
+                        .padding(.trailing, 10)
+                        .allowsHitTesting(false)
+                }
+            }
         }
+    }
+
+    /// `.ocr-nocand`：没匹配到流水时的兜底（两颗胶囊按钮）
+    private var noCandidateBlock: some View {
+        VStack(spacing: 6) {
+            Text("没匹配到充电流水")
+                .v2Text(.nocandT14)
+            Text("可以先记下金额放进「待确认」，之后再指定属于哪次充电。")
+                .v2Text(.ocrSub12, color: V2Color.text3)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                actionButton("重选截图") { onReselectImage() }
+                actionButton("手写录入") { onManualEntry() }
+            }
+            .padding(.top, 6)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 16)
+        .padding(.bottom, 4)
+    }
+
+    /// `.ocr-act`：44 高、左右 20、r999、淡紫底
+    private func actionButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .v2Text(.ocrAct14, color: V2Color.accent)
+                .padding(.horizontal, 20)
+                .frame(height: 44)
+                .background(V2Color.chipFill)
+                .clipShape(Capsule())
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 一行候选（`.ocr-cand`）：无边框；选中整行铺紫底白字、右侧打勾；
+    /// 未选中写「差 N 天」；「已补录」是勾左边的绿胶囊，纯标记不可点。
+    ///
+    /// - Parameter forcedOn: 传 `false` 强制不高亮（没有候选时的「仍要保存」行）
+    private func candidateRow(
+        index: Int,
+        target: String?,
+        main: String,
+        side: String,
+        duplicated: Bool,
+        forcedOn: Bool?
+    ) -> some View {
+        let on = forcedOn ?? (drafts[index].chosenSessionId == target)
+
+        return Button {
+            drafts[index].chosenSessionId = target
+            userPicked.insert(index)
+            rebinding.remove(index)
+        } label: {
+            HStack(spacing: 8) {
+                Text(main)
+                    .v2Text(on ? .ocrCandOn : .ocrCand, color: on ? .white : V2Color.text1)
+                    .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                /* 「已补录」只在**金额与站点都匹配**时出现（HTML `detectDupReceipts`）：
+                   只做标记，不可点、不弹提示 —— 撤回仍走「金额记录」里的解绑。 */
+                if duplicated {
+                    Text("已补录")
+                        .v2Text(.dupBadge, color: V2Color.good)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        // 选中行是紫底，胶囊要换成近白底，否则绿字压在紫底上看不清
+                        .background(on ? Color.white.opacity(0.92) : V2Color.tintGood)
+                        .clipShape(Capsule())
+                }
+
+                if on {
+                    Text("✓")
+                        .v2Text(.ocrCandOn, color: .white)
+                } else if !side.isEmpty {
+                    Text(side)
+                        .v2Text(.ocrSide, color: V2Color.text3)
+                        .fixedSize()
+                }
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .frame(minHeight: 38)
+            .background(on ? V2Color.accent : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? AccessibilityTraits.isSelected : [])
+    }
+
+    // MARK: - 底部操作（`.ocr-actions`）
+
+    private var footerBar: some View {
+        HStack(spacing: 8) {
+            Button {
+                dismiss()
+            } label: {
+                Text("取消")
+                    .v2Text(.ocrPrimary15, color: V2Color.text1)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                    .background(V2Color.softFill)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                Task { await save() }
+            } label: {
+                Text(isSaving ? "补录中…" : "确认补录")
+                    .v2Text(.ocrPrimary15, color: .white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                    .background(V2Color.accent)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .opacity(validCount > 0 && !isSaving ? 1 : 0.5)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(validCount == 0 || isSaving)
+        }
+        // `.ocr-actions` 在 `.sheet` 的 10px 内距里（正文 `.ocr-body` 是 12）
         .padding(.horizontal, 10)
-        .background(Theme.surface(scheme))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    // MARK: - 数据
+
+    private func stationText(_ row: OcrRow?) -> String {
+        if let name = row?.stationName, !name.isEmpty { return name }
+        return "未识别到站点"
+    }
+
+    /// `ocrConf()`：<=1 当比例、否则当百分数
+    private func confidenceText(_ row: OcrRow?) -> String? {
+        guard let raw = row?.confidence else { return nil }
+        let pct = raw <= 1 ? (raw * 100).rounded() : raw.rounded()
+        return "置信度 \(Int(pct))%"
+    }
+
+    /// 需核对：HTML 固定句式「需要核对：{note}。金额请按「实付」填，别填服务费原价。」
+    private func reviewText(_ row: OcrRow?) -> String {
+        let note: String
+        if let raw = row?.reviewNote, !raw.isEmpty {
+            note = raw
+        } else {
+            note = "这一项读得不准"
+        }
+        return "需要核对：\(note)。金额请按「实付」填，别填服务费原价。"
+    }
+
+    /// 小票的「金额 + 站点」是否已经补录过（对应 HTML `detectDupReceipts`）
+    private func isDuplicate(row: OcrRow?, candidate: OcrCandidate) -> Bool {
+        guard let row, let amount = row.amount, amount > 0 else { return false }
+        let station = Self.normStation(row.stationName)
+        guard !station.isEmpty, let sessionId = candidate.sessionId else { return false }
+        guard let record = records.first(where: { $0.sessionId == sessionId }) else { return false }
+        guard let recorded = record.amount, record.amountSource != "estimate" else { return false }
+        guard abs(recorded - amount) <= 0.005 else { return false }
+        return Self.normStation(record.stationName) == station
+    }
+
+    /// 站名归一：「极氪超充·上海中心」与「极氪超充上海中心（B2）」视为同一站。只用于判重。
+    private static func normStation(_ raw: String?) -> String {
+        guard let raw else { return "" }
+        var text = raw.lowercased()
+        text = String(text.unicodeScalars.filter { scalar in
+            let v = scalar.value
+            let chinese = v >= 0x4E00 && v <= 0x9FFF
+            let ascii = (v >= 0x61 && v <= 0x7A) || (v >= 0x30 && v <= 0x39)
+            return chinese || ascii
+        })
+        for suffix in ["充电站", "充电桩", "超充站"] where text.hasSuffix(suffix) {
+            text.removeLast(suffix.count)
+        }
+        return text
+    }
+
+    /// `22:10` —— 只取时分（HTML `fmtTime`）
+    private static func clock(_ raw: String?) -> String {
+        guard let raw, raw.count >= 16 else { return raw ?? "--" }
+        let time = raw.split(separator: " ").last.map(String.init) ?? raw
+        return String(time.prefix(5))
+    }
+
+    /// 小票时间与候选时间差几天（HTML `diffTxt`：`同一天` / `差 N 天`）
+    private static func dayDiffText(from base: String?, to other: String?) -> String {
+        guard let base, let other, base.count >= 10, other.count >= 10 else { return "" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let a = formatter.date(from: String(base.prefix(10))),
+              let b = formatter.date(from: String(other.prefix(10))) else { return "" }
+        let days = abs(Calendar.current.dateComponents([.day], from: a, to: b).day ?? 0)
+        return days == 0 ? "同一天" : "差 \(days) 天"
+    }
+
+    // MARK: - 动作
+
+    /// 改了开始时间/电量：自动预选的那条已不可信，撤销并提示重选。
+    /// 用户自己点过候选的行不动；本来就没绑的也不用提示。
+    private func handleRebind(_ index: Int) {
+        guard !userPicked.contains(index) else { return }
+        guard drafts[index].chosenSessionId != nil else { return }
+        drafts[index].chosenSessionId = nil
+        rebinding.insert(index)
     }
 
     private func save() async {
-        guard !isSaving else { return }
+        guard !isSaving, validCount > 0 else { return }
         isSaving = true
         let rows = drafts.filter { $0.isValid }.map { $0.payload }
         let ok = await onCommit(rows)
@@ -744,7 +1133,6 @@ private struct ManualPaymentSheet: View {
     let onSave: (Double, String, Double?, String?) async -> Bool
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var scheme
 
     @State private var amountText = ""
     @State private var paidAtText = ""
@@ -753,40 +1141,57 @@ private struct ManualPaymentSheet: View {
     @State private var isSaving = false
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("金额（元）", text: $amountText)
-                        .keyboardType(.decimalPad)
-                    TextField("时间（YYYY-MM-DD HH:mm）", text: $paidAtText)
-                        .keyboardType(.numbersAndPunctuation)
-                    TextField("电量（度，可留空）", text: $energyText)
-                        .keyboardType(.decimalPad)
-                    TextField("站点（可留空）", text: $stationText)
-                } header: {
+        V2BottomSheet(
+            title: "手写录入",
+            closeTitle: "取消",
+            trailingTitle: isSaving ? "保存中…" : "保存",
+            trailingEnabled: isValid && !isSaving,
+            onTrailing: { Task { await save() } },
+            onClose: { dismiss() },
+            heightRatio: 0.70
+        ) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
                     Text("金额 + 时间就能存，其余两项有就填 —— 电量影响每度单价。")
+                        .v2Text(.note11b, color: V2Color.text3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 2)
+
+                    field("金额（元）", $amountText, .decimalPad)
+                    field("时间", $paidAtText, .numbersAndPunctuation)
+                    field("电量（度）", $energyText, .decimalPad)
+                    field("站点", $stationText, .default)
                 }
-            }
-            .navigationTitle("手写录入")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        Task { await save() }
-                    } label: {
-                        Text(isSaving ? "保存中…" : "保存")
-                    }
-                    .disabled(!isValid || isSaving)
-                }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 28)
             }
         }
     }
 
     private var isValid: Bool {
         (Double(amountText) ?? 0) > 0 && !paidAtText.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// 一行输入：左标签 + 右输入，白 .45 底 + r10（与 OCR 弹层同一套）
+    private func field(
+        _ title: String,
+        _ text: Binding<String>,
+        _ keyboard: UIKeyboardType
+    ) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .v2Text(.label12, color: V2Color.text3)
+                .frame(width: 64, alignment: .leading)
+            TextField(title == "时间" ? "2026-10-27 14:30" : "", text: text)
+                .v2Text(.label12, color: V2Color.text1)
+                .keyboardType(keyboard)
+                .multilineTextAlignment(.trailing)
+                .frame(minHeight: 44)
+        }
+        .padding(.horizontal, 10)
+        .background(Color.white.opacity(0.45))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private func save() async {
@@ -814,91 +1219,83 @@ private struct PaymentsSheet: View {
     let onUnlink: (String) async -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        NavigationStack {
+        V2BottomSheet(
+            title: "待确认金额",
+            closeTitle: "完成",
+            onClose: { dismiss() },
+            heightRatio: 0.74
+        ) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 10) {
                     if payments.isEmpty {
                         Text("没有待处理的金额记录。")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.textTertiary(scheme))
+                            .v2Text(.label12, color: V2Color.text3)
                     } else {
                         ForEach(payments) { payment in
-                            paymentRow(payment)
+                            paymentCard(payment)
                         }
                     }
                 }
-                .padding(16)
-            }
-            .navigationTitle("待确认金额")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
-                }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 28)
             }
         }
     }
 
-    private func paymentRow(_ payment: ChargePayment) -> some View {
+    private func paymentCard(_ payment: ChargePayment) -> some View {
         let candidates = payment.candidates ?? []
         let statusText = payment.status == "unmatched" ? "没找到对应充电" : "有多条候选"
 
         return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("¥\(String(format: "%.2f", payment.amount ?? 0))")
-                    .font(.system(size: 15, weight: .medium, design: .rounded))
-                    .foregroundStyle(Theme.textPrimary(scheme))
-                    .monospacedDigit()
-                Spacer(minLength: 8)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("¥" + String(format: "%.2f", payment.amount ?? 0))
+                    .v2Text(.amt19)
+                    .v2Numeric()
+                Spacer(minLength: 0)
                 Text(payment.paidAt ?? "时间未知")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textTertiary(scheme))
+                    .v2Text(.label11, color: V2Color.text3)
             }
 
             if payment.isMatched {
                 Text("已绑定到一次充电")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(ChineseColor.zhuQing)
+                    .v2Text(.label11, color: V2Color.good)
                 Button {
                     Task { await onUnlink(payment.id) }
                 } label: {
                     Text("解绑")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(ChineseColor.zhuSha)
-                        .frame(minHeight: Metrics.minTouchTarget)
+                        .v2Text(.label12, color: V2Color.bad)
+                        .frame(minHeight: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             } else {
                 Text(statusText)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Theme.textSecondary(scheme))
+                    .v2Text(.label11, color: V2Color.text2)
 
                 if candidates.isEmpty {
                     Text("时间附近没有充电流水，可能是停车费 / 占位费，或这笔是别人付的。先留着，别删。")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(Theme.textTertiary(scheme))
+                        .v2Text(.label11, color: V2Color.text3)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else {
                     ForEach(candidates) { candidate in
                         Button {
                             Task { await onLink(payment.id, candidate.sessionId ?? "") }
                         } label: {
-                            HStack {
+                            HStack(spacing: 8) {
                                 Text("\(candidate.startTime ?? "--") · \(String(format: "%.1f", candidate.energyKwh ?? 0)) 度")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(Theme.textPrimary(scheme))
-                                Spacer(minLength: 8)
+                                    .v2Text(.label12, color: V2Color.text1)
+                                Spacer(minLength: 0)
                                 Text(candidate.kindText)
-                                    .font(.system(size: 10.5))
-                                    .foregroundStyle(Theme.textTertiary(scheme))
+                                    .v2Text(.label11, color: V2Color.text3)
                             }
                             .padding(.horizontal, 10)
-                            .frame(minHeight: Metrics.minTouchTarget)
-                            .background(Theme.surfaceAlt(scheme))
+                            .frame(minHeight: 44)
+                            .background(Color.white.opacity(0.45))
                             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
@@ -906,8 +1303,13 @@ private struct PaymentsSheet: View {
             }
         }
         .padding(12)
-        .background(Theme.surfaceAlt(scheme).opacity(0.55))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.55))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.90), lineWidth: 1)
+        )
     }
 }
 

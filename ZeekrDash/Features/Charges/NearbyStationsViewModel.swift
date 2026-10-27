@@ -49,12 +49,28 @@ final class LocationFetcher: NSObject, CLLocationManagerDelegate {
     private var phase: Phase = .idle
     private var continuation: CheckedContinuation<CLLocation, Error>?
 
+    /// 超时兜底任务。
+    ///
+    /// `requestLocation` 在室内 / 信号差时可能长时间不回调（不是永远不回，但可能几分钟）。
+    /// 没有超时的话界面会一直停在「正在定位…」，而且这个 continuation 会一直占着 ——
+    /// 用户再点一次，新的 continuation 会把旧的覆盖掉，旧那次就**永久泄漏**了。
+    private var timeoutTask: Task<Void, Never>?
+
+    /// 定位最长等待（秒）
+    private static let timeout: TimeInterval = 15
+
     func currentLocation() async throws -> CLLocation {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CLLocation, Error>) in
+        // 上一次还没回来就又点了一次：先把旧的收掉，别让它被覆盖后永远挂着
+        if continuation != nil {
+            finish(.failure(FetchError.unavailable("已取消上一次定位")))
+        }
+
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CLLocation, Error>) in
             self.continuation = continuation
             manager.delegate = self
             // 百米精度足够选充电站，且比最高精度省电、出结果更快
             manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+            startTimeout()
 
             switch manager.authorizationStatus {
             case .authorizedWhenInUse, .authorizedAlways:
@@ -74,9 +90,22 @@ final class LocationFetcher: NSObject, CLLocationManagerDelegate {
         }
     }
 
-    /// 收口：授权回调与定位回调可能先后都来，而 continuation **只能 resume 一次**
+    private func startTimeout() {
+        timeoutTask?.cancel()
+        // 由 MainActor 调用 → 这个 Task 继承主线程上下文
+        timeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.timeout * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.finish(.failure(FetchError.unavailable("定位超时")))
+        }
+    }
+
+    /// 收口：授权回调、定位回调、超时兜底三路都会进来，而 continuation **只能 resume 一次**。
+    /// `guard let continuation` 就是那个「只认第一个」的闸门。
     private func finish(_ result: Result<CLLocation, Error>) {
         guard let continuation else { return }
+        timeoutTask?.cancel()
+        timeoutTask = nil
         self.continuation = nil
         phase = .idle
         continuation.resume(with: result)
