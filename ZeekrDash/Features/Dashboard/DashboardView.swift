@@ -345,7 +345,10 @@ struct DashboardView: View {
     }
 
     /// 任一扇开即开。整体 nil 表示网关没给 —— 由调用处判为「—」。
-    private func anyOpen(_ dict: [String: Bool]?) -> Bool? {
+    ///
+    /// 参数的值类型是 `Bool?` 而非 `Bool`：`VehicleStatus.doors/windows` 用可选值是因为
+    /// 服务端对单扇门会返回 null（值的 null = 未知，不是「关着」），见 Models.swift。
+    private func anyOpen(_ dict: [String: Bool?]?) -> Bool? {
         guard let dict else { return nil }
         return dict.values.contains { $0 == true }
     }

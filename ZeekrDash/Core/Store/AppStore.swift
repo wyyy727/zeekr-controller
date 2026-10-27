@@ -195,8 +195,13 @@ final class AppStore {
             await inFlight.value
             return
         }
+        // 注意别写成 `Task { await self?.performRefresh() }`：`await self?.f()` 的值是
+        // Optional<Void>，闭包推断成 `Task<()?, Never>`，赋给 `Task<Void, Never>?` 会报
+        // "cannot assign value of type 'Task<()?, Never>' to type 'Task<Void, Never>'"。
+        // guard 绑一下，闭包才是 Void 返回（顺带保证这轮刷新期间 self 不被释放）。
         let task = Task { [weak self] in
-            await self?.performRefresh()
+            guard let self else { return }
+            await self.performRefresh()
         }
         refreshTask = task
         await task.value
