@@ -36,9 +36,19 @@ targets:
     type: application
     platform: iOS
     sources:
+      # 只收 ZeekrDash/ 子树 —— 这是本工程的**唯一**资源落点。
+      # 放在仓库根之外的资产（曾经有：ios-icons/Icons.xcassets）不会被 xcodegen
+      # 收进来，actool 也不报错，装到手机上才发现图标全空白。
+      # 新增资源请放进 ZeekrDash/Resources/：
+      #   Resources/Icons.xcassets  28 个矢量图标（template 件 + avatar-mark original）
+      #   Resources/Fonts/          Inter 四个静态字重 ttf
       - path: ZeekrDash
         excludes:
           - "**/*.md"
+          # Info.plist 是模板基座（INFOPLIST_FILE），不能再当资源打进 Bundle，
+          # 否则 Xcode 会警告 "The Copy Bundle Resources build phase contains this
+          # target's Info.plist file"，并在 .app 里多出一份野 plist。
+          - "**/Info.plist"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zeekrdash.app
@@ -52,5 +62,14 @@ targets:
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: 用于连接您本机的 ZeekrDash 数据服务，读取车辆状态与充电记录
         # 查找附近充电站时需要一次定位；位置只用于本次查询，不上传、不留存
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: 用于查找附近的充电站（位置仅用于本次查询，不会上传）
+        # ── Info.plist：生成 + 基座合并（两件事都要）────────────────────
+        # GENERATE_INFOPLIST_FILE=YES 时，Xcode 只把 INFOPLIST_KEY_* 里属于
+        # **Apple 白名单**的键写进最终 Info.plist；白名单外的键（UIAppFonts 这种
+        # 数组键正是其中之一）会被静默丢弃 —— 构建不报错，装上才发现字体没注册。
+        # 所以：下面这些 INFOPLIST_KEY_* 继续用（都在白名单内），唯独 UIAppFonts
+        # 放进 ZeekrDash/Info.plist 当基座，Xcode 以它为 seed 再把生成的键合并上去。
+        # 不要改成 xcodegen 的 info: block —— 那个 block 由 xcodegen 独占并覆盖
+        # 整份 plist，反而会跟生成机制打架（其余键得全部手写，容易漏）。
+        INFOPLIST_FILE: ZeekrDash/Info.plist
         GENERATE_INFOPLIST_FILE: YES
         TARGETED_DEVICE_FAMILY: "1"   # 仅 iPhone

@@ -2,7 +2,7 @@
 """
 ZeekrDash — 从官方极氪 APK 提取 6 个网关密钥
 ============================================
-产出 ZeekrDash 的 `server/.env` 所需的全部凭据：
+产出 ZeekrDash 的 `.env` 所需的全部凭据：
 
     ZEEKR_HMAC_ACCESS_KEY    GW2 换令牌
     ZEEKR_HMAC_SECRET_KEY    GW2 换令牌
@@ -15,7 +15,7 @@ ZeekrDash — 从官方极氪 APK 提取 6 个网关密钥
 起源：https://github.com/wysie/zeekr_key_extractor （MIT，Copyright (c) 2025）
 本仓库的改动仅三处（算法一行未动）：
   1. 默认 `--region CN`（上游默认 EM），并默认输出到 `docs/zeekr_secrets.json`
-  2. 新增 `--write-env` —— 直接把密钥填进 `server/.env` 的空位
+  2. 新增 `--write-env` —— 直接把密钥填进 `.env` 的空位
   3. **默认不再回显密钥明文**（只显示掩码）。上游会原样打印到终端，
      那会把密钥留在 shell 历史、CI 日志与录屏里。要明文用 `--show`。
 
@@ -704,7 +704,10 @@ def write_env(secrets: dict, env_path: Path) -> None:
     重跑脚本不会覆盖你手工修正过的值（例如从候选里试出来的 prod_secret）。
     """
     if not env_path.is_file():
-        print(f"\n  [!!] 找不到 {env_path} —— 请先 cp .env.example .env")
+        print(
+            f"\n  [!!] 找不到 {env_path} —— 请先 cp .env.example .env"
+            "\n        （模板在仓库根；.env 放仓库根或 server/ 都能被服务端读到）"
+        )
         return
 
     text = env_path.read_text(encoding="utf-8")
@@ -985,11 +988,11 @@ APK 从哪来：
     parser.add_argument(
         "--write-env",
         nargs="?",
-        const="server/.env",
+        const=".env",
         type=Path,
         default=None,
         metavar="PATH",
-        help="把密钥填进 .env 的空位（不带值时用默认的 server/.env）",
+        help="把密钥填进 .env 的空位（不带值时用仓库根的 .env，与 README 的 cp 路径一致）",
     )
     parser.add_argument(
         "--show",

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  只放「INFOPLIST_KEY_* 写不进去」的键，其余全部由 Xcode 从 project.yml 的
+  INFOPLIST_KEY_* 生成后合并进来（GENERATE_INFOPLIST_FILE 保持 YES）。
+
+  为什么不能直接写 INFOPLIST_KEY_UIAppFonts：
+  该机制只认 Apple 的白名单键，UIAppFonts 这类数组键会被**静默丢弃** ——
+  构建照样成功，装上跑起来字体却是系统字体，很难查。
+
+  为什么不能不用这个文件：
+  字体要生效必须进 Info.plist 的 UIAppFonts 数组，而数组无法用构建设置表达。
+  本文件是 INFOPLIST_FILE 指向的「基座」，Xcode 以它为 seed 再合并生成的键。
+
+  新增字体：把 .ttf 放进 ZeekrDash/Resources/Fonts/，并在下面数组里加**文件名**
+  （不是路径、不是 PostScript 名）。改完重新 xcodegen generate。
+-->
+<plist version="1.0">
+<dict>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Inter-Regular.ttf</string>
+		<string>Inter-Medium.ttf</string>
+		<string>Inter-SemiBold.ttf</string>
+		<string>Inter-Bold.ttf</string>
+	</array>
+</dict>
+</plist>

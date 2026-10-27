@@ -617,7 +617,7 @@ zeekr-controller/
 │
 ├── .github/workflows/build-ios.yml
 ├── project.yml                 # XcodeGen 工程描述
-└── .env.example                # 环境变量模板
+└── .env.example                # 环境变量模板（唯一一份；cp 成 .env 后放仓库根或 server/ 都能读到）
 ```
 
 ---
