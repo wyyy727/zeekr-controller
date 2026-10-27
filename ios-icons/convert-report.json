@@ -1,0 +1,226 @@
+[
+  {
+    "name": "action-ocr-scan",
+    "kb": "2.0",
+    "intent": "template",
+    "paths": 1,
+    "notes": "flatten(1.75,1.75) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "avatar-mark",
+    "kb": "1.0",
+    "intent": "original",
+    "paths": 4,
+    "notes": "circle-to-path flatten(17,17) currentColor->#000000; 盘面 #000000->#6742E8(accent);render intent=original（双色件，不参与染色）",
+    "bad": ""
+  },
+  {
+    "name": "ctrl-charge-start",
+    "kb": "1.4",
+    "intent": "template",
+    "paths": 1,
+    "notes": "flatten(6.60333,3.07761) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "ctrl-climate",
+    "kb": "1.7",
+    "intent": "template",
+    "paths": 3,
+    "notes": "flatten(3.26667,4.9) flatten(3.26667,17.7333) flatten(3.26667,14) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "ctrl-defrost-front",
+    "kb": "1.8",
+    "intent": "template",
+    "paths": 2,
+    "notes": "flatten(5.6,11.2) flatten(10.0333,12.7167) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "ctrl-drive-mode",
+    "kb": "1.8",
+    "intent": "template",
+    "paths": 5,
+    "notes": "circle-to-path flatten(14,6.88333) flatten(10.5,14) flatten(7.7,21.7) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "ctrl-find-car",
+    "kb": "0.9",
+    "intent": "template",
+    "paths": 2,
+    "notes": "circle-to-path flatten(6.3,5.13333) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "ctrl-flash",
+    "kb": "1.6",
+    "intent": "template",
+    "paths": 3,
+    "notes": "flatten(7.46667,5.7753) flatten(10.9667,17.9667) flatten(12.6,14.7) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "ctrl-frunk",
+    "kb": "1.3",
+    "intent": "template",
+    "paths": 4,
+    "notes": "circle-to-path rect-flatten(4.66667,12.95) flatten(6.53333,9.45) currentColor->#000000; rect(stroke)->path",
+    "bad": ""
+  },
+  {
+    "name": "ctrl-home",
+    "kb": "1.5",
+    "intent": "template",
+    "paths": 3,
+    "notes": "flatten(3.96667,7.93333) flatten(17.0333,14) flatten(20.5333,10.9667) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "ctrl-horn",
+    "kb": "1.6",
+    "intent": "template",
+    "paths": 3,
+    "notes": "flatten(4.66667,6.76667) flatten(18.2,10.7333) flatten(21.2333,8.16667) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "ctrl-lock",
+    "kb": "1.3",
+    "intent": "template",
+    "paths": 3,
+    "notes": "ellipse-to-path flatten(8.86667,4.55) flatten(5.95,12.3667) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "ctrl-refresh",
+    "kb": "1.1",
+    "intent": "template",
+    "paths": 2,
+    "notes": "flatten(5.367,5.44281) flatten(15.75,4.2) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "ctrl-seat-heat",
+    "kb": "2.1",
+    "intent": "template",
+    "paths": 5,
+    "notes": "flatten(8.63333,9.1) flatten(5.83333,19.6) flatten(16.8,4.08333) flatten(14,4.08333) flatten(11.2,4.08333) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "ctrl-seat-vent",
+    "kb": "1.9",
+    "intent": "template",
+    "paths": 3,
+    "notes": "flatten(7.11667,5.13333) flatten(5.36667,14.2333) flatten(17.9667,8.63333) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "ctrl-sentry",
+    "kb": "1.3",
+    "intent": "template",
+    "paths": 2,
+    "notes": "flatten(2.1,9.8) flatten(17.9667,10.2667) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "ctrl-steering-heat",
+    "kb": "2.3",
+    "intent": "template",
+    "paths": 4,
+    "notes": "ellipse-to-path flatten(10.85,5.075) flatten(6.65,16.9167) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "ctrl-sunroof",
+    "kb": "1.4",
+    "intent": "template",
+    "paths": 3,
+    "notes": "flatten(3.73333,9.56667) flatten(3.73333,19.6) flatten(10.5,5.6) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "ctrl-trip-plan",
+    "kb": "1.1",
+    "intent": "template",
+    "paths": 3,
+    "notes": "circle-to-path flatten(7.23333,8.63333) flatten(18.2,4.43333) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "ctrl-trunk",
+    "kb": "1.4",
+    "intent": "template",
+    "paths": 3,
+    "notes": "flatten(5.13333,9.33333) flatten(11.2,3.73333) flatten(5.13333,16.3333) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "ctrl-window-close",
+    "kb": "1.7",
+    "intent": "template",
+    "paths": 4,
+    "notes": "flatten(6.53333,5.6) flatten(9.1,9.8) flatten(14,9.8) flatten(17.0333,20.3) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "sheet-handle",
+    "kb": "0.3",
+    "intent": "template",
+    "paths": 1,
+    "notes": "rect-flatten(161,0) currentColor->#000000; rect->path",
+    "bad": ""
+  },
+  {
+    "name": "status-signal-battery",
+    "kb": "1.9",
+    "intent": "template",
+    "paths": 4,
+    "notes": "rect-flatten(24.5,2.5) flatten(1.4,1.2) flatten(22.7,0.7) flatten(41.6,3.8) currentColor->#000000; 冗余 clipPath 已去掉;rect->path",
+    "bad": ""
+  },
+  {
+    "name": "tab-charging",
+    "kb": "1.3",
+    "intent": "template",
+    "paths": 1,
+    "notes": "flatten(5.43607,2.53795) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "tab-controls",
+    "kb": "1.0",
+    "intent": "template",
+    "paths": 3,
+    "notes": "circle-to-path flatten(4,12) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "tab-dashboard",
+    "kb": "1.6",
+    "intent": "template",
+    "paths": 4,
+    "notes": "circle-to-path flatten(3.8,7.47018) flatten(4.2,18.2) flatten(12,14.1) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "tab-settings",
+    "kb": "5.1",
+    "intent": "template",
+    "paths": 2,
+    "notes": "circle-to-path flatten(2.22128,1.76) currentColor->#000000",
+    "bad": ""
+  },
+  {
+    "name": "tab-trips",
+    "kb": "1.2",
+    "intent": "template",
+    "paths": 3,
+    "notes": "circle-to-path flatten(5,6.8) currentColor->#000000",
+    "bad": ""
+  }
+]
