@@ -7,7 +7,14 @@
 
 import SwiftUI
 
+/// 设置的唯一真源。
+///
+/// `@MainActor`：这是个 UI 状态（服务端地址、指令总开关），读写都发生在主线程 ——
+/// View、4 个 `@MainActor` 的 ViewModel、`AppStore` 全在主 actor 上。
+/// 不标的话，严格并发检查会把每一次 `SettingsStore.shared.prefersMockData`
+/// 都算成跨 actor 访问（当前 `SWIFT_STRICT_CONCURRENCY: minimal` 只是暂时压住了）。
 @Observable
+@MainActor
 final class SettingsStore {
 
     static let shared = SettingsStore()

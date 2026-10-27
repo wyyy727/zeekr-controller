@@ -15,6 +15,12 @@ struct ZeekrDashApp: App {
     @State private var settings = SettingsStore.shared
     @State private var appStore = AppStore.shared
 
+    init() {
+        // 字体没注册 / 图标没进 bundle 都是**静默**失败：界面照常显示，
+        // 只是悄悄退化成系统字体和空白方块。这里让 App 自己在控制台喊一声。
+        AssetSelfCheck.run()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()

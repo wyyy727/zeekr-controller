@@ -6,8 +6,8 @@
 //
 //  设计对齐确认版预览页（preview/index.html）：
 //  - 底部导航为「悬浮玻璃胶囊」，两侧留 14pt 间隙，而非通栏
-//  - 胶囊**贴近屏幕底边**（下沿距屏幕底 14pt），因此它会压在系统底部安全区
-//    之上 —— 见 `tabBarBottomGap` 的说明
+//  - 胶囊由原生 `safeAreaBar(edge: .bottom)` 承载，下沿距屏幕物理底 22pt
+//    （实测系统电话 app 为 21.7pt）—— 会压进底部安全区，但避开 Home Indicator 白条
 //  - 背景有一层氛围光斑（4 组径向渐变）—— 玻璃必须有可折射的内容才看得出效果
 //  - 卡片保持实心（密集文字上盖玻璃是可读性灾难，Apple HIG 明确反对）
 //  - 不使用 .clipped()，它会让玻璃采样不到背景从而静默失效
@@ -17,7 +17,6 @@ import SwiftUI
 
 struct RootView: View {
 
-    @Environment(\.colorScheme) private var scheme
     @Environment(AppStore.self) private var store
 
     /// 进出前后台统一在这里处理。不能下放到页面：页面随 tab 重建，
@@ -27,27 +26,27 @@ struct RootView: View {
     /// 当前 Tab 由 AppStore 持有 —— 车况页的登录引导要能把用户送到「设置」页
     private var selectedTab: AppTab { store.selectedTab }
 
-    /// 悬浮胶囊两侧的留白，让 tab bar 从内容上「浮」起来
-    private static let tabBarSideInset: CGFloat = 14
-
-    /// 悬浮胶囊下沿距**屏幕底边**的留白。
+    /// 悬浮胶囊下沿距**屏幕物理底边**的留白。
     ///
-    /// 注意基准是屏幕底边，不是安全区上沿 —— `body` 里那层 `ZStack` 挂了
-    /// `ignoresSafeArea(.container, edges: .bottom)`，让它越过 34pt 的系统
-    /// 安全区、一直铺到屏幕底部。这样在任何机型上都成立：没有底部安全区的
-    /// 设备（Home 键机型）会退化成普通的 14pt 下边距，不会跑到屏幕外面去。
-    private static let tabBarBottomGap: CGFloat = 14
+    /// **22 是量出来的，不是估的**：iPhone 16 Pro（402×874pt @3x）的系统电话 app
+    /// 截图逐像素测量 —— 胶囊下沿距屏幕底 65px / 3 = 21.7pt，取 22；
+    /// 同一张图里侧边距 61px / 3 = 20.3pt（我们取 21）、胶囊高 180px / 3 = 60pt
+    /// （我们取 62，差 2pt 来自 v2 规格，未改）。
+    ///
+    /// 注意 22 < 底部安全区 34：即 Apple 自己的悬浮底栏**就是压进安全区里的**。
+    /// Home Indicator 的视觉条大约占距底 8–13pt，所以 22 仍然落在它上方约 9pt 处，
+    /// 不会盖住。真正要避开的不是「34pt 安全区」，而是那条 5pt 高的白条本身。
+    /// （第 11 轮我曾按「必须待在安全区之上」推到 48，属判断失误。）
+    private static let tabBarBottomGap: CGFloat = 22
 
-    /// Toast 距**屏幕底边**的间距（与胶囊同一基准，见上）。
+    /// Toast 距**屏幕物理底边**的间距（与胶囊同一基准，见上）。
     ///
     /// 需紧贴底部导航胶囊上方，而不是让 Toast 落在内容区 ——
     /// 车控面板是车况页最后一张卡片，若 Toast 浮在屏幕中部偏下的位置，
     /// 滚到底部时两者会占据同一区域而互相遮挡。
     ///
-    /// 数值 = 胶囊上沿距屏幕底（下留白 14 + 胶囊 64 = 78）+ 间隙 8 = 86。
-    /// 不再减系统安全区：外层 ZStack 已忽略底部安全区，Toast 与胶囊共用
-    /// 「屏幕底边」这一个基准。
-    private static let toastBottomInset: CGFloat = 86
+    /// 数值 = 下留白 22 + 胶囊 62 = 84（胶囊上沿），再留 8 的间隙 = 92。
+    private static let toastBottomInset: CGFloat = 92
 
     var body: some View {
         // 这里刻意**不使用** `GlassEffectContainer`。
@@ -76,23 +75,28 @@ struct RootView: View {
                 if let toast = store.toast {
                     ToastBubble(text: toast)
                         .padding(.bottom, Self.toastBottomInset)
-                        .padding(.horizontal, Metrics.screenPadding)
+                        .padding(.horizontal, V2Metrics.screenPadding)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                         .allowsHitTesting(false)
                 }
             }
             .animation(.easeInOut(duration: 0.22), value: store.toast)
-
+        }
+        /* 越过底部安全区，让下一行的 `safeAreaBar` 把 bar 锚在**屏幕物理底边**上。
+           不能只靠 bar 自身：它锚的是父视图的边界，不越过安全区就锚在安全区上沿，
+           胶囊会被顶高 34pt（第 11 轮就是这么来的）。 */
+        .ignoresSafeArea(.container, edges: .bottom)
+        /* 底部胶囊走原生 `safeAreaBar`（iOS 26）：
+           · 它与 `safeAreaInset` 同构 —— **只内缩安全区、不裁剪内容**，
+             滚动时页面从胶囊底下穿过，玻璃才有可折射的动内容；
+           · 文档原文「extends the edge effect of any scroll views affected by the
+             inset safe area」，胶囊上方那条边缘淡出由系统负责，不必手写。
+           早期这里是「整层 ignoresSafeArea + 内容自带 105pt 留白」—— 那是网页
+           （`position:fixed` + `.wrap` padding）的机制，iOS 有原生 API 不该照抄。 */
+        .safeAreaBar(edge: .bottom, spacing: V2Metrics.tabBarContentGap) {
             tabBar
         }
-        // 整层越过底部安全区，一直铺到屏幕底边 —— 底部胶囊与 Toast 的定位基准
-        // 因此从「安全区上沿」变成「屏幕底边」。
-        //
-        // 为什么挂在这里而不是挂在 tabBar 上：tabBar 是内容自适应尺寸的视图，
-        // 它自己挂 ignoresSafeArea 只放开绘制边界、不会把视图往下挪，胶囊下方
-        // 仍会留下安全区那 34pt（实机量到约 40pt 空隙，正是本 bug）。
-        .ignoresSafeArea(.container, edges: .bottom)
-        .tint(Theme.accent(scheme))
+        .tint(V2Color.accent)
         // 全局请求指示条（对应网页顶部的 #netBar）。
         //
         // 挂在最外层的 `.overlay(alignment: .top)` 而不是塞进 ZStack：
@@ -164,77 +168,36 @@ struct RootView: View {
         }
     }
 
-    // MARK: - 背景氛围光斑
+    // MARK: - 背景：v2 渐变 + 两处光斑
 
-    /// 青 / 橙调光斑，模糊 6pt。
-    /// 固定在底层不随内容滚动，模拟 iOS 壁纸透过玻璃的效果。
+    /// 照抄 `index-v2.html` 1631–1656 的 `.screen`：
+    /// 180deg 三停渐变（#F7F8FC → #EEF2FA → #E8EEF7）+ BlobViolet + BlobCyan。
+    ///
+    /// 旧的四团青/橙光斑整体删除：v2 只有两团，且位置与半径都是量出来的定值，
+    /// 不是按屏幕比例估的 —— 换成比例会把紫团挪错位置（HTML 注释专门警告过）。
     private var backgroundLayer: some View {
-        GeometryReader { geo in
-            ZStack {
-                Theme.background(scheme)
-
-                aura(
-                    ChineseColor.tianQing.opacity(scheme == .dark ? 0.22 : 0.16),
-                    at: UnitPoint(x: 0.18, y: 0.12),
-                    radius: 0.26 * min(geo.size.width, geo.size.height),
-                    in: geo.size
-                )
-
-                aura(
-                    ChineseColor.qingBi.opacity(scheme == .dark ? 0.16 : 0.13),
-                    at: UnitPoint(x: 0.84, y: 0.22),
-                    radius: 0.24 * min(geo.size.width, geo.size.height),
-                    in: geo.size
-                )
-
-                aura(
-                    ChineseColor.dianLan.opacity(scheme == .dark ? 0.20 : 0.14),
-                    at: UnitPoint(x: 0.62, y: 0.88),
-                    radius: 0.30 * min(geo.size.width, geo.size.height),
-                    in: geo.size
-                )
-
-                aura(
-                    ChineseColor.tiSe.opacity(scheme == .dark ? 0.12 : 0.10),
-                    at: UnitPoint(x: 0.08, y: 0.76),
-                    radius: 0.22 * min(geo.size.width, geo.size.height),
-                    in: geo.size
-                )
-            }
-            .blur(radius: 6)
-        }
-        .ignoresSafeArea()
-    }
-
-    private func aura(
-        _ color: Color,
-        at center: UnitPoint,
-        radius: CGFloat,
-        in size: CGSize
-    ) -> some View {
-        RadialGradient(
-            colors: [color, color.opacity(0)],
-            center: center,
-            startRadius: 0,
-            endRadius: max(radius, 1)
-        )
-        .frame(width: size.width, height: size.height)
+        V2Background()
+            .ignoresSafeArea()
     }
 
     // MARK: - 底部悬浮玻璃胶囊
 
     private var tabBar: some View {
-        HStack(spacing: 0) {
+        /* 规格（index-v2.html `.tabbar-inner`，实测 getBoundingClientRect）：
+           高 62 / 圆角 36 / 内距 0 10 / 项间距 4.5 / 5 项各 62×54
+           → 5×62 + 4×4.5 + 20 = 348，正好是胶囊宽度。 */
+        HStack(spacing: V2Metrics.tabItemGap) {
             ForEach(AppTab.allCases) { tab in
                 tabItem(tab)
             }
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 7)
-        .glassEffect(.regular, in: .capsule)
-        .padding(.horizontal, Self.tabBarSideInset)
-        // 两侧留 14pt，整体悬浮而非通栏；底部 14pt 由外层 ZStack 的
-        // ignoresSafeArea 保证是「距屏幕底边」（详见 tabBarBottomGap）。
+        .padding(.horizontal, 10)
+        .frame(height: V2Metrics.tabBarHeight)
+        // 底栏是浮层 → 真玻璃（任务书 1.2）。不用 .capsule：胶囊半径是高度的一半(31)，
+        // 而设计是 36，肉眼能看出差别。
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: V2Metrics.tabBarRadius, style: .continuous))
+        .padding(.horizontal, V2Metrics.tabBarSideInset)
+        // 两侧留白 21（实测电话 app 20.3）、下沿距屏幕底 22（实测 21.7）。
         .padding(.bottom, Self.tabBarBottomGap)
     }
 
@@ -247,31 +210,34 @@ struct RootView: View {
                 store.selectedTab = tab
             }
         } label: {
-            VStack(spacing: 3) {
-                Image(systemName: tab.systemImage)
-                    .font(.system(size: 21))
-                    .scaleEffect(isOn ? 1.06 : 1)
-                    .animation(.spring(response: 0.24, dampingFraction: 0.6), value: isOn)
+            /* HTML `.tab`：gap 4、字号 11、字重 **500（选中也是 500）**、
+               `transform: none` —— 规格里明确写了「不做选中胶囊 / 底色 / 放大动画」。 */
+            VStack(spacing: 4) {
+                Image(tab.assetName)
+                    .renderingMode(.template)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: V2Metrics.tabIconSize, height: V2Metrics.tabIconSize)
 
                 Text(tab.title)
-                    .font(.system(size: 10, weight: isOn ? .semibold : .regular))
+                    .v2Text(.label11, color: isOn ? V2Color.accent : V2Color.text2)
             }
-            .foregroundStyle(isOn ? Theme.accent(scheme) : Theme.textTertiary(scheme))
-            .frame(maxWidth: .infinity, minHeight: 50)
-            // 选中态：玻璃上的一层高光药丸
-            .background {
-                if isOn {
-                    Capsule()
-                        .fill(ChineseColor.xiangYaBai.opacity(scheme == .dark ? 0.12 : 0.70))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                }
-            }
+            .foregroundStyle(isOn ? V2Color.accent : V2Color.text2)
+            .frame(width: V2Metrics.tabItemWidth, height: V2Metrics.tabItemHeight)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        // 按下整项 opacity .72（HTML `.tab:active`）
+        .buttonStyle(TabPressStyle())
         .accessibilityLabel(tab.title)
         .accessibilityAddTraits(isOn ? [.isSelected] : [])
+    }
+}
+
+/// 底栏按下反馈：整项 opacity .72（HTML `.tab:active{opacity:.72}`）
+private struct TabPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.72 : 1)
     }
 }
 
@@ -293,13 +259,15 @@ enum AppTab: String, CaseIterable, Identifiable {
         }
     }
 
-    var systemImage: String {
+    /// 底栏图标资产（`Icons.xcassets` 的 `tab-*`，24×24 线稿，stroke 1.7）。
+    /// HTML 用 `<use href="#tab-dashboard">` 引同一批 SVG —— 不许再用 SF Symbols 顶替。
+    var assetName: String {
         switch self {
-        case .dashboard: return "car"
-        case .trips:     return "chart.xyaxis.line"
-        case .charges:   return "bolt"
-        case .controls:  return "steeringwheel"
-        case .settings:  return "gearshape"
+        case .dashboard: return "tab-dashboard"
+        case .trips:     return "tab-trips"
+        case .charges:   return "tab-charging"
+        case .controls:  return "tab-controls"
+        case .settings:  return "tab-settings"
         }
     }
 }
@@ -312,39 +280,46 @@ enum AppTab: String, CaseIterable, Identifiable {
 /// 背景保持透明，交给 `RootView` 的氛围光斑层，让玻璃有东西可折射。
 struct ScreenContainer<Content: View, Accessory: View>: View {
 
-    @Environment(\.colorScheme) private var scheme
-
-    /// 数据来源徽标文案；传 nil 则不展示徽标（真实数据无需标识）
-    var modeText: String?
-    /// 徽标左侧的附加操作（如充电页的账单菜单），默认无
+    /// 数据来源胶囊；nil 不展示（真实数据无需标识）
+    var modePill: ModePill?
+    /// 胶囊**右侧**的附加文字（车况屏的「更新于 HH:MM」）。
+    /// HTML 把它和来源胶囊放在同一行 `.v2-head--end` 里，不是内容区的另一行。
+    var tailText: String?
+    /// 屏内卡片纵向间距：默认 16，车况屏是唯一例外（12）
+    var sectionGap: CGFloat
+    /// 胶囊左侧的附加操作（如充电页的月份胶囊），默认无
     @ViewBuilder var trailingAccessory: () -> Accessory
     @ViewBuilder let content: () -> Content
 
+    /// 显式 init：`@ViewBuilder` 标在存储属性上时，成员初始化器的参数推导
+    /// 在不同 Swift 版本里表现不完全一致；显式写出来更稳（本机没有 Xcode 可验证）。
+    init(
+        modePill: ModePill?,
+        tailText: String? = nil,
+        sectionGap: CGFloat = V2Metrics.screenGap,
+        @ViewBuilder trailingAccessory: @escaping () -> Accessory,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.modePill = modePill
+        self.tailText = tailText
+        self.sectionGap = sectionGap
+        self.trailingAccessory = trailingAccessory
+        self.content = content
+    }
+
     var body: some View {
+        /* 底部不写任何留白：外层 `safeAreaBar(edge: .bottom, spacing: 29)`
+           已经把「胶囊高度 + 29」算进安全区 —— 内容滚到底时停在胶囊上方，
+           滚动途中则从胶囊下面穿过（安全区只内缩、不裁剪）。 */
         ScrollView {
-            VStack(spacing: Metrics.sectionSpacing) {
+            VStack(spacing: sectionGap) {
                 content()
             }
-            .padding(.horizontal, Metrics.screenPadding)
-            .padding(.bottom, 24)
+            .padding(.horizontal, V2Metrics.screenPadding)
         }
         .background(Color.clear)
         .safeAreaInset(edge: .top, spacing: 0) {
             topBar
-        }
-        // 为底部浮动导航胶囊预留空间。
-        //
-        // 为什么用 safeAreaBar（iOS 26+）而不是 safeAreaInset：
-        // 两者都会把滚动内容顶上来，但 safeAreaBar 额外会把**滚动边缘效果**
-        // 延伸到这一侧 —— 内容滚到胶囊附近时是柔和淡出，而不是被硬生生裁在
-        // 胶囊下面。胶囊本身仍是浮在内容之上的（见 RootView.tabBar），内容
-        // 照旧从它底下穿过，视觉规格与 preview/index.html 一致。
-        //
-        // 高度只写胶囊自身占的 70pt；系统安全区由 safeAreaBar 自动叠加，
-        // 不必手算 34pt。此前这里缺了这道预留 —— 胶囊占了 104pt 而内容只留
-        // 24pt，导致「快捷车控」永远滚不到胶囊上方，只能在它后面来回弹。
-        .safeAreaBar(edge: .bottom, spacing: 0) {
-            Color.clear.frame(height: Metrics.tabBarClearance)
         }
         .scrollIndicators(.hidden)
     }
@@ -355,27 +330,46 @@ struct ScreenContainer<Content: View, Accessory: View>: View {
 
             trailingAccessory()
 
-            if let modeText {
-                Text(modeText)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(scheme == .dark ? ChineseColor.tianQing : ChineseColor.tianQingDeep)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 5)
-                    .glassEffect(.regular, in: .capsule)
+            if let modePill {
+                // `.v2-pill-src`：11/500/14、padding 4 8、r999、最大宽 140
+                Text(modePill.text)
+                    .v2Text(.label11, color: Color(hex: modePill.foregroundHex))
+                    .lineLimit(1)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .frame(maxWidth: 140)
+                    .background(Color(hex: modePill.backgroundHex))
+                    .clipShape(Capsule())
                     .transition(.opacity.combined(with: .scale(scale: 0.92)))
             }
+
+            if let tailText {
+                // `.v2-updated`：11/500/16 text-3，与胶囊间距 8（`.v2-head-r{gap:8}`）
+                Text(tailText)
+                    .v2Text(.note11, color: V2Color.text3)
+                    .lineLimit(1)
+            }
         }
-        .padding(.horizontal, Metrics.screenPadding)
-        .padding(.vertical, 8)
-        .animation(.easeInOut(duration: 0.2), value: modeText)
+        .padding(.horizontal, V2Metrics.screenPadding)
+        // 定高：不管这一行放的是 22pt 的胶囊还是 32pt 的月份 chip，四屏首卡都对齐
+        .frame(height: V2Metrics.topBarHeight)
+        .animation(.easeInOut(duration: 0.2), value: modePill)
+        .animation(.easeInOut(duration: 0.2), value: tailText)
     }
 }
 
 extension ScreenContainer where Accessory == EmptyView {
     /// 无附加操作的常规页面
-    init(modeText: String?, @ViewBuilder content: @escaping () -> Content) {
+    init(
+        modePill: ModePill?,
+        tailText: String? = nil,
+        sectionGap: CGFloat = V2Metrics.screenGap,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
         self.init(
-            modeText: modeText,
+            modePill: modePill,
+            tailText: tailText,
+            sectionGap: sectionGap,
             trailingAccessory: { EmptyView() },
             content: content
         )

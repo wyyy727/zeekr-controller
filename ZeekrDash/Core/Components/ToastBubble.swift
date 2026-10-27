@@ -17,24 +17,17 @@ struct ToastBubble: View {
 
     let text: String
 
-    @Environment(\.colorScheme) private var scheme
-
     var body: some View {
         Text(text)
-            .font(.system(size: 12.5, weight: .medium))
-            // 浅色模式墨色、深色模式浅色，随配色方案自动切换
-            .foregroundStyle(Theme.textPrimary(scheme))
+            // `.toast{font-size:12.5px}` 没写 font-weight，即 400 —— 不是 500
+            .v2Text(.toast12, color: V2Color.text1)
             .multilineTextAlignment(.center)
             .padding(.horizontal, 18)
             .padding(.vertical, 10)
             // 毛玻璃半透明底：与卡片/徽标/tab bar 同一套材质
             .glassEffect(.regular, in: .capsule)
             // 保留柔和投影，让它从滚动内容上「浮」起来
-            .shadow(
-                color: ChineseColor.moSe.opacity(scheme == .dark ? 0.35 : 0.12),
-                radius: 10,
-                y: 3
-            )
+            .shadow(color: V2Color.glassShadow, radius: 10, y: 3)
             .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -45,5 +38,5 @@ struct ToastBubble: View {
         ToastBubble(text: "连接服务端失败，已切换为模拟数据")
     }
     .padding()
-    .background(Theme.background(.light))
+    .background(V2Background())
 }

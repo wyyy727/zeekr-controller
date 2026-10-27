@@ -25,14 +25,27 @@ enum DataMode: Equatable {
     /// 配置了真实地址但连不上，已回落模拟数据
     case offline
 
-    /// 顶栏徽标文案；返回 nil 表示不展示徽标（真实数据无需标识）
-    var badgeText: String? {
+    /// 顶栏数据来源胶囊；返回 nil 表示不展示（真实数据无需标识）。
+    /// 文案与配色逐条对齐 HTML `v2SourcePill()`（index-v2.html 4075–4083）。
+    var badgePill: ModePill? {
         switch self {
-        case .mock:    return "模拟数据"
-        case .offline: return "模拟数据 · 后端不可达"
+        case .mock:    return ModePill(text: "模拟数据",       backgroundHex: 0xFEF3E2, foregroundHex: 0x8A5A12)
+        case .offline: return ModePill(text: "离线 · 模拟数据", backgroundHex: 0xFFF1F4, foregroundHex: 0xB23350)
         case .live:    return nil
         }
     }
+}
+
+/// 顶栏数据来源胶囊（对应 HTML `.v2-pill-src`）。
+///
+/// 用 hex 而不是 `Color`：这个结构体要能被 `Equatable` 比较、被 `DataMode` 直接返回，
+/// 不把 SwiftUI 的颜色类型渗进数据层。
+struct ModePill: Equatable {
+    let text: String
+    /// 底色 —— 琥珀 `#FEF3E2`（模拟）/ 红 `#FFF1F4`（离线）/ 灰 `#EEF0F8`（未登录）
+    let backgroundHex: UInt32
+    /// 文字色 —— `#8A5A12` / `#B23350` / `#5E6775`
+    let foregroundHex: UInt32
 }
 
 @Observable
@@ -83,6 +96,14 @@ final class AppStore {
     ///
     /// nil = 服务端没拿到（网关没回或解析失败）。此时 `isCapabilityAvailable`
     /// 一律返回 true —— 宁可多显示，也不隐藏这台车其实支持的按钮。
+    /// 服务端是否也允许下发车控（`GET /api/health` 的 `allowCommands`）。
+    /// nil = 还没问过 / 问失败 —— 界面据此决定要不要提示「本地开了服务端也会拒」。
+    ///
+    /// **这是该状态的唯一存放处。** 早先 `SettingsViewModel` 里也有一份同名字段，
+    /// 同样请求 `/api/health` 却没有任何界面读它 —— 两份副本会静默不同步，
+    /// 已删除。设置页将来要展示这个值，从这里读，不要再造一个。
+    private(set) var serverAllowsCommands: Bool?
+
     var capabilities: [String: Bool]?
 
     /// 权限包原始 ID 列表（与 `capabilities` 同一次请求返回）。
@@ -136,7 +157,13 @@ final class AppStore {
     var isCharging: Bool { vehicleStatus?.isCharging == true }
 
     /// 顶栏徽标文案（nil 表示不显示）
-    var modeBadgeText: String? { dataMode.badgeText }
+    /// 顶栏胶囊。未登录优先 —— 此时页面显示的是登录墙，标「未登录」比标「模拟数据」准确。
+    var modePill: ModePill? {
+        if needsLogin {
+            return ModePill(text: "未登录", backgroundHex: 0xEEF0F8, foregroundHex: 0x5E6775)
+        }
+        return dataMode.badgePill
+    }
 
     private let settings: SettingsStore
     private var pollTask: Task<Void, Never>?
@@ -154,7 +181,30 @@ final class AppStore {
 
     // MARK: - 手动刷新
 
+    /// 正在飞的那一次刷新。
+    ///
+    /// 刷新有 10+ 个入口（轮询、四屏下拉、5 处「重试」按钮、前后台切换、登录后、改地址后），
+    /// 它们之间没有任何互斥。并发跑会出现两类问题：
+    ///   · 先完成的那轮 `defer` 把 `isLoading` 提前打回 false（骨架提前消失）
+    ///   · 后发先至 —— 慢的那轮带着旧数据覆盖掉新数据
+    /// 所以这里**复用同一个 Task**：第二个调用者只是等同一个结果，不会另起一轮。
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
+
     func refresh() async {
+        if let inFlight = refreshTask {
+            await inFlight.value
+            return
+        }
+        let task = Task { [weak self] in
+            await self?.performRefresh()
+        }
+        refreshTask = task
+        await task.value
+        refreshTask = nil
+    }
+
+    /// 真正的拉取逻辑。**只由 `refresh()` 调用** —— 那里保证同一时刻只有一轮。
+    private func performRefresh() async {
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
@@ -358,7 +408,7 @@ final class AppStore {
            保留上一次真实读取的时间，界面才说得清"这些数字是什么时候的"。 */
         dataMode = .offline
         /* ⚠️ 不要把 `errorMessage` 清空。
-           它是车况页/车控页那条 `ErrorBanner` 的唯一数据源 ——
+           它是车况页/车控页那条 stale 横幅（`.v2-stale`）的唯一数据源 ——
            清空等于"连接服务端失败"这个最常见的故障在页面上完全不留痕迹，
            用户只看到一份演示数据，还以为是自己的车。
            弹窗（`pendingDataSourceNotice`）只在首次回落时弹一次，
@@ -532,6 +582,25 @@ final class AppStore {
             guard !Task.isCancelled else { return }
             // 只有"仍然是这条消息"时才清除，避免误清掉更新后的那条
             if self?.toast == message { self?.toast = nil }
+        }
+    }
+}
+
+// MARK: - 服务端车控开关
+
+extension AppStore {
+
+    /// 单独问一次 `/api/health`。
+    ///
+    /// 为什么不在 `refresh()` 里带上：那条链路每 60 秒跑一次，
+    /// 而车控开关是个几乎不变的配置项 —— 进车控页问一次就够。
+    func refreshServerCommandFlag() async {
+        do {
+            let health: HealthInfo = try await APIClient.shared.get(APIRoutes.health)
+            serverAllowsCommands = health.allowCommands
+        } catch {
+            // 问不到就当未知：界面不会因为一次网络抖动就断言「服务端没开」
+            serverAllowsCommands = nil
         }
     }
 }

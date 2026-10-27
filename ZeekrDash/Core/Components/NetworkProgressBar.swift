@@ -32,9 +32,9 @@ struct NetworkProgressBar: View {
 
             LinearGradient(
                 colors: [
-                    Theme.accent(scheme).opacity(0),
-                    Theme.accent(scheme),
-                    Theme.accent(scheme).opacity(0),
+                    V2Color.accent.opacity(0),
+                    V2Color.accent,
+                    V2Color.accent.opacity(0),
                 ],
                 startPoint: .leading,
                 endPoint: .trailing

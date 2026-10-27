@@ -24,5 +24,12 @@
 		<string>Inter-SemiBold.ttf</string>
 		<string>Inter-Bold.ttf</string>
 	</array>
+	<!-- 锁定浅色外观。
+	     真源是 index-v2.html 在浅色下的渲染：背景三停渐变、玻璃卡、图表配色全是固定浅色值。
+	     不锁的话，系统切到深色后自绘区仍是浅底深字，而 TextField 光标/键盘、Toggle、
+	     ProgressView 会变深 —— 同一屏里出现两套语言。
+	     要真正支持深色，需要给 V2Color 全量补 dark 变体（HTML 里有参考值），那是独立的一项工作。 -->
+	<key>UIUserInterfaceStyle</key>
+	<string>Light</string>
 </dict>
 </plist>
