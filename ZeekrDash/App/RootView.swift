@@ -5,15 +5,17 @@
 //  根视图：五 Tab + 液态玻璃
 //
 //  设计对齐确认版预览页（preview/index.html）：
-//  - 底部导航为「悬浮玻璃胶囊」，两侧留 14pt 间隙，而非通栏
-//  - 胶囊由原生 `safeAreaBar(edge: .bottom)` 承载，下沿距屏幕物理底 22pt
-//    （实测系统电话 app 为 21.7pt）—— 会压进底部安全区，但避开 Home Indicator 白条
+//  - 底部导航为「悬浮玻璃胶囊」，两侧留 21pt 间隙，而非通栏
+//  - 胶囊由 `.overlay(alignment: .bottom)` 钉在**屏幕物理底边**，下沿留白 14pt
+//    （= 网页 `.tabbar{padding-bottom:14}`）—— 会压进底部安全区，但避开 Home Indicator 白条
+//  - 键盘不参与布局（`.ignoresSafeArea(.keyboard)`）：顶栏/底栏是固定 chrome
 //  - 背景有一层氛围光斑（4 组径向渐变）—— 玻璃必须有可折射的内容才看得出效果
 //  - 卡片保持实心（密集文字上盖玻璃是可读性灾难，Apple HIG 明确反对）
 //  - 不使用 .clipped()，它会让玻璃采样不到背景从而静默失效
 //
 
 import SwiftUI
+import UIKit   // 键盘「完成」按钮要 resignFirstResponder
 
 struct RootView: View {
 
@@ -26,27 +28,15 @@ struct RootView: View {
     /// 当前 Tab 由 AppStore 持有 —— 车况页的登录引导要能把用户送到「设置」页
     private var selectedTab: AppTab { store.selectedTab }
 
-    /// 悬浮胶囊下沿距**屏幕物理底边**的留白。
-    ///
-    /// **22 是量出来的，不是估的**：iPhone 16 Pro（402×874pt @3x）的系统电话 app
-    /// 截图逐像素测量 —— 胶囊下沿距屏幕底 65px / 3 = 21.7pt，取 22；
-    /// 同一张图里侧边距 61px / 3 = 20.3pt（我们取 21）、胶囊高 180px / 3 = 60pt
-    /// （我们取 62，差 2pt 来自 v2 规格，未改）。
-    ///
-    /// 注意 22 < 底部安全区 34：即 Apple 自己的悬浮底栏**就是压进安全区里的**。
-    /// Home Indicator 的视觉条大约占距底 8–13pt，所以 22 仍然落在它上方约 9pt 处，
-    /// 不会盖住。真正要避开的不是「34pt 安全区」，而是那条 5pt 高的白条本身。
-    /// （第 11 轮我曾按「必须待在安全区之上」推到 48，属判断失误。）
-    private static let tabBarBottomGap: CGFloat = 22
-
-    /// Toast 距**屏幕物理底边**的间距（与胶囊同一基准，见上）。
+    /// Toast 距**屏幕物理底边**的间距（与胶囊同一基准）。
     ///
     /// 需紧贴底部导航胶囊上方，而不是让 Toast 落在内容区 ——
     /// 车控面板是车况页最后一张卡片，若 Toast 浮在屏幕中部偏下的位置，
     /// 滚到底部时两者会占据同一区域而互相遮挡。
     ///
-    /// 数值 = 下留白 22 + 胶囊 62 = 84（胶囊上沿），再留 8 的间隙 = 92。
-    private static let toastBottomInset: CGFloat = 92
+    /// 数值 = 下留白 14 + 胶囊 62 = 76（胶囊上沿），再留 8 的间隙 = 84。
+    private static let toastBottomInset: CGFloat =
+        V2Metrics.tabBarBottomGap + V2Metrics.tabBarHeight + 8
 
     var body: some View {
         // 这里刻意**不使用** `GlassEffectContainer`。
@@ -82,18 +72,24 @@ struct RootView: View {
             }
             .animation(.easeInOut(duration: 0.22), value: store.toast)
         }
-        /* 越过底部安全区，让下一行的 `safeAreaBar` 把 bar 锚在**屏幕物理底边**上。
-           不能只靠 bar 自身：它锚的是父视图的边界，不越过安全区就锚在安全区上沿，
-           胶囊会被顶高 34pt（第 11 轮就是这么来的）。 */
+        /* 越过底部安全区：这一层（含页面 ScrollView）要能铺到**屏幕物理底边**，
+           否则底栏只能锚在安全区上沿，下沿被顶高 34pt。 */
         .ignoresSafeArea(.container, edges: .bottom)
-        /* 底部胶囊走原生 `safeAreaBar`（iOS 26）：
-           · 它与 `safeAreaInset` 同构 —— **只内缩安全区、不裁剪内容**，
-             滚动时页面从胶囊底下穿过，玻璃才有可折射的动内容；
-           · 文档原文「extends the edge effect of any scroll views affected by the
-             inset safe area」，胶囊上方那条边缘淡出由系统负责，不必手写。
-           早期这里是「整层 ignoresSafeArea + 内容自带 105pt 留白」—— 那是网页
-           （`position:fixed` + `.wrap` padding）的机制，iOS 有原生 API 不该照抄。 */
-        .safeAreaBar(edge: .bottom, spacing: V2Metrics.tabBarContentGap) {
+        /* 键盘同样**不参与布局**。
+           之前没写这一条，键盘一弹出系统的键盘安全区就把整棵子树压扁：
+           页面内容上移、顶栏跟着被顶到状态栏下面（截图里「远程车控」压住了时钟），
+           底栏胶囊则浮到屏幕中部压住内容。顶栏/底栏是固定 chrome，不该随键盘动。 */
+        .ignoresSafeArea(.keyboard, edges: .bottom)
+        /* 底部胶囊钉在**屏幕物理底边**（+ `V2Metrics.tabBarBottomGap` = 14）。
+           为什么不用 `safeAreaBar(edge: .bottom)`：实测它把 bar 摆在**安全区上沿**，
+           外层 `.ignoresSafeArea(.container, edges: .bottom)` 对它无效 ——
+           22pt 的留白在真机上被算成 22 + 34 = 56pt（iPhone 16 Pro 截图逐像素量出来的）。
+           改用 overlay 后 bar 由自己定位：坐标就是物理底边，留白就是 14。
+           · 内容侧的留白不再由安全区自动产生，改由 `ScreenContainer` 的
+             `.contentMargins(.bottom, V2Metrics.tabBarClearance)` 精确给出（105 = 14+62+29）；
+           · overlay 覆盖在 ScrollView 之上，滚动时页面照样从胶囊底下穿过，
+             玻璃仍能实时折射正在动的内容。 */
+        .overlay(alignment: .bottom) {
             tabBar
         }
         .tint(V2Color.accent)
@@ -197,8 +193,8 @@ struct RootView: View {
         // 而设计是 36，肉眼能看出差别。
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: V2Metrics.tabBarRadius, style: .continuous))
         .padding(.horizontal, V2Metrics.tabBarSideInset)
-        // 两侧留白 21（实测电话 app 20.3）、下沿距屏幕底 22（实测 21.7）。
-        .padding(.bottom, Self.tabBarBottomGap)
+        // 两侧留白 21、下沿距屏幕底 14（= 网页 `.tabbar{padding-bottom:14}`）。
+        .padding(.bottom, V2Metrics.tabBarBottomGap)
     }
 
     private func tabItem(_ tab: AppTab) -> some View {
@@ -308,20 +304,37 @@ struct ScreenContainer<Content: View, Accessory: View>: View {
     }
 
     var body: some View {
-        /* 底部不写任何留白：外层 `safeAreaBar(edge: .bottom, spacing: 29)`
-           已经把「胶囊高度 + 29」算进安全区 —— 内容滚到底时停在胶囊上方，
-           滚动途中则从胶囊下面穿过（安全区只内缩、不裁剪）。 */
+        /* 底部留白由这里自己给：底栏是 overlay（见 RootView），不再内缩安全区，
+           所以滚到底要留出「下留白 14 + 胶囊 62 + 间隙 29 = 105」，
+           与网页 `.wrap{padding-bottom:105px}` 一致。 */
         ScrollView {
             VStack(spacing: sectionGap) {
                 content()
             }
             .padding(.horizontal, V2Metrics.screenPadding)
         }
+        .contentMargins(.bottom, V2Metrics.tabBarClearance, for: .scrollContent)
         .background(Color.clear)
         .safeAreaInset(edge: .top, spacing: 0) {
             topBar
         }
         .scrollIndicators(.hidden)
+        /* 键盘收起：
+           · 下拉列表即交互式收起（网页里靠点空白处）；
+           · 数字键盘（手机号 / API 令牌）没有 Return 键，系统不给收起入口，
+             所以在键盘上方常驻一个「完成」—— 这是 iOS 上唯一可靠的出口。 */
+        .scrollDismissesKeyboard(.interactively)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("完成") {
+                    _ = UIApplication.shared.sendAction(
+                        #selector(UIResponder.resignFirstResponder),
+                        to: nil, from: nil, for: nil
+                    )
+                }
+            }
+        }
     }
 
     private var topBar: some View {

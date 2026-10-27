@@ -360,13 +360,20 @@ enum V2Metrics {
     static let tabBarSideInset: CGFloat = 21
     /// 内容末端与胶囊上沿之间的间隙。
     ///
-    /// 交给 `safeAreaBar(edge:spacing:)` 的 `spacing` 参数 —— 系统把它算进安全区内缩：
-    /// 内容滚到底时正好停在这里，滚动过程中则从胶囊**下方**穿过
-    /// （`safeAreaBar` 与 `safeAreaInset` 同构，只内缩安全区、不裁剪内容），
-    /// 玻璃因此能实时折射到正在动的东西。
-    ///
     /// 29 = 网页 `.wrap{padding-bottom:105}` − 胶囊总高 76，静止位置与网页一致。
     static let tabBarContentGap: CGFloat = 29
+    /// 胶囊下沿距**屏幕物理底边**的留白，= 网页 `.tabbar{padding: 12px 21px 14px}` 的 14。
+    ///
+    /// 早先这里取 22（照系统电话 app 量出来的 21.7），但它是靠
+    /// `safeAreaBar(edge: .bottom)` 承载的 —— 那个 API 把 bar 摆在**安全区上沿**，
+    /// 于是实际下沿 = 22 + 34（底部安全区）= 56pt，真机上看着「离屏幕底很远」。
+    /// 现在改由 `RootView` 的 `.overlay(alignment: .bottom)` 直接锚在物理底边，
+    /// 数值也就回到网页真源：14。Home Indicator 白条约占距底 8–13pt，14 仍在其上方。
+    static let tabBarBottomGap: CGFloat = 14
+    /// 页面内容滚到底时，底部需要留出的总高度 = 下留白 + 胶囊高 + 胶囊与内容的间隙。
+    /// 105 = 14 + 62 + 29，与网页 `.wrap{padding-bottom:105px}` 逐像素一致。
+    /// 由 `ScreenContainer` 用 `.contentMargins(.bottom,for:.scrollContent)` 消费。
+    static var tabBarClearance: CGFloat { tabBarBottomGap + tabBarHeight + tabBarContentGap }
 
     /// 顶栏固定高度。
     ///
