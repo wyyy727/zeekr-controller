@@ -2,57 +2,63 @@
 //  DashboardView.swift
 //  ZeekrDash
 //
-//  车况主页
+//  车况屏（v2）
+//
+//  真源：`preview/index-v2.html` 的 `renderDashboard()`（4335–4479）
+//  与车况屏样式块（1725–1794）。每个数值都能在那两处指到出处。
 //
 
 import SwiftUI
 import UIKit
 
-/// 车况主页：电量、续航、胎压、门窗、充电状态
-/// （快捷车控已独立成「车控」tab，见 `ControlsView`）
+/// 车况屏：SOC、充电中、四项指标、胎压、车身状态、位置
 struct DashboardView: View {
 
     @Environment(AppStore.self) private var store
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        // 页面标题与底部导航重复，已移除；顶部右上角为数据来源徽标
-        // （真实数据时不显示，模拟 / 后端不可达时显示）
         NavigationStack {
-            ScreenContainer(modeText: store.modeBadgeText) {
+            // 车况屏是唯一 gap 12 的屏（`.v2-screen.v2-dash`）
+            ScreenContainer(
+                modePill: store.modePill,
+                tailText: updatedTailText,
+                sectionGap: V2Metrics.dashGap
+            ) {
                 if store.needsLogin {
                     // 已连上服务端但还没登录 —— 停在登录引导，不碰任何数据接口
                     loginWall
                 } else if let status = store.vehicleStatus {
-                    headerCard(status)
+                    /* 注意：「更新于」不在这里，它通过 `tailText` 渲染在顶栏、
+                       与来源胶囊同一行 —— 这是 HTML `.v2-head--end` 的结构。
+                       以前是内容区单独一行，首卡因此比网页低约 22pt。 */
 
+                    /* 有旧数据但本轮失败：保留旧数据，明确告知「不是刚拿的」。
+                       这是 v2 的 `.v2-stale`（4365–4369），不要退化成静默的旧数字。 */
+                    if let message = store.errorMessage {
+                        V2StaleBanner(
+                            text: "这一轮没读到最新车况，下面是上次读到的数据",
+                            detail: message
+                        ) { Task { await store.refresh() } }
+                    }
+
+                    socCard(status)
+
+                    // 充电中卡**条件渲染**：未充电时整张消失（HTML 4372）
                     if status.isCharging == true {
                         chargingCard(status)
                     }
 
-                    metricsGrid(status)
-                    tyreCard(status)
-                    // 「车身状态」保持 2×2，不随胎压一起改横排
+                    metricsCard(status)
+                    if cap("tyrePressure") {
+                        tyreCard(status)
+                    }
                     statusCard(status)
                     locationCard(store.vehicleLocation)
-                    /* 快捷车控已搬到独立的「车控」tab：
-                       车况页已经有电量 / 胎压 / 车身 / 位置四块，
-                       而车控是高频操作，每次都要滑到最底才能按。 */
-                    footerNote
+                    footNote
                 } else if store.isLoading {
-                    LoadingView(text: "正在获取车辆状态")
-                        .padding(.top, 60)
+                    skeleton
                 } else {
                     emptyState
-                }
-
-                /* 重试必须**真的重新拉一次**。
-                   以前只是 `errorMessage = nil` —— 提示消失了，数据还是旧的，
-                   用户以为"好了"，其实什么都没变。 */
-                if let message = store.errorMessage, store.hasData {
-                    ErrorBanner(message: message, onRetry: {
-                        Task { await store.refresh() }
-                    })
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -63,521 +69,444 @@ struct DashboardView: View {
         .onAppear { store.startPolling() }
     }
 
-    // MARK: - 顶部：电量与续航
+    // MARK: - 能力门控
 
-    private func headerCard(_ status: VehicleStatus) -> some View {
+    /// 与网页 `cap(key)` 同语义：明确 false 才隐藏，**取不到一律显示**。
+    ///
+    /// 刻意不做「拿不到就隐藏」：网络抖动不该让整块功能凭空消失。
+    private func cap(_ key: String) -> Bool {
+        guard let caps = store.capabilities else { return true }
+        return caps[key] != false
+    }
+
+    // MARK: - 页头右对齐行（HTML 4411–4419）
+
+    /// 顶栏右侧的「更新于」—— 与来源胶囊**同一行**（HTML `.v2-head--end` 里的 `.v2-updated`）
+    private var updatedTailText: String? {
+        store.lastRefresh.map { "更新于 \(updatedText($0))" }
+    }
+
+    private func updatedText(_ date: Date) -> String {
+        date.formatted(date: .omitted, time: .shortened)
+    }
+
+
+    // MARK: - SOC 卡（HTML 4425–4432）
+
+    private func socCard(_ status: VehicleStatus) -> some View {
         HStack(spacing: 20) {
+            // v2 环是 100×100 / 线宽 8（HTML `v2Ring()` 默认值）
             SOCRing(
-                soc: status.soc ?? 0,
+                soc: status.soc,
                 isCharging: status.isCharging == true,
-                size: 132,
-                lineWidth: 11
+                size: 100,
+                lineWidth: 8
             )
 
             VStack(alignment: .leading, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(status.nickname ?? status.modelName ?? "我的爱车")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary(scheme))
-                        .lineLimit(1)
-
-                    if let plate = status.plateNo, !plate.isEmpty {
-                        Text(plate)
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.textTertiary(scheme))
-                    }
+                if let plate = status.plateNo, !plate.isEmpty {
+                    Text(plate)
+                        .v2Text(.chip11, color: V2Color.accent)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(V2Color.accent.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 }
 
-                Divider().overlay(Theme.separator(scheme))
+                // `.v2-kv`：15 / 600 / 22，单位 11 / 500 / text-2
+                kvRow("续航", value: status.rangeKm.map { "\(Int($0.rounded()))" }, unit: "km")
 
-                miniStat("续航", value: status.rangeKm.map { "\(Int($0)) km" } ?? "--")
-                miniStat("总里程", value: status.odometerKm.map { formatDistance($0) } ?? "--")
+                // `.v2-kv.sub`：14 / 400 / 20，整行 text-2
+                kvRow(
+                    "总里程",
+                    value: status.odometerKm.map { formatDistance($0) },
+                    unit: "km",
+                    secondary: true
+                )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(Metrics.cardPadding)
-        .background(Theme.surface(scheme))
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+        .v2Card()
     }
 
-    private func miniStat(_ title: String, value: String) -> some View {
-        HStack {
+    private func kvRow(
+        _ title: String,
+        value: String?,
+        unit: String,
+        secondary: Bool = false
+    ) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(title)
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textTertiary(scheme))
-            Spacer()
-            Text(value)
-                .font(.system(size: 14, weight: .medium, design: .rounded))
-                .foregroundStyle(Theme.textPrimary(scheme))
-                .monospacedDigit()
+                .v2Text(secondary ? .body14 : .body15, color: secondary ? V2Color.text2 : V2Color.text1)
+            if let value {
+                Text(value)
+                    .v2Text(secondary ? .body14 : .body15, color: secondary ? V2Color.text2 : V2Color.text1)
+                    .v2Numeric()
+                Text(unit)
+                    .v2Text(.label11, color: V2Color.text2)
+            } else {
+                Text("--")
+                    .v2Text(secondary ? .body14 : .body15, color: V2Color.text2)
+            }
+            Spacer(minLength: 0)
         }
     }
 
-    // MARK: - 充电状态
+    // MARK: - 充电中卡（HTML 4372–4381）
 
     private func chargingCard(_ status: VehicleStatus) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("充电中", systemImage: "bolt.fill")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(ChineseColor.statusCharging)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("充电中")
+                .v2Text(.title14, color: V2Color.info)
 
-            HStack(spacing: 0) {
-                chargeItem("功率", value: status.chargePowerKw, unit: "kW", decimals: 1)
-                chargeItem("电压", value: status.chargeVoltage, unit: "V", decimals: 0)
-                chargeItem("电流", value: status.chargeCurrent, unit: "A", decimals: 0)
+            HStack {
+                chargeValue(status.chargePowerKw, unit: "kW", decimals: 1)
+                Spacer(minLength: 0)
+                chargeValue(status.chargeVoltage, unit: "V", decimals: 0)
+                Spacer(minLength: 0)
+                chargeValue(status.chargeCurrent, unit: "A", decimals: 0)
             }
 
             if let minutes = status.minutesToFull, minutes > 0 {
-                HStack(spacing: 6) {
-                    Image(systemName: "clock")
-                        .font(.system(size: 11))
-                    Text("预计 \(formatDuration(minutes)) 充满")
-                        .font(.system(size: 12))
-                }
-                .foregroundStyle(Theme.textSecondary(scheme))
+                Text("预计 \(formatDuration(minutes))充满")
+                    .v2Text(.text12, color: V2Color.text2)
             }
         }
-        .padding(Metrics.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ChineseColor.piaoSe.opacity(scheme == .dark ? 0.10 : 0.55))
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+        .v2Card()
     }
 
-    private func chargeItem(_ title: String, value: Double?, unit: String, decimals: Int) -> some View {
-        VStack(spacing: 4) {
+    private func chargeValue(_ value: Double?, unit: String, decimals: Int) -> some View {
+        HStack(spacing: 3) {
             Text(value.map { String(format: "%.\(decimals)f", $0) } ?? "--")
-                .font(.system(size: 18, weight: .medium, design: .rounded))
-                .foregroundStyle(Theme.textPrimary(scheme))
-                .monospacedDigit()
-            Text("\(title) \(unit)")
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.textTertiary(scheme))
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    // MARK: - 指标网格
-
-    private func metricsGrid(_ status: VehicleStatus) -> some View {
-        LazyVGrid(
-            columns: [GridItem(.flexible(), spacing: Metrics.sectionSpacing),
-                      GridItem(.flexible(), spacing: Metrics.sectionSpacing)],
-            spacing: Metrics.sectionSpacing
-        ) {
-            StatCard(title: "车内温度", icon: "thermometer.medium") {
-                StatValue(
-                    value: status.interiorTemp.map { String(format: "%.1f", $0) } ?? "--",
-                    unit: "°C"
-                )
-            }
-            /* 「当地气温」而不是「车外温度」：车端 `exteriorTemp` 实测恒为空
-               （这版固件不上报），这个数是按车辆位置查来的天气。
-               暴晒 / 地库时两者能差十几度，标成"车外温度"就是谎报。 */
-            StatCard(title: "当地气温", icon: "thermometer.sun") {
-                StatValue(
-                    // 保留一位小数：22.5℃ 就显示 22.5，取整会丢掉这半度。
-                    value: store.weather?.temperature.map { String(format: "%.1f", $0) } ?? "--",
-                    unit: "°C"
-                )
-            }
-            StatCard(title: "平均能耗", icon: "chart.line.downtrend.xyaxis") {
-                StatValue(
-                    value: status.avgConsumption.map { String(format: "%.1f", $0) } ?? "--",
-                    unit: "kWh/100km"
-                )
-            }
-            StatCard(title: "12V 电瓶", icon: "battery.100") {
-                StatValue(
-                    value: status.battery12vVoltage.map { String(format: "%.1f", $0) } ?? "--",
-                    unit: "V"
-                )
-            }
+                .v2Text(.num16)
+                .v2Numeric()
+            Text(unit)
+                .v2Text(.label11, color: V2Color.text2)
         }
     }
 
-    // MARK: - 胎压
+    // MARK: - 四项指标（HTML 4436–4447）
+
+    private func metricsCard(_ status: VehicleStatus) -> some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                metric("车内温度", value: status.interiorTemp.map { String(format: "%.1f", $0) }, unit: "°C")
+                metric("当地气温", value: weatherTempText, unit: "°C")
+            }
+            HStack(spacing: 12) {
+                metric("平均能耗", value: status.avgConsumption.map { String(format: "%.1f", $0) }, unit: "kWh/100km")
+                metric("12V 电瓶", value: status.battery12vVoltage.map { String(format: "%.1f", $0) }, unit: "V")
+            }
+        }
+        .v2Card()
+    }
+
+    /// 格子：标签 11/500/14 text-3，数值 16/600/22，单位 11/500/14 text-3
+    private func metric(_ title: String, value: String?, unit: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .v2Text(.label11, color: V2Color.text3)
+            HStack(spacing: 2) {
+                Text(value ?? "--")
+                    .v2Text(.num16)
+                    .v2Numeric()
+                if value != nil, !unit.isEmpty {
+                    Text(unit)
+                        .v2Text(.label11, color: V2Color.text3)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 「当地气温」而不是「车外温度」：车端 `exteriorTemp` 实测恒为空（这版固件不上报），
+    /// 这个数是按车辆位置查来的天气。暴晒 / 地库时两者能差十几度，标成"车外温度"就是谎报。
+    ///
+    /// ⚠️ HTML 的 `weatherTemp()`（`index-v2.html:4499`）是 `Math.round` —— **取整**。
+    /// 这里**故意偏离真源**：仓库既定口径是「气温保留一位小数」（10-23 定，勿取整），
+    /// 且车内温度 / 平均能耗 / 12V 都是 `%.1f`，同一张卡里取整会让气温显得突兀。
+    /// 这是经用户确认的第三处例外，不是漏改；要回真源只改这一行。
+    private var weatherTempText: String? {
+        guard let w = store.weather, w.available == true, let t = w.temperature else { return nil }
+        return String(format: "%.1f", t)
+    }
+
+    // MARK: - 胎压（HTML 4449–4458）
 
     private func tyreCard(_ status: VehicleStatus) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
+        VStack(spacing: 8) {
+            HStack(spacing: 4) {
                 Text("胎压")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary(scheme))
-
-                // 单位从每格重复四次提到标题旁
+                    .v2Text(.title14)
                 Text("kPa")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textTertiary(scheme))
-
-                Spacer()
-
-                if status.tyreWarning == true {
-                    Label("异常", systemImage: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(ChineseColor.statusBad)
-                }
+                    .v2Text(.label11, color: V2Color.text3)
+                Spacer(minLength: 0)
             }
 
-            // 一行四列：标签在上、数值在下，胎温作为副行（与 index.html 一致）
-            LazyVGrid(columns: tyreColumns, spacing: 8) {
-                tyreItem("左前", status.tyreFrontLeft, status.tyreTempFrontLeft)
-                tyreItem("右前", status.tyreFrontRight, status.tyreTempFrontRight)
-                tyreItem("左后", status.tyreRearLeft, status.tyreTempRearLeft)
-                tyreItem("右后", status.tyreRearRight, status.tyreTempRearRight)
+            HStack(spacing: 8) {
+                tyreColumn("左前", status.tyreFrontLeft, status.tyreTempFrontLeft)
+                tyreColumn("右前", status.tyreFrontRight, status.tyreTempFrontRight)
+                tyreColumn("左后", status.tyreRearLeft, status.tyreTempRearLeft)
+                tyreColumn("右后", status.tyreRearRight, status.tyreTempRearRight)
             }
         }
-        .padding(Metrics.cardPadding)
-        .background(Theme.surface(scheme))
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+        .v2Card()
     }
 
-    private var tyreColumns: [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
-    }
-
-    private func tyreItem(_ position: String, _ value: Double?, _ temp: Double? = nil) -> some View {
-        /* 正常胎压区间（kPa）。
-           门限按**本车实测**放宽到 240–320：本车四轮约 299–305 kPa（2.99–3.05 bar），
-           旧的 220–280 会把四个正常值全判成异常 —— 全是红的反而看不出真问题。 */
-        let isAbnormal = value.map { $0 < 240 || $0 > 320 } ?? false
-
-        return VStack(spacing: 3) {
-            Text(position)
-                .font(.system(size: 10))
-                .foregroundStyle(Theme.textTertiary(scheme))
-
+    /// 正常区间 240–320 kPa：本车四轮约 299–305，旧的 220–280 会把四个正常值全判成异常。
+    private func tyreColumn(_ label: String, _ value: Double?, _ temp: Double?) -> some View {
+        let abnormal = value.map { $0 < 240 || $0 > 320 } ?? false
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .v2Text(.label11, color: V2Color.text3)
             Text(value.map { String(format: "%.0f", $0) } ?? "--")
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                // 正常值用靛蓝（读数感、不刺眼）；越界用藤黄表示"该看一眼"，
-                // 朱砂红留给车门未关这类必须立刻处理的状态
-                .foregroundStyle(isAbnormal ? ChineseColor.tengHuang : ChineseColor.dianLan)
-                .monospacedDigit()
-
-            // 胎温副行：拿不到时不占位显示，避免出现无意义的 "----"
+                .v2Text(.num16, color: abnormal ? V2Color.bad : V2Color.text1)
+                .v2Numeric()
+            /* 胎温是 v2 没有的副行：只在真有值时才渲染，取不到时不占位 ——
+               常态下与 HTML 完全一致，避免出现无意义的 "----"。 */
             if let temp {
-                Text(String(format: "%.0f°", temp))
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.textTertiary(scheme))
-                    .monospacedDigit()
+                Text("\(Int(temp.rounded()))°")
+                    .v2Text(.label11, color: V2Color.text3)
+                    .v2Numeric()
             }
         }
-        .padding(.vertical, 9)
-        .frame(maxWidth: .infinity)
-        .background(Theme.surfaceAlt(scheme).opacity(0.55))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // MARK: - 车身状态
+    // MARK: - 车身状态（HTML 4460–4474）
 
     private func statusCard(_ status: VehicleStatus) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("车身状态")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary(scheme))
+        VStack(spacing: 8) {
+            HStack {
+                Text("车身状态")
+                    .v2Text(.title14)
+                Spacer(minLength: 0)
+            }
 
-            LazyVGrid(
-                columns: [GridItem(.flexible(), spacing: Metrics.sectionSpacing),
-                          GridItem(.flexible(), spacing: Metrics.sectionSpacing)],
-                spacing: Metrics.sectionSpacing
-            ) {
-                // 「锁车」与「车门」是两件事，此前 iOS 把锁车状态挂在「车门」标题下，
-                // 会让人以为"车门已关好"。网页一直是两个独立 chip，这里对齐。
-                StatusChip(
-                    title: "锁车",
-                    isGood: status.isLocked == true,
-                    goodText: "已锁",
-                    badText: status.isLocked == nil ? "未知" : "未锁",
-                    icon: status.isLocked == true ? "lock.fill" : "lock.open.fill",
-                    neutral: status.isLocked == nil
-                )
-                // 四门聚合口径（与网页 `doorOpen3` 一致）：任一扇开即「有门未关」。
-                // doors 为 nil 表示网关未提供 —— 显示「未知」，绝不默认成「全部关闭」。
-                StatusChip(
-                    title: "车门",
-                    isGood: status.doors == nil || !hasOpenDoor(status),
-                    goodText: status.doors == nil ? "未知" : "全部关闭",
-                    badText: "有门未关",
-                    icon: "car.side",
-                    neutral: status.doors == nil
-                )
-                StatusChip(
-                    title: "空调",
-                    isGood: status.climateOn == true,
-                    goodText: "开启",
-                    badText: "关闭",
-                    icon: "snowflake",
-                    // 空调开启是中性状态，不用告警色
-                    neutral: true
-                )
-                // 车窗状态在 live 模式下拿不到（网关字段名尚未确认）。
-                // 没有数据时显式显示「未知」并走中性配色，而不是默认成「已关」——
-                // 后者等于把"不知道"说成"没问题"，是把无数据伪装成好消息。
-                StatusChip(
-                    title: "车窗",
-                    isGood: status.windows == nil || !hasOpenWindow(status),
-                    goodText: status.windows == nil ? "未知" : "已关",
-                    badText: "未关",
-                    icon: "car.window.left",
-                    neutral: status.windows == nil
-                )
-                StatusChip(
-                    title: "后备箱",
-                    isGood: status.trunkOpen != true,
-                    goodText: status.trunkOpen == nil ? "未知" : "已关",
-                    badText: "开启",
-                    icon: "car.side.rear.open",
-                    neutral: status.trunkOpen == nil
-                )
-                // 前备箱：真车字段名是 engineHoodOpenStatus（不是 frunkOpenStatus），
-                // 后端已映射到 frunkOpen；网页早有这个 chip，iOS 这边此前漏了。
-                StatusChip(
-                    title: "前备箱",
-                    isGood: status.frunkOpen != true,
-                    goodText: status.frunkOpen == nil ? "未知" : "已关",
-                    badText: "开启",
-                    icon: "car.side.front.open",
-                    neutral: status.frunkOpen == nil
-                )
+            VStack(spacing: 9) {
+                HStack(spacing: 0) {
+                    // 「锁车」与「车门」是两件事：把锁车状态挂在「车门」下会让人以为车门已关好
+                    statusItem("锁车", capKey: "doorLock", value: status.isLocked, on: "已锁", off: "未锁", onTone: .good, offTone: .bad)
+                    statusItem("车门", capKey: "doorLock", value: anyOpen(status.doors), on: "有门未关", off: "全部关闭", onTone: .bad, offTone: .good)
+                    statusItem("空调", capKey: "climate", value: status.climateOn, on: "开启", off: "关闭", onTone: .info, offTone: .plain)
+                }
+                HStack(spacing: 0) {
+                    statusItem("车窗", capKey: "window", value: anyOpen(status.windows), on: "有窗未关", off: "全部关闭", onTone: .bad, offTone: .good)
+                    statusItem("后备箱", capKey: "trunk", value: status.trunkOpen, on: "开启", off: "已关", onTone: .bad, offTone: .good)
+                    statusItem("前备箱", capKey: "frunk", value: status.frunkOpen, on: "开启", off: "已关", onTone: .bad, offTone: .good)
+                }
             }
         }
-        .padding(Metrics.cardPadding)
-        .background(Theme.surface(scheme))
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+        .v2Card()
     }
 
-    private func hasOpenDoor(_ status: VehicleStatus) -> Bool {
-        // 与 hasOpenWindow 同一写法：元素是 Bool?，nil（网关未给单个门）
-        // 不能算作"开着"，但整体 nil 已在调用处单独判为「未知」。
-        (status.doors ?? [:]).values.contains { $0 == true }
+    private enum Tone {
+        case good, bad, info, plain
+
+        var color: Color {
+            switch self {
+            case .good:  return V2Color.good
+            case .bad:   return V2Color.bad
+            case .info:  return V2Color.info
+            case .plain: return V2Color.text2
+            }
+        }
     }
 
-    private func hasOpenWindow(_ status: VehicleStatus) -> Bool {
-        // 值本身是 Bool?（服务端可能返回 null 表示"未知"），
-        // 用闭包判断而不是 contains(true)，避免依赖可选值提升。
-        (status.windows ?? [:]).values.contains { $0 == true }
+    /// `.v2-status-item`：占 1/3 宽，12/500/15，名称与状态同色（状态色由 tone 决定）。
+    /// `value == nil` 时显示「—」且不带色调 —— 「不知道」不能画成「没问题」。
+    @ViewBuilder
+    private func statusItem(
+        _ name: String,
+        capKey: String,
+        value: Bool?,
+        on onText: String,
+        off offText: String,
+        onTone: Tone,
+        offTone: Tone
+    ) -> some View {
+        if cap(capKey) {
+            HStack(spacing: 0) {
+                Text("\(name) · ")
+                    .v2Text(.item12, color: V2Color.text2)
+                if let value {
+                    Text(value ? onText : offText)
+                        .v2Text(.item12, color: value ? onTone.color : offTone.color)
+                } else {
+                    Text("—")
+                        .v2Text(.item12, color: V2Color.text2)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .lineLimit(1)
+        }
     }
 
-    // MARK: - 车辆位置
+    /// 任一扇开即开。整体 nil 表示网关没给 —— 由调用处判为「—」。
+    private func anyOpen(_ dict: [String: Bool]?) -> Bool? {
+        guard let dict else { return nil }
+        return dict.values.contains { $0 == true }
+    }
 
-    /// 车辆位置卡。
-    ///
-    /// 三条底线（与网页 `vehicleLocationCard()` 一致）：
-    /// 1. **位置不是实时的** —— 标题右侧必须写「最后上报 X」，否则会被当成"车现在就在这"；
-    ///    车静止时网关不更新坐标（实测 15 条快照只有 3 个位置点）。
-    /// 2. **没配地图 key ≠ 没有位置** —— 照常显示「最后上报」与提示，只是没有地址与地图。
-    /// 3. 地图取不到就只不显示图，地址照常可读。
-    ///
-    /// 经纬度**不展示**：`31.2035, 121.5858` 这种数字对人没有信息量，
-    /// 判断"车在哪"只能靠地址与地图；把精确坐标摆在屏幕上属于多余暴露。
+    // MARK: - 车辆位置（HTML `v2LocCard()` 4044–4073）
+
+    /// 四种形态：A 正常 / B 有坐标但没取到地址 / C 没配 key 或非实时 / D 地图图加载不出来。
     private func locationCard(_ location: VehicleLocation?) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(alignment: .firstTextBaseline) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
                 Text("车辆位置")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary(scheme))
-
-                Spacer(minLength: 8)
-
+                    .v2Text(.title14)
                 if let raw = location?.reportedAt, !raw.isEmpty {
                     Text("最后上报 \(formatReportedAt(raw))")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textTertiary(scheme))
+                        .v2Text(.label11, color: V2Color.text3)
                 }
+                Spacer(minLength: 0)
             }
 
-            if let location, location.hasCoordinate {
-                if let data = store.locationMapData,
-                   let image = UIImage(data: data) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 148)
-                        .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                }
+            locationBody(location)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .v2Card()
+    }
 
-                Text(location.displayAddress ?? mapUnavailableText(location))
-                    .font(.system(size: 13.5, weight: .medium))
-                    .foregroundStyle(location.displayAddress == nil
-                                     ? Theme.textSecondary(scheme)
-                                     : Theme.textPrimary(scheme))
-                    .fixedSize(horizontal: false, vertical: true)
+    @ViewBuilder
+    private func locationBody(_ location: VehicleLocation?) -> some View {
+        if let location, location.available == true {
+            locationDetail(location)
+        } else if let location {
+            Text(location.reason ?? "车辆尚未上报位置")
+                .v2Text(.text13, color: V2Color.text2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text("正在获取位置…")
+                .v2Text(.text13, color: V2Color.text2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
 
-                if let secondary = location.secondaryAddress {
-                    Text(secondary)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textTertiary(scheme))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+    @ViewBuilder
+    private func locationDetail(_ location: VehicleLocation) -> some View {
+        let showMap = location.mapAvailable == true && store.dataMode == .live
+        let address = location.address?.recommend ?? location.address?.address
 
-                if location.displayAddress == nil {
-                    Text(mapUnavailableHint(location))
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textTertiary(scheme))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Text("位置取自车辆最后一次上报，车辆移动后可能不会立即更新。")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textTertiary(scheme).opacity(0.85))
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if let location, location.available == false {
-                // 明确说"车没上报位置"，而不是显示两个 0
-                Text(location.reason ?? "车辆尚未上报位置")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textSecondary(scheme))
-            } else if let error = store.locationError {
-                // 与"还没加载"区分开：请求一直失败时不能永远显示「正在获取位置…」
-                Text(error)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textSecondary(scheme))
+        if showMap {
+            if let data = store.locationMapData, let image = UIImage(data: data) {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(600.0 / 260.0, contentMode: .fill)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             } else {
-                Text("正在获取位置…")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textTertiary(scheme))
+                // 形态 D：地图这张图没加载出来 —— 地址照常可读，不整块消失
+                Text("地图暂时加载不出来")
+                    .v2Text(.text13, color: V2Color.text3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(Metrics.cardPadding)
-        .background(Theme.surface(scheme))
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+
+        if let address {
+            Text(address)
+                .v2Text(.text13, color: V2Color.text2)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            Text(location.mapAvailable == true ? "地址暂时取不到" : "未配置地图服务")
+                .v2Text(.text13, color: V2Color.text3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
+        if let recommend = location.address?.recommend,
+           let full = location.address?.address,
+           recommend != full {
+            Text(full)
+                .v2Text(.label11, color: V2Color.text3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
+        Text(address == nil ? mapUnavailableHint(location) : "位置取自车辆最后一次上报，车辆移动后可能不会立即更新。")
+            .v2Text(.label11, color: V2Color.text3)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// 没有地址时的标题文案。
-    ///
-    /// 必须区分两种情况 —— 它们的处理方式完全不同：
-    /// · 没配 key：去 `.env` 填 `TENCENT_MAP_KEY`
-    /// · 配了但取不到：多半是第三方额度用完 / 网络问题，改配置没用
-    /// 统一显示「未配置地图服务」会把人引到错误的方向上。
-    private func mapUnavailableText(_ location: VehicleLocation) -> String {
-        location.mapAvailable == true ? "地址暂时取不到" : "未配置地图服务"
-    }
-
+    /// 必须区分两种情况 —— 处理方式完全不同：
+    /// · 没配 key → 去 `.env` 填 `TENCENT_MAP_KEY`
+    /// · 配了但取不到 → 多半是第三方额度用完 / 网络问题，改配置没用
     private func mapUnavailableHint(_ location: VehicleLocation) -> String {
         if location.mapAvailable == true {
             return "地图服务已配置，但这次没取到地址（可能是第三方额度用完或网络问题）。稍后会自动重试。"
         }
-        return "尚未配置腾讯地图 key，只能看到「最后上报」时间。在服务端 .env 填入 TENCENT_MAP_KEY 并重启，即可显示地址与地图。"
+        return "尚未配置腾讯地图 key，只显示「最后上报」时间。在服务端 .env 填入 TENCENT_MAP_KEY 并重启，即可显示地址与地图图。"
     }
 
-    /// 把服务端透传的 `yyyy-MM-dd HH:mm:ss` 变成「今天 10:48」/「10月19日 10:48」。
-    /// 解析失败就原样显示 —— 宁可难看，也不要把时间吞掉（时间本身是有意义的）。
-    private func formatReportedAt(_ raw: String) -> String {
-        let parser = DateFormatter()
-        parser.locale = Locale(identifier: "en_US_POSIX")
-        parser.timeZone = TimeZone(identifier: "Asia/Shanghai")
-        parser.dateFormat = "yyyy-MM-dd HH:mm:ss"
+    // MARK: - 页脚（`.v2-foot`）
 
-        guard let date = parser.date(from: raw) else { return raw }
-
-        let isToday = Calendar.current.isDateInToday(date)
-        let output = DateFormatter()
-        output.locale = Locale(identifier: "zh_CN")
-        output.timeZone = TimeZone(identifier: "Asia/Shanghai")
-        output.dateFormat = isToday ? "HH:mm" : "M月d日 HH:mm"
-        let text = output.string(from: date)
-        return isToday ? "今天 \(text)" : text
+    private var footNote: some View {
+        Text("数据来自非官方接口，仅供参考")
+            .v2Text(.foot11, color: V2Color.text3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 8)
     }
 
-    // MARK: - 底部说明
+    // MARK: - 加载骨架（HTML 4339–4343）
 
-    private var footerNote: some View {
-        VStack(spacing: 4) {
-            if let lastRefresh = store.lastRefresh {
-                Text("更新于 \(lastRefresh.formatted(date: .omitted, time: .standard))")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textTertiary(scheme))
+    private var skeleton: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("车辆状态")
+                .v2Text(.title14)
+            Text("加载中")
+                .v2Text(.label11, color: V2Color.text3)
+            ForEach(0..<3, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.white.opacity(0.55))
+                    .frame(height: 14)
             }
-            Text("数据来自非官方接口，仅供参考")
-                .font(.system(size: 10))
-                .foregroundStyle(Theme.textTertiary(scheme).opacity(0.8))
         }
-        .padding(.top, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .v2Card()
     }
 
-    // MARK: - 未登录引导
+    // MARK: - 未登录引导（五屏共用 `V2LoginWall`）
 
-    /// 明确说明「不是页面坏了，是还没登录」，并给出去登录的入口
     private var loginWall: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "person.crop.circle.badge.questionmark")
-                .font(.system(size: 40, weight: .light))
-                .foregroundStyle(Theme.textTertiary(scheme))
-
-            Text("需要先登录极氪账号")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Theme.textPrimary(scheme))
-
-            Text("服务端已连上（真实数据模式）。\n登录前不会请求任何车况 / 行程 / 充电接口。")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textTertiary(scheme))
-                .multilineTextAlignment(.center)
-                .lineSpacing(3)
-
-            Button {
-                store.selectedTab = .settings
-            } label: {
-                Text("去登录")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(ChineseColor.xiangYaBai)
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 10)
-                    .background(Theme.accent(scheme))
-                    .clipShape(Capsule())
-            }
-            .padding(.top, 4)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 36)
-        .padding(.horizontal, 20)
-        .background(Theme.surface(scheme))
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+        V2LoginWall { store.selectedTab = .settings }
     }
 
-    // MARK: - 空态
+    // MARK: - 空态 / 读失败（HTML 4345–4359）
 
     private var emptyState: some View {
         VStack(spacing: 14) {
-            Image(systemName: "car.side")
-                .font(.system(size: 42, weight: .light))
-                .foregroundStyle(Theme.textTertiary(scheme))
+            // `.v2-empty-ico svg`（1997 行）：28×28，色 #666F7E
+            Image("ic-car")
+                .renderingMode(.template)
+                .resizable()
+                .frame(width: 28, height: 28)
+                .foregroundStyle(V2Color.text3)
 
-            Text("尚未获取到车辆数据")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Theme.textSecondary(scheme))
+            Text(store.errorMessage == nil ? "尚未获取到车辆数据" : "车辆数据没有读到")
+                .v2Text(.body15, color: V2Color.text2)
 
-            if let error = store.errorMessage {
-                Text(error)
-                    .font(.system(size: 12))
-                    .foregroundStyle(ChineseColor.statusBad)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-            }
-
-            Text("请检查服务端是否启动，以及设置中的地址是否正确")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textTertiary(scheme))
+            Text(store.errorMessage == nil
+                 ? "请确认服务已启动，且地址配置正确"
+                 : "后端可能正在重启，或登录状态已失效")
+                .v2Text(.text12, color: V2Color.text3)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
 
-            Button("重新加载") {
-                Task { await store.refresh() }
-            }
-            .font(.system(size: 14, weight: .medium))
-            .foregroundStyle(ChineseColor.xiangYaBai)
-            .padding(.horizontal, 22)
-            .padding(.vertical, 10)
-            .background(Theme.accent(scheme))
-            .clipShape(Capsule())
-            .padding(.top, 4)
+            Button("重试") { Task { await store.refresh() } }
+                .v2Text(.title14, color: .white)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 10)
+                .background(V2Color.accent)
+                .clipShape(Capsule())
+                .padding(.top, 4)
         }
-        .padding(.top, 60)
+        .frame(maxWidth: .infinity)
+        .v2Card()
     }
 
     // MARK: - 格式化
 
-    /// 里程一律显示原始公里数 —— 不做「万」换算：15545 被压成「1.6 万」后
-    /// 既有精度损失，也无法与官方 App 的读数直接比对。
+    /// 里程一律显示原始公里数 —— 不做「万」换算：既有精度损失，
+    /// 也无法与官方 App 的读数直接比对。
     private func formatDistance(_ km: Double) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
@@ -585,8 +514,7 @@ struct DashboardView: View {
         formatter.groupingSeparator = ","
         formatter.maximumFractionDigits = 0
         formatter.roundingMode = .halfUp
-        let text = formatter.string(from: NSNumber(value: km)) ?? String(format: "%.0f", km)
-        return "\(text) km"
+        return formatter.string(from: NSNumber(value: km)) ?? String(format: "%.0f", km)
     }
 
     private func formatDuration(_ minutes: Double) -> String {
@@ -595,5 +523,24 @@ struct DashboardView: View {
         let hours = total / 60
         let mins = total % 60
         return mins == 0 ? "\(hours) 小时" : "\(hours) 小时 \(mins) 分"
+    }
+
+    /// `yyyy-MM-dd HH:mm:ss` → 「今天 10:48」/「10月19日 10:48」。
+    /// 解析失败就原样显示 —— 宁可难看，也不要把时间吞掉。
+    private func formatReportedAt(_ raw: String) -> String {
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        parser.dateFormat = "yyyy-MM-dd HH:mm:ss"
+
+        guard let date = parser.date(from: raw) else { return raw }
+
+        let output = DateFormatter()
+        output.locale = Locale(identifier: "zh_CN")
+        output.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        let isToday = Calendar.current.isDateInToday(date)
+        output.dateFormat = isToday ? "HH:mm" : "M月d日 HH:mm"
+        let text = output.string(from: date)
+        return isToday ? "今天 \(text)" : text
     }
 }

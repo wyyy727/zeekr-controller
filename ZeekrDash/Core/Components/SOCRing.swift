@@ -20,8 +20,9 @@ import SwiftUI
 /// 充电中（`isCharging == true`）主色为靛青，不触发上述三档警示。
 struct SOCRing: View {
 
-    /// 电量百分比 0–100
-    let soc: Double
+    /// 电量百分比 0–100；**nil 表示没读到**，显示 `--` 而不是 0%
+    /// （0% 是「电量耗尽」的正常读数，把「没读到」画成 0 会让人以为车趴窝了）
+    let soc: Double?
     /// 是否充电中
     var isCharging: Bool = false
     /// 圆环直径
@@ -40,22 +41,48 @@ struct SOCRing: View {
     @State private var alertShown = false
 
     private var progress: Double {
-        max(0, min(1, soc / 100))
+        max(0, min(1, (soc ?? 0) / 100))
     }
 
-    /// 主色：充电中固定靛青，否则按三档阈值取色
-    private var ringColor: Color {
-        isCharging ? ChineseColor.dianQing : Theme.socColor(soc)
+    /// 中心文字：整段「68%」，与 v2 的 `.v2-ring-txt b` 一致（百分号不是小上标）。
+    private var socText: String {
+        guard let soc else { return "--" }
+        return String(format: "%.0f%%", soc.rounded())
     }
 
-    /// 低电量档（<30%）—— 充电中不触发
+    /// 主色：v2 是**固定三色渐变，不随电量分档**。
+    ///
+    /// 出处 `index-v2.html` 4320–4324：`v2Ring()` 里没有任何按 SOC 取色的分支。
+    /// 渐变 `#7CE8B5` → `#7EDCEE` → `#B9A5FF`，方向左下 → 右上
+    /// （`x1,y1 = 0,1` → `x2,y2 = 1,0`）。
+    /// 旧的三档阈值色（低电量转朱砂）是 v1 的东西，v2 没有。
+    private var ringGradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color(hex: 0x7CE8B5),
+                Color(hex: 0x7EDCEE),
+                Color(hex: 0xB9A5FF),
+            ],
+            startPoint: .bottomLeading,
+            endPoint: .topTrailing
+        )
+    }
+
+    /// 轨道色：v2 是 rgba(27,34,51,.05)，不是旧的分割线色。
+    private var trackColor: Color {
+        Color(hex: 0x1B2233).opacity(0.05)
+    }
+
+    /// 低电量档（<30%）—— 充电中不触发；没读到就不算低
     private var isLow: Bool {
-        !isCharging && soc < 30
+        guard let soc, !isCharging else { return false }
+        return soc < 30
     }
 
     /// 中电量档（30~50%）—— 充电中不触发
     private var isMid: Bool {
-        !isCharging && soc >= 30 && soc < 50
+        guard let soc, !isCharging else { return false }
+        return soc >= 30 && soc < 50
     }
 
     var body: some View {
@@ -63,7 +90,7 @@ struct SOCRing: View {
             // 底环
             Circle()
                 .stroke(
-                    Theme.separator(scheme),
+                    trackColor,
                     style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
                 )
 
@@ -71,7 +98,7 @@ struct SOCRing: View {
             Circle()
                 .trim(from: 0, to: progress)
                 .stroke(
-                    ringColor,
+                    ringGradient,
                     style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))
@@ -86,23 +113,17 @@ struct SOCRing: View {
                 // 外发光：中档柔和 / 低档强化
                 .shadow(color: glowColor, radius: glowRadius)
 
-            // 中心文字
+            /* 中心文字：v2 是**一整段**「68%」，26/700/31/−0.4（`.v2-ring-txt b`，1745 行）——
+               百分号与数字同字号同字重，不是小的上标。字号按环径等比缩放：
+               v2 的基准是环 100 → 字 26，所以系数是 size/100。 */
             VStack(spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 1) {
-                    Text(String(format: "%.0f", soc))
-                        .font(.system(size: size * 0.28, weight: .medium, design: .rounded))
-                        .foregroundStyle(Theme.textPrimary(scheme))
-                        .monospacedDigit()
-                    Text("%")
-                        .font(.system(size: size * 0.11, weight: .regular, design: .rounded))
-                        .foregroundStyle(Theme.textSecondary(scheme))
-                }
+                Text(socText)
+                    .v2Text(.hero26.scaled(size / 100), color: V2Color.text1)
+                    .v2Numeric()
 
                 if isCharging {
-                    Label("充电中", systemImage: "bolt.fill")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(ChineseColor.dianQing)
-                        .labelStyle(.titleAndIcon)
+                    Text("充电中")
+                        .v2Text(.label11.scaled(size / 100), color: V2Color.info)
                 }
             }
             // 低电量：中心数字同步脉冲（透明度 1.0→0.68）
@@ -113,12 +134,11 @@ struct SOCRing: View {
         .overlay(alignment: .bottom) {
             if isLow {
                 Text("电量偏低")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .v2Text(.alert10, color: .white)
                     .padding(.horizontal, 9)
                     .padding(.vertical, 2)
-                    .background(ChineseColor.zhuSha, in: RoundedRectangle(cornerRadius: 10))
-                    .shadow(color: ChineseColor.zhuSha.opacity(0.6), radius: 4, y: 2)
+                    .background(V2Color.bad, in: RoundedRectangle(cornerRadius: 10))
+                    .shadow(color: V2Color.bad.opacity(0.6), radius: 4, y: 2)
                     .fixedSize()
                     .offset(y: 7)
                     .scaleEffect(alertShown ? 1 : 0.8)
@@ -131,15 +151,16 @@ struct SOCRing: View {
             // 与屏幕上的 `%.0f` 保持一致：都用四舍五入。
             // 此前读屏用的是 Int(soc)（向零截断），soc=82.6 时屏幕显示 83、
             // 读屏却念「82」—— 视障用户拿到的是错的数值。
-            "电量 \(Int(soc.rounded())) 百分比\(isCharging ? "，正在充电" : (isLow ? "，电量偏低" : ""))"
+            soc.map { "电量 \(Int($0.rounded())) 百分比\(isCharging ? "，正在充电" : (isLow ? "，电量偏低" : ""))" }
+                ?? "电量未读到"
         )
     }
 
     // MARK: - 光晕
 
     private var glowColor: Color {
-        if isLow { return ChineseColor.zhuSha.opacity(0.55) }
-        if isMid { return ChineseColor.tengHuang.opacity(0.42) }
+        if isLow { return V2Color.bad.opacity(0.55) }
+        if isMid { return V2Color.warn.opacity(0.42) }
         return .clear
     }
 
@@ -186,5 +207,5 @@ struct SOCRing: View {
         }
     }
     .padding()
-    .background(Theme.background(.light))
+    .background(V2Background())
 }
