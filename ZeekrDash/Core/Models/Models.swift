@@ -203,6 +203,9 @@ struct DailyEnergy: Codable {
     var distanceKm: Double?
     var energyKwh: Double?
     var dynamicEnergyKwh: Double?
+    /// 静态电耗（空调 / 待机等非行驶消耗）。**总电耗 = 动态 + 静态**，
+    /// v2 汇总卡第 5 格要用它；服务端已返回，早期 iOS 模型漏了这个字段。
+    var staticEnergyKwh: Double?
     var avgConsumption: Double?
     var avgDynamicConsumption: Double?
     var fastChargeCount: Int?
@@ -218,6 +221,11 @@ struct DailyEnergyPoint: Codable, Identifiable {
     var energyKwh: Double?
     var minutes: Int?
     var consumption: Double?
+    /// 当日动态电耗（行驶）。与 `staticKwh` 相加等于 `energyKwh`，
+    /// 供电耗柱「动态在下、静态在上」两段式渲染（HTML `v2BarBody()`）。
+    var dynamicKwh: Double?
+    /// 当日静态电耗（空调 / 待机 / 哨兵等）
+    var staticKwh: Double?
 
     /// 图表 X 轴用的短标签：`2026-10-09` → `10-09`（与网页 `date.slice(5)` 一致）。
     ///
@@ -522,7 +530,18 @@ struct OcrStatus: Codable {
 
 /// 识别出来的一行金额。**不直接入库** —— 先给用户核对。
 struct OcrRow: Codable, Identifiable {
-    var id: String { "\(startAt ?? "")-\(amount.map { String(format: "%.2f", $0) } ?? "")-\(UUID().uuidString)" }
+    /// 稳定的行标识：时间 + 金额 + 电量 + 站点。
+    ///
+    /// **不要用 `UUID()`** —— 那样每次访问 `id` 都得到新值，`ForEach` 会把整行当新元素，
+    /// 重建、丢状态、动画乱跳。用内容本身能区分小票的字段拼一个就够。
+    var id: String {
+        [
+            startAt ?? "",
+            amount.map { String(format: "%.2f", $0) } ?? "",
+            energyKwh.map { String(format: "%.3f", $0) } ?? "",
+            stationName ?? "",
+        ].joined(separator: "|")
+    }
 
     var amount: Double?
     var energyKwh: Double?
@@ -944,29 +963,6 @@ enum VehicleCommand: String, Codable, CaseIterable {
         case .tripPlan:     return "出行规划"
         case .carFinder:    return "寻车"
         case .refresh:      return "立即刷新"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .lock:         return "lock.fill"
-        case .unlock:       return "lock.open.fill"
-        case .climateOn:    return "snowflake"
-        case .climateOff:   return "snowflake"
-        case .flash:        return "headlight.high.beam"
-        case .honk:         return "speaker.wave.2"
-        case .chargeStart:  return "bolt.fill"
-        case .chargeStop:   return "bolt.slash.fill"
-        case .defrost:      return "snowflake.circle"
-        case .wheelHeat:    return "steeringwheel"
-        case .seatHeat:     return "car.seat.forward.and.heat.waves"
-        case .ventSeat:     return "wind"
-        case .closeWindows: return "car.window.left"
-        case .sunshade:     return "sun.max"
-        case .sentinel:     return "shield.lefthalf.filled"
-        case .tripPlan:     return "point.topleft.down.to.point.bottomright.curvepath"
-        case .carFinder:    return "location.circle"
-        case .refresh:      return "arrow.clockwise"
         }
     }
 

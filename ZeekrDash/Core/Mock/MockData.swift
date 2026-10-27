@@ -242,7 +242,11 @@ enum MockData {
         let cal = Calendar.current
         let now = Date()
         var list: [EnergyMonth] = [EnergyMonth(yearMonth: "currentMonth", label: "本月")]
-        for i in 1...5 {
+        /* 近 24 个月，不是近 6 个月。
+           官方里程服务支持约两年（见 `live_client.py` 的 ENERGY_MONTHLY_PATH 注释），
+           演示数据却只造了 5 个历史月 —— 结果是 iPhone 上「年份只能选今年、
+           月份最旧只到 5 月」（10 月启动 = 10−5）。用户已实机确认过这个现象。 */
+        for i in 1...23 {
             guard let date = cal.date(byAdding: .month, value: -i, to: now) else { continue }
             let comps = cal.dateComponents([.year, .month], from: date)
             let year = comps.year ?? 1970
@@ -288,24 +292,45 @@ enum MockData {
         var series: [DailyEnergyPoint] = []
         var totalKm = 0.0
         var totalKwh = 0.0
+        var totalDynamic = 0.0
+
+        /* 与网页 `mockEnergy()`（index-v2.html 2687–2730）**逐公式对齐**：
+           7 天用设计稿那组固定值；30 天（及其他天数）用确定性伪随机，避免循环出花纹。
+           以前这里是 `12 + i%7*5.5` 的自造曲线，和网页并排一看就不一样。 */
+        let base7: [Double] = [24.8, 41.2, 18.6, 33.5, 12.4, 56.0, 27.3]
+        func jitter(_ k: Int) -> Double {
+            let x = sin(Double(k) * 12.9898) * 43758.5453
+            return x - floor(x)
+        }
 
         for (index, date) in dates.enumerated() {
-            // 约五分之一的天数不动车
-            if index % 5 == 3 { continue }
-            let distance = 12.0 + Double(index % 7) * 5.5
+            let distance: Double
+            if dates.count == 7 {
+                distance = base7[(dates.count - 1 - index) % base7.count]
+            } else {
+                distance = ((9 + jitter(index + 1) * 47) * 10).rounded() / 10
+            }
             let energy = (distance * 0.2 * 100).rounded() / 100
+            // 静态占每天每度电的 8%~14%，随天微抖 —— 否则第二色会是一条死板的平行条
+            let dynPart = ((energy * (0.92 - jitter(index + 7) * 0.06)) * 100).rounded() / 100
+            let statPart = ((energy - dynPart) * 100).rounded() / 100
             totalKm += distance
             totalKwh += energy
+            totalDynamic += dynPart
             series.append(DailyEnergyPoint(
                 date: formatter.string(from: date),
                 distanceKm: (distance * 10).rounded() / 10,
                 energyKwh: energy,
                 minutes: Int(distance * 1.35),
-                consumption: 20.0
+                consumption: 20.0,
+                dynamicKwh: dynPart,
+                staticKwh: statPart
             ))
         }
 
-        let dynamicKwh = (totalKwh * 0.9 * 100).rounded() / 100
+        // 汇总由逐日拆分相加得出，而不是再按固定比例算一遍 ——
+        // 否则卡片上「动态 + 静态 ≠ 总电耗」，也会和下面两张图对不上
+        let dynamicKwh = (totalDynamic * 100).rounded() / 100
         let avg = totalKm > 0 ? ((totalKwh / totalKm) * 1000).rounded() / 10 : 0
         let avgDynamic = totalKm > 0 ? ((dynamicKwh / totalKm) * 1000).rounded() / 10 : 0
 
@@ -316,6 +341,7 @@ enum MockData {
             distanceKm: (totalKm * 10).rounded() / 10,
             energyKwh: (totalKwh * 100).rounded() / 100,
             dynamicEnergyKwh: dynamicKwh,
+            staticEnergyKwh: ((totalKwh - dynamicKwh) * 100).rounded() / 100,
             avgConsumption: avg,
             avgDynamicConsumption: avgDynamic,
             fastChargeCount: max(1, dates.count / 5),
