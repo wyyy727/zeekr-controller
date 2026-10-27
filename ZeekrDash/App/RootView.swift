@@ -15,7 +15,6 @@
 //
 
 import SwiftUI
-import UIKit   // 键盘「完成」按钮要 resignFirstResponder
 
 struct RootView: View {
 
@@ -327,12 +326,7 @@ struct ScreenContainer<Content: View, Accessory: View>: View {
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
-                Button("完成") {
-                    _ = UIApplication.shared.sendAction(
-                        #selector(UIResponder.resignFirstResponder),
-                        to: nil, from: nil, for: nil
-                    )
-                }
+                Button("完成") { dismissKeyboard() }
             }
         }
     }

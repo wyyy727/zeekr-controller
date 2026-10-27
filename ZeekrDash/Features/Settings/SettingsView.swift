@@ -347,6 +347,10 @@ struct SettingsView: View {
                     }
 
                     Button {
+                        /* 先收键盘再发码。数字键盘没有 Return 键 —— 不收的话它会一直
+                           压在「获取验证码」下方，而且发码成功后紧接着要弹全屏验证码面板，
+                           键盘立在那里会盖住面板底部（用户看到的就像是「点完没动静」）。 */
+                        dismissKeyboard()
                         Task {
                             let sent = await model.sendCode()
                             if sent { showCodeSheet = true }
