@@ -40,7 +40,10 @@ targets:
       # 放在仓库根之外的资产（曾经有：ios-icons/Icons.xcassets）不会被 xcodegen
       # 收进来，actool 也不报错，装到手机上才发现图标全空白。
       # 新增资源请放进 ZeekrDash/Resources/：
-      #   Resources/Icons.xcassets  28 个矢量图标（template 件 + avatar-mark original）
+      #   Resources/Icons.xcassets  63 个矢量图标（62 个 template + avatar-mark 为 original）
+      #      命名分四族：tab-*（底栏）/ ctrl-*（车控）/ ic-*（HTML 内联 SVG 那边过来的）/ action-*、status-*、sheet-*
+      #      ⚠️ 新增或改名务必同步 `Core/Theme/AssetSelfCheck.swift` 的 iconNames 清单，
+      #      那份清单是启动自检的依据，漏一个就让「资产丢了却没人知道」重新成为可能
       #   Resources/Fonts/          Inter 四个静态字重 ttf
       - path: ZeekrDash
         excludes:
