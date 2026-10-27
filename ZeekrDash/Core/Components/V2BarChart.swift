@@ -294,8 +294,13 @@ struct V2BarChart: View {
                     .animation(labelAnimation(delay), value: grown)
             }
 
-            barBody(point, height: h)
-                .frame(width: barW, height: grown ? targetH : 0, alignment: .bottom)
+            /* 动画必须下放到**柱体自身的高度**上。
+               原来是把 0 高 frame 套在未裁剪的柱体外面 —— SwiftUI 的 frame 只改
+               布局尺寸、不裁剪子视图，柱体照旧按 h 全高绘制，于是从一开始就是满高，
+               动画根本没有可看的中间态（数值行的 opacity 有动画，所以显得「只有数字在弹」）。
+               HTML 那边的 @keyframes v2BarGrow 动的也是 height（1898 行），这里等价。 */
+            barBody(point, height: grown ? targetH : 0)
+                .frame(width: barW)
                 .animation(barAnimation(delay), value: grown)
                 .overlay(alignment: .center) {
                     if selected {
@@ -324,7 +329,7 @@ struct V2BarChart: View {
                             style: StrokeStyle(lineWidth: 1, dash: [3, 3])
                         )
                 )
-                .frame(height: 8)
+                .frame(height: h)
         } else if let d = point.dynamic, let s = point.staticPart, d + s > 0 {
             splitBody(d: d, s: s, height: h)
                 .frame(height: h)
@@ -337,13 +342,30 @@ struct V2BarChart: View {
     }
 
     /// 静态在上、动态在下；静态段最少 2pt，否则 0.2 kWh 在 112pt 绘图区里看不见
-    private func splitBody(d: Double, s: Double, height h: CGFloat) -> some View {
+    /// 返回 AnyView：两条分支形状不同（矮柱走单段矩形、正常柱走两段 VStack），
+    /// 而高度是动画量，没法用 @ViewBuilder 的隐式分支收口。
+    private func splitBody(d: Double, s: Double, height h: CGFloat) -> AnyView {
+        // 入场动画会从 0 一路长到目标高：h 很小时两段都得夹在 0...h 内，
+        // 否则 hs 被强制拉成 2、hd 变负数，柱子会瞬间「跳」到 2pt。
+        if h < 3 {
+            return AnyView(
+                Rectangle().fill(
+                    LinearGradient(
+                        colors: [V2Color.barDynTop, V2Color.barDynBottom],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(height: max(0, h))
+            )
+        }
+
         let total = d + s
         var hs: CGFloat = s > 0 ? (s / total * Double(h)).rounded() : 0
         hs = s > 0 ? max(2, min(h - 1, hs)) : 0
-        let hd = h - hs
+        hs = min(hs, h)
+        let hd = max(0, h - hs)
 
-        return VStack(spacing: 0) {
+        return AnyView(VStack(spacing: 0) {
             if hs > 0 {
                 Rectangle()
                     .fill(LinearGradient(
@@ -360,7 +382,7 @@ struct V2BarChart: View {
                     ))
                     .frame(height: hd)
             }
-        }
+        })
     }
 
     private var singleGradient: LinearGradient {
@@ -409,8 +431,15 @@ struct V2BarChart: View {
             return
         }
         grown = false
-        // 下一帧再置 true，否则首帧的 false 与 true 会被合并，动画不触发
-        DispatchQueue.main.async { grown = true }
+        /* 先让「0 高」这一帧真的渲染出来，再置 true。
+           原来用 DispatchQueue.main.async：那一跳可能和首帧合并进同一个隐式事务，
+           SwiftUI 看到的是 0 → 目标 一步到位，整段动画被跳过（数字偶尔弹一下就是
+           这个原因）。40ms 约等于 2.5 帧，足够跨过一次布局提交。 */
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 40_000_000)
+            guard !Task.isCancelled else { return }
+            grown = true
+        }
     }
 
     // MARK: 交互

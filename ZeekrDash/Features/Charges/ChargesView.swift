@@ -234,9 +234,17 @@ struct ChargesView: View {
                     Text("本月充入电量")
                         .v2Text(V2Type.label12.bumped(), color: V2Color.text2)
                     HStack(alignment: .firstTextBaseline, spacing: 3) {
-                        Text(number(stat.totalKwh, 1))
+                        // 电量大数递增入场；没读到仍是 --（不是 0.0）
+                        if let kwh = stat.totalKwh {
+                            V2CountUp(target: kwh, reserveWidth: true) {
+                                String(format: "%.1f", $0)
+                            }
                             .v2Text(V2Type.hero34.bumped())
-                            .v2Numeric()
+                        } else {
+                            Text("--")
+                                .v2Text(V2Type.hero34.bumped())
+                                .v2Numeric()
+                        }
                         Text("kWh")
                             .v2Text(V2Type.body14m.bumped(), color: V2Color.text2)
                     }
@@ -272,10 +280,20 @@ struct ChargesView: View {
             }
 
             HStack(spacing: 24) {
-                Text("\(stat.count ?? 0) 次充电")
-                    .v2Text(V2Type.stat15.bumped(), color: V2Color.info)
-                Text("均值 \(number(stat.avgPowerKw, 1)) kW")
+                V2CountUp(target: Double(stat.count ?? 0), delay: 0.10) {
+                    String(format: "%.0f 次充电", $0)
+                }
+                .v2Text(V2Type.stat15.bumped(), color: V2Color.info)
+
+                if let avg = stat.avgPowerKw {
+                    V2CountUp(target: avg, delay: 0.16) {
+                        "均值 " + String(format: "%.1f", $0) + " kW"
+                    }
                     .v2Text(V2Type.stat15.bumped(), color: V2Color.text1)
+                } else {
+                    Text("均值 \(number(stat.avgPowerKw, 1)) kW")
+                        .v2Text(V2Type.stat15.bumped(), color: V2Color.text1)
+                }
             }
             .padding(.top, 10)
         }
@@ -286,9 +304,10 @@ struct ChargesView: View {
     @ViewBuilder
     private func amountChip(_ amount: Double?) -> some View {
         if let amount {
-            Text("¥" + String(format: "%.2f", amount))
-                .v2Text(V2Type.amt19.bumped())
-                .v2Numeric()
+            V2CountUp(target: amount, delay: 0.06, reserveWidth: true) {
+                "¥" + String(format: "%.2f", $0)
+            }
+            .v2Text(V2Type.amt19.bumped())
         } else {
             Text("未补录")
                 .v2Text(V2Type.label11.bumped(), color: V2Color.warn)

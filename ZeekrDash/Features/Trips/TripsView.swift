@@ -162,16 +162,16 @@ struct TripsView: View {
     private func summaryCard(_ month: DailyEnergy) -> some View {
         VStack(spacing: V2Metrics.sumRowGap) {
             HStack(spacing: V2Metrics.sumColGap) {
-                sumCell("本月里程", month.distanceKm.map { String(format: "%.0f", $0) }, "km")
-                sumCell("总电耗", month.energyKwh.map { String(format: "%.1f", $0) }, "kWh")
+                sumCell("本月里程", month.distanceKm, "km", decimals: 0, delay: 0)
+                sumCell("总电耗", month.energyKwh, "kWh", decimals: 1, delay: 0.06)
             }
             HStack(spacing: V2Metrics.sumColGap) {
-                sumCell("动态电耗", month.dynamicEnergyKwh.map { String(format: "%.1f", $0) }, "kWh")
-                sumCell("静态电耗", month.staticEnergyKwh.map { String(format: "%.1f", $0) }, "kWh")
+                sumCell("动态电耗", month.dynamicEnergyKwh, "kWh", decimals: 1, delay: 0.12)
+                sumCell("静态电耗", month.staticEnergyKwh, "kWh", decimals: 1, delay: 0.18)
             }
             HStack(spacing: V2Metrics.sumColGap) {
-                sumCell("平均动态电耗", month.avgDynamicConsumption.map { String(format: "%.1f", $0) }, "kWh/100km")
-                sumCell("平均电耗", month.avgConsumption.map { String(format: "%.1f", $0) }, "kWh/100km")
+                sumCell("平均动态电耗", month.avgDynamicConsumption, "kWh/100km", decimals: 1, delay: 0.24)
+                sumCell("平均电耗", month.avgConsumption, "kWh/100km", decimals: 1, delay: 0.30)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -180,7 +180,16 @@ struct TripsView: View {
 
     /// 一格：标题 11/500、数值 16/600、单位 11/500，数值与单位基线对齐、间距 3。
     /// 数值缺失一律 `--`（不是 0）。
-    private func sumCell(_ key: String, _ value: String?, _ unit: String) -> some View {
+    ///
+    /// 数值走 `V2CountUp` 递增入场，`delay` 让六格按行错开；`reserveWidth` 用最终宽度
+    /// 占位，否则数字从 1 位数涨到 3 位数时，右边的单位会一路被推开。
+    private func sumCell(
+        _ key: String,
+        _ value: Double?,
+        _ unit: String,
+        decimals: Int,
+        delay: Double
+    ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(key)
                 .v2Text(.sumKey, color: V2Color.text2)
@@ -188,9 +197,16 @@ struct TripsView: View {
                 .minimumScaleFactor(0.85)
 
             HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(value ?? "--")
+                if let value {
+                    V2CountUp(target: value, delay: delay, reserveWidth: true) {
+                        String(format: "%.\(decimals)f", $0)
+                    }
                     .v2Text(.sumValue)
-                    .v2Numeric()
+                } else {
+                    Text("--")
+                        .v2Text(.sumValue)
+                        .v2Numeric()
+                }
                 Text(unit)
                     .v2Text(.sumKey, color: V2Color.text2)
                     .lineLimit(1)

@@ -44,12 +44,6 @@ struct SOCRing: View {
         max(0, min(1, (soc ?? 0) / 100))
     }
 
-    /// 中心文字：整段「68%」，与 v2 的 `.v2-ring-txt b` 一致（百分号不是小上标）。
-    private var socText: String {
-        guard let soc else { return "--" }
-        return String(format: "%.0f%%", soc.rounded())
-    }
-
     /// 主色：v2 是**固定三色渐变，不随电量分档**。
     ///
     /// 出处 `index-v2.html` 4320–4324：`v2Ring()` 里没有任何按 SOC 取色的分支。
@@ -117,9 +111,15 @@ struct SOCRing: View {
                百分号与数字同字号同字重，不是小的上标。字号按环径等比缩放：
                v2 的基准是环 100 → 字 26，所以系数是 size/100。 */
             VStack(spacing: 2) {
-                Text(socText)
-                    .v2Text(.hero26.scaled(size / 100), color: V2Color.text1)
-                    .v2Numeric()
+                // 数字递增入场（0 → 实际电量）；没读到时仍是 --，不走动画
+                if let soc {
+                    V2CountUp(target: soc.rounded()) { String(format: "%.0f%%", $0) }
+                        .v2Text(.hero26.scaled(size / 100), color: V2Color.text1)
+                } else {
+                    Text("--")
+                        .v2Text(.hero26.scaled(size / 100), color: V2Color.text1)
+                        .v2Numeric()
+                }
 
                 if isCharging {
                     Text("充电中")
