@@ -4,6 +4,13 @@
 //
 //  设置页
 //
+//  视觉真源：`preview/index-v2.html` 的 `renderSettings()`（6527–6660）。
+//  与 v1 的区别（也是这轮重写的重点）：
+//    · 区块标题从「卡外小标题」改成**卡内首行**（`.v2-set-col` 的第一行就是标题）
+//    · 权限是两列等分网格 + 跨行「…」「收起」，不是弹性 chip 流
+//    · 头像是 `avatar-mark` 双色件，original 渲染，不染色
+//    · 未登录才显示「服务端连接」与「高级与调试」
+//
 
 import SwiftUI
 
@@ -12,54 +19,118 @@ struct SettingsView: View {
 
     @Environment(SettingsStore.self) private var settings
     @Environment(AppStore.self) private var store
-    @Environment(\.colorScheme) private var scheme
 
     @State private var model = SettingsViewModel()
     @State private var showCodeSheet = false
-    /// 车辆权限是否展开全部（默认只看前 6 项）
+    /// 车辆权限是否展开全部（默认只看前 6 项，与 HTML `PERM_PREVIEW` 一致）
     @State private var showAllPermissions = false
+    /// 「高级与调试」是否展开（HTML 是 `<details>`，默认收起）
+    @State private var showAdvanced = false
     /// 服务端地址输入框焦点：失焦即提交，避免「改完不按回车」导致不生效
     @FocusState private var isAddressFocused: Bool
     /// API 令牌输入框焦点，同上
     @FocusState private var isTokenFocused: Bool
 
     var body: some View {
-        // 页面标题与底部导航重复，已移除；顶部右上角为数据来源徽标
+        // 页面标题与底部导航重复，已移除；顶部右上角为数据来源胶囊
         NavigationStack {
-            ScreenContainer(modeText: store.modeBadgeText) {
-                // 顺序对齐 preview/index.html：
-                //   车辆权限 → 服务连接 → 车辆控制 → 关于当前数据 → 待配置项 → 账号与凭据
-                // iOS 独有的「诊断」放在后面，不与网页抢前面的位置。
-                capabilitySection
-                /* 「服务端」卡只在**没登录**时显示：登录后地址与连接状态已经不是
-                   需要用户操心的事，天天摆在最上面只是噪音。
-                   退出登录后卡片会回来；要改地址也可以先退出或重装时带 ?api=。 */
+            ScreenContainer(modePill: store.modePill) {
+                /* 顺序对齐 HTML `renderSettings()`：
+                   头像 → 远程车控 → 服务端连接(未登录) → 账号登录 → 车辆权限 → 关于 → 页脚。
+                   iOS 独有的三块（数据来源说明 / 待配置项 / 诊断）放在「关于」之后 ——
+                   HTML 没有它们，但它们承载的是现有功能，不能因为重写而减少。 */
+                heroCard
+                commandSection
                 if !model.isAuthenticated {
                     connectionSection
-                }
-                commandSection
-
-                // 对齐网页：非 live 时给一段"现在看到的是不是真数据"的说明
-                if store.dataMode != .live {
-                    dataSourceNoticeCard
-                }
-                if !model.missingKeys.isEmpty {
-                    pendingConfigCard
                 }
                 // 地址指向本机时没有可登录的后端，放出账号区只会诱导点一个必然失败的按钮
                 if !model.isLocalEndpoint {
                     accountSection
                 }
-
-                diagnosticsSection
+                capabilitySection
                 aboutSection
+                footNote
+
+                /* 「高级与调试」：HTML 里是 `<details>`，位置在页脚之后、且登录后不渲染。
+                   数据来源说明 / 待配置项 / 诊断三块收进来 —— 它们属于开发者视角，
+                   天天摊在首页只是噪音（模拟数据状态已由顶部胶囊标注，信息不丢）。 */
+                if !model.isAuthenticated {
+                    advancedSection
+                }
             }
             .toolbar(.hidden, for: .navigationBar)
             .task { await model.checkHealth(baseURL: settings.baseURL) }
-            .sheet(isPresented: $showCodeSheet) {
+            // 验证码弹窗也走自绘面板（与充电页的三个弹层同一套观感）
+            .fullScreenCover(isPresented: $showCodeSheet) {
                 SMSCodeSheet(model: model, phone: model.pendingPhone)
             }
         }
+    }
+
+    // MARK: - 头像 Hero（`.v2-set-hero`）
+
+    /// 品牌标记 `avatar-mark` 是**双色件**（accent 盘面 + 白色字形），
+    /// 资产里已设 `template-rendering-intent: original` —— 直接 `Image("avatar-mark")`，
+    /// **不要 `.renderingMode(.template)`、不要 `.foregroundStyle()`**，否则会糊成单色块。
+    private var heroCard: some View {
+        HStack(spacing: 14) {
+            // `.v2-set-ava`：48×48 r24，盘面 #6742E8（资产里已烘焙，不染色）
+            Image("avatar-mark")
+                .resizable()
+                .frame(width: 48, height: 48)
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(vehicleName)
+                    .v2Text(.setName16)
+                    .lineLimit(1)
+                Text(plateText)
+                    .v2Text(.setSub13, color: V2Color.text2)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+
+            // `.v2-set-chev`：20pt，不是 SF 的小箭头
+            Text("›")
+                .v2Text(.setName16, color: V2Color.text3)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .v2Card()
+        // HTML `.v2-set-hero{ margin-top: 8px }` —— 卡**外**间距。
+        // 写在 .v2Card() 之前会变成卡内上内距（16+8=24），卡片比别的卡高 8pt。
+        .padding(.top, 8)
+    }
+
+    private var vehicleName: String { "我的极氪" }
+
+    private var plateText: String {
+        if let plate = store.vehicleStatus?.plateNo, !plate.isEmpty { return plate }
+        return "未绑定车辆"
+    }
+
+    // MARK: - 远程车控
+
+    private var commandSection: some View {
+        /* HTML `.v2-set-row`：一行标题+副标题 + 右侧原生开关。
+           服务端那把锁的说明不在这张卡里 —— 车控屏会按 `/health` 单独提示。 */
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("远程车控")
+                    .v2Text(.setName16)
+                Text("允许 App 下发车辆指令")
+                    .v2Text(.setRowT2, color: V2Color.text2)
+            }
+            Spacer(minLength: 0)
+            Toggle("", isOn: Bindable(settings).commandsEnabled)
+                .labelsHidden()
+                .tint(V2Color.accent)
+                .frame(width: 51, height: 31)
+                .accessibilityLabel("远程车控")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .v2Card()
     }
 
     // MARK: - 服务端连接
@@ -93,13 +164,9 @@ struct SettingsView: View {
     private var connectionSection: some View {
         SettingsCard(title: "服务端") {
             VStack(spacing: 10) {
-                HStack {
-                    Text("地址")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textSecondary(scheme))
-                    Spacer()
+                settingsRow("地址") {
                     TextField("http://192.168.1.10:8765", text: Bindable(settings).baseURL)
-                        .font(.system(size: 13))
+                        .v2Text(.text13m)
                         .multilineTextAlignment(.trailing)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -115,15 +182,11 @@ struct SettingsView: View {
                         .focused($isAddressFocused)
                 }
 
-                Divider().overlay(Theme.separator(scheme))
+                separator
 
-                HStack {
-                    Text("API 令牌")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textSecondary(scheme))
-                    Spacer()
+                settingsRow("API 令牌") {
                     SecureField("未启用可留空", text: Bindable(settings).apiToken)
-                        .font(.system(size: 13))
+                        .v2Text(.text13m)
                         .multilineTextAlignment(.trailing)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -138,43 +201,54 @@ struct SettingsView: View {
                 }
 
                 Text("服务端设了 API_TOKEN 后必填，否则所有接口会返回 401；留空表示未启用鉴权")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textTertiary(scheme))
+                    .v2Text(.foot11, color: V2Color.text3)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                Divider().overlay(Theme.separator(scheme))
+                separator
 
                 // 对齐网页「服务连接」里的「地址形态」。
                 // 只判断"是不是本机"看不出「根本没填」和「填了本机」的区别，
                 // 而这两者的处理方式不一样（前者要提示去填，后者是刻意的离线用）。
-                HStack {
-                    Text("地址形态")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textSecondary(scheme))
-                    Spacer()
+                settingsRow("地址形态") {
                     Text(endpointModeText)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.textPrimary(scheme))
+                        .v2Text(.text13m)
                 }
 
-                Divider().overlay(Theme.separator(scheme))
+                separator
 
-                HStack {
-                    Text("状态")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textSecondary(scheme))
-                    Spacer()
+                settingsRow("状态") {
                     connectionBadge
                 }
 
                 if model.isLocalEndpoint {
                     Text("地址为空或指向本机，将直接展示内置模拟数据（不联网）")
-                        .font(.system(size: 11))
-                        .foregroundStyle(ChineseColor.statusWarn)
+                        .v2Text(.foot11, color: V2Color.warn)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
+    }
+
+    /// 一行设置：「标签 …… 右值」，标签 13/500 `#5E6775`
+    private func settingsRow<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack {
+            Text(title)
+                .v2Text(.text13m, color: V2Color.text2)
+            Spacer(minLength: 12)
+            content()
+        }
+    }
+
+    /// `--separator: rgba(27,31,36,.07)`
+    private var separator: some View {
+        Rectangle()
+            .fill(V2Color.separator)
+            .frame(height: 1)
     }
 
     /// 地址形态三态文案，与网页 `${ENDPOINT_MODE}` 的映射一致。
@@ -193,8 +267,7 @@ struct SettingsView: View {
                 .frame(width: 7, height: 7)
 
             Text(connectionText)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(connectionColor)
+                .v2Text(.text13m, color: connectionColor)
 
             if model.isChecking {
                 ProgressView().controlSize(.mini)
@@ -203,10 +276,10 @@ struct SettingsView: View {
     }
 
     private var connectionColor: Color {
-        if model.isChecking { return Theme.textTertiary(scheme) }
+        if model.isChecking { return V2Color.text3 }
         // 地址为空 / localhost：按约定走模拟数据，不算失败
-        if model.isLocalEndpoint { return ChineseColor.statusWarn }
-        return model.isReachable ? ChineseColor.statusGood : ChineseColor.statusBad
+        if model.isLocalEndpoint { return V2Color.warn }
+        return model.isReachable ? V2Color.good : V2Color.bad
     }
 
     private var connectionText: String {
@@ -215,78 +288,18 @@ struct SettingsView: View {
         return model.isReachable ? "已连接" : "未连接"
     }
 
-    /// 诊断区展示的数据来源文案
-    private var diagnosticsSourceText: String {
-        switch store.dataMode {
-        case .mock:    return "本地模拟数据"
-        case .live:    return "真实服务端"
-        case .offline: return "模拟数据（后端不可达）"
-        }
-    }
-
-    /// 「关于当前数据」—— 对齐网页同名卡片，只在非 live 时出现。
-    ///
-    /// 这一段的用处不是装饰：模拟数据长得像真的，不写清楚「现在看到的不是真实车况」，
-    /// 用户会把演示数据当成车。网页那边是一整张卡，这里保持一致。
-    private var dataSourceNoticeCard: some View {
-        SettingsCard(title: "关于当前数据") {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(store.dataMode == .mock
-                     ? "服务地址未配置或指向本机，界面展示的是内置模拟数据，不是真实车况。"
-                     : "服务地址已配置，但后端当前不可达，已暂时切换为模拟数据，不是真实车况。")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textSecondary(scheme))
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text("在上方「服务端」里填写后端地址即可切换到真实数据。")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textTertiary(scheme))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    /// 「待配置项」—— 对齐网页独立卡片。
-    ///
-    /// 与「诊断」里那行分开：这里说的是"服务端缺什么密钥"，
-    /// 是用户下一步要去改 `.env` 的清单，不该埋在诊断数字里。
-    private var pendingConfigCard: some View {
-        SettingsCard(title: "待配置项") {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(model.missingKeys, id: \.self) { key in
-                    Text("· \(key)")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Theme.textSecondary(scheme))
-                }
-
-                Text("填入服务端 .env 后重启服务即可切换到真实数据。")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textTertiary(scheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 4)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
     // MARK: - 账号
 
     private var accountSection: some View {
-        SettingsCard(title: "极氪账号") {
+        SettingsCard(title: "账号登录") {
             VStack(spacing: 10) {
-                HStack {
-                    Text("登录状态")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textSecondary(scheme))
-                    Spacer()
+                settingsRow("登录状态") {
                     HStack(spacing: 5) {
                         Circle()
-                            .fill(model.isAuthenticated ? ChineseColor.statusGood : Theme.textTertiary(scheme))
+                            .fill(model.isAuthenticated ? V2Color.good : V2Color.text3)
                             .frame(width: 7, height: 7)
                         Text(model.isAuthenticated ? "已登录" : "未登录")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Theme.textPrimary(scheme))
+                            .v2Text(.text13m)
                     }
                 }
 
@@ -294,11 +307,12 @@ struct SettingsView: View {
                     // 已登录只给退出入口，不再摆着登录表单 —— 与网页一致。
                     // 此前 iOS 既没有退出按钮、表单又一直在，想换个账号只能重装 App。
                     Text("会话保存在服务端。退出后立即回到未登录态，车辆数据会被清空。")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textTertiary(scheme))
+                        .v2Text(.foot11, color: V2Color.text3)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
+                    /* 位置按用户要求保留在账号卡里（HTML 把它放在「关于」卡，这里不搬）。
+                       `.v2-set-out`：42 高 / r16 / #FFF1F4 底 / #C03950 字 / 15-600。 */
                     Button {
                         Task {
                             if await model.logout() {
@@ -313,25 +327,21 @@ struct SettingsView: View {
                                 ProgressView().controlSize(.small)
                             }
                             Text(model.isLoggingOut ? "退出中" : "退出登录")
-                                .font(.system(size: 14, weight: .medium))
+                                .v2Text(.btn15, color: Color(hex: 0xC03950))
                         }
                         .frame(maxWidth: .infinity)
-                        .frame(height: Metrics.minTouchTarget)
-                        .foregroundStyle(ChineseColor.statusBad)
-                        .background(ChineseColor.statusBad.opacity(0.10))
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .frame(height: 42)
+                        .background(Color(hex: 0xFFF1F4))
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
+                    .buttonStyle(.plain)
                     .disabled(model.isLoggingOut)
                 } else {
-                    Divider().overlay(Theme.separator(scheme))
+                    separator
 
-                    HStack {
-                        Text("手机号")
-                            .font(.system(size: 13))
-                            .foregroundStyle(Theme.textSecondary(scheme))
-                        Spacer()
+                    settingsRow("手机号") {
                         TextField("13800138000", text: Bindable(model).phone)
-                            .font(.system(size: 13))
+                            .v2Text(.text13m)
                             .multilineTextAlignment(.trailing)
                             .keyboardType(.numberPad)
                     }
@@ -342,32 +352,30 @@ struct SettingsView: View {
                             if sent { showCodeSheet = true }
                         }
                     } label: {
-                        HStack {
+                        HStack(spacing: 6) {
                             if model.isSending {
                                 ProgressView().controlSize(.small)
                             }
                             Text(model.isSending ? "发送中" : "获取验证码")
-                                .font(.system(size: 14, weight: .medium))
+                                .v2Text(.btn15, color: .white)
                         }
                         .frame(maxWidth: .infinity)
-                        .frame(height: Metrics.minTouchTarget)
-                        .foregroundStyle(ChineseColor.xiangYaBai)
-                        .background(canSendCode ? Theme.accent(scheme) : Theme.textTertiary(scheme).opacity(0.4))
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .frame(height: 44)
+                        .background(canSendCode ? V2Color.accent : V2Color.text3.opacity(0.4))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
+                    .buttonStyle(.plain)
                     .disabled(!canSendCode)
 
                     Text("建议使用独立的极氪子账号并共享车辆，避免与手机 App 会话冲突")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textTertiary(scheme))
+                        .v2Text(.foot11, color: V2Color.text3)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 if let message = model.accountMessage {
                     Text(message)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textTertiary(scheme))
+                        .v2Text(.foot11, color: V2Color.text3)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -377,68 +385,6 @@ struct SettingsView: View {
 
     private var canSendCode: Bool {
         !model.isSending && model.phone.count == 11 && model.phone.allSatisfy(\.isNumber)
-    }
-
-    // MARK: - 车控
-
-    private var commandSection: some View {
-        SettingsCard(title: "车辆控制") {
-            VStack(spacing: 8) {
-                /* 服务端那把锁（.env 的 ALLOW_COMMANDS）。放在开关上方是当它的上下文：
-                   两把锁都开才能下发，先看到"收不收"再看"发不发"。 */
-                HStack(spacing: 6) {
-                    Text("服务端车控")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textSecondary(scheme))
-                    Spacer(minLength: 8)
-                    Text(model.serverAllowCommands.map { $0 ? "已开启" : "已禁用" } ?? "--")
-                        .font(.system(size: 13))
-                        .foregroundStyle(model.serverAllowCommands == false
-                                         ? ChineseColor.statusWarn
-                                         : Theme.textPrimary(scheme))
-                }
-
-                Divider().overlay(Theme.separator(scheme))
-
-                Toggle(isOn: Bindable(settings).commandsEnabled) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("允许下发控制指令")
-                            .font(.system(size: 14))
-                            .foregroundStyle(Theme.textPrimary(scheme))
-                        Text("关闭时 App 仅可查看，不能操作车辆")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.textTertiary(scheme))
-                    }
-                }
-                .tint(Theme.accent(scheme))
-
-                if settings.commandsEnabled {
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 11))
-                        Text("远程控制存在风险，请确认车辆处于安全场景")
-                            .font(.system(size: 11))
-                    }
-                    .foregroundStyle(ChineseColor.statusWarn)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    // 服务端没开时如实说明 —— 否则用户会以为「开关都开了怎么还是失败」
-                    if model.serverAllowCommands == false {
-                        Text("服务端也没有开启车控（.env 里 ALLOW_COMMANDS=true），即便本开关打开，指令仍会被拒绝")
-                            .font(.system(size: 11))
-                            .foregroundStyle(ChineseColor.statusBad)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-
-                Text("总开关（默认关）与上面的「服务端车控」是两把锁，都要打开才能下发指令。")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textTertiary(scheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
     }
 
     // MARK: - 车辆权限
@@ -471,135 +417,178 @@ struct SettingsView: View {
         "Rear_seat_ventilation": "后排座椅通风",
     ]
 
-    private var capabilitySection: some View {
-        SettingsCard(title: "车辆权限") {
-            VStack(alignment: .leading, spacing: 10) {
-                permissionChips
+    /// 能力键 → 中文名。只翻有把握的，表里没有的原样显示 key。
+    private static let capabilityLabels: [String: String] = [
+        "doorLock": "车锁", "climate": "空调", "defrost": "前除霜",
+        "wheelHeat": "方向盘加热", "seatHeat": "座椅加热", "seatVent": "座椅通风",
+        "window": "车窗", "sentinel": "哨兵", "travelPlan": "出行规划",
+        "tyrePressure": "胎压", "charge": "充电", "location": "位置", "trips": "行程",
+    ]
 
-                // 对齐网页：被能力集裁掉的功能用灰色 chip 逐个列出。
-                // 只写"已隐藏 3 项"回答不了「到底哪个按钮不见了」——
-                // 而这张卡存在的意义就是让这件事可解释。
-                if !hiddenCommandNames.isEmpty {
+    /// 后端明确判定「没有此项」的能力（`capabilities[key] == false`）。
+    /// 取不到能力集时返回空 —— 「不知道」不能写成「确认没有」。
+    private var offCapabilityNames: [String] {
+        guard let caps = store.capabilities else { return [] }
+        return caps
+            .filter { $0.value == false }
+            .keys
+            .sorted()
+            .map { Self.capabilityLabels[$0] ?? $0 }
+    }
+
+    /// 权限清单默认只显示前 6 项（HTML `PERM_PREVIEW`）
+    private static let permissionPreview = 6
+
+    private var visiblePermissions: [String] {
+        (store.permissions ?? []).filter { $0 != "half_load_260" }
+    }
+
+    private var capabilitySection: some View {
+        SettingsCard(
+            title: "车辆权限",
+            badge: visiblePermissions.isEmpty ? nil : "\(visiblePermissions.count) 项"
+        ) {
+            VStack(alignment: .leading, spacing: 8) {
+                if !visiblePermissions.isEmpty {
+                    let shown = showAllPermissions
+                        ? visiblePermissions
+                        : Array(visiblePermissions.prefix(Self.permissionPreview))
+
                     LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 88), spacing: 6)],
-                        alignment: .leading,
-                        spacing: 6
+                        columns: [
+                            GridItem(.flexible(), spacing: 8),
+                            GridItem(.flexible(), spacing: 8),
+                        ],
+                        spacing: 8
                     ) {
-                        ForEach(hiddenCommandNames, id: \.self) { name in
-                            Text(name)
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(Theme.textTertiary(scheme))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.75)
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 4)
-                                .frame(maxWidth: .infinity)
-                                .background(Theme.textTertiary(scheme).opacity(0.08))
-                                .clipShape(Capsule())
+                        ForEach(shown, id: \.self) { permission in
+                            grantChip(Self.permissionLabels[permission] ?? permission, off: false)
                         }
                     }
-                }
 
-                if !capabilityHint.isEmpty {
-                    Text(capabilityHint)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textTertiary(scheme))
+                    /* HTML 的「…」/「收起」是**跨满整行**的 chip（`grid-column: 1/-1`），
+                       不是文字链接、更不是 SF 的 chevron。 */
+                    if visiblePermissions.count > Self.permissionPreview {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                showAllPermissions.toggle()
+                            }
+                        } label: {
+                            Text(showAllPermissions ? "收起" : "…")
+                                .v2Text(.grantChip, color: V2Color.accent)
+                                .frame(maxWidth: .infinity)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(V2Color.tintAccent)
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .strokeBorder(Color.white.opacity(0.90), lineWidth: 1)
+                                )
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(showAllPermissions
+                                            ? "收起权限列表"
+                                            : "展开全部 \(visiblePermissions.count) 项权限")
+                    }
+                } else {
+                    Text(store.permissions == nil
+                         ? "未取到权限包 —— 权限接口不可用时界面按「全部显示」处理。"
+                         : "服务端确认这台车没有任何权限包。")
+                        .v2Text(.foot11, color: V2Color.text3)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-            }
-        }
-    }
 
-    /// 被能力集裁掉、从界面隐藏的车控功能名。
-    private var hiddenCommandNames: [String] {
-        VehicleCommand.allCases
-            .filter { !store.isCapabilityAvailable($0) }
-            .map(\.displayName)
-    }
+                // 未开通：后端明确判定「没有此项」的能力，灰 chip 逐个列出。
+                // 只写"已隐藏 3 项"回答不了「到底哪个按钮不见了」——
+                // 而这张卡存在的意义就是让这件事可解释。
+                if !offCapabilityNames.isEmpty {
+                    Text("未开通")
+                        .v2Text(.label11, color: V2Color.text3)
+                        .padding(.top, 2)
 
-    /// 「这台车开通了什么」的原始清单。
-    ///
-    /// 取不到时如实说「没取到」，而不是显示一个空列表 —— 后者会被读成
-    /// 「什么权限都没有」，那是把「不知道」谎报成「确认没有」。
-    /// 权限清单默认只显示前 6 项。
-    ///
-    /// 十几项 chip 铺满会把卡片撑得很长，而多数人只想知道"有哪些"。
-    /// 网页那边用「…」小按钮，iOS 这边改成**文字按钮 + 44pt 触控区**：
-    /// 一个省略号在触摸屏上既不好点也不像按钮，HIG 要求可见的可点目标。
-    private static let permissionPreview = 6
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(), spacing: 8),
+                            GridItem(.flexible(), spacing: 8),
+                        ],
+                        spacing: 8
+                    ) {
+                        ForEach(offCapabilityNames, id: \.self) { name in
+                            grantChip(name, off: true)
+                        }
+                    }
 
-    @ViewBuilder
-    private var permissionChips: some View {
-        if let permissions = store.permissions, !permissions.isEmpty {
-            let shown = showAllPermissions
-                ? permissions
-                : Array(permissions.prefix(Self.permissionPreview))
-
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 88), spacing: 6)],
-                alignment: .leading,
-                spacing: 6
-            ) {
-                ForEach(shown, id: \.self) { permission in
-                    Text(Self.permissionLabels[permission] ?? permission)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(ChineseColor.qingBi)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 4)
-                        .frame(maxWidth: .infinity)
-                        .background(ChineseColor.qingBi.opacity(0.10))
-                        .clipShape(Capsule())
+                    Text("灰项为本账号未开通、已从界面隐藏的功能")
+                        .v2Text(.foot11, color: V2Color.text3)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-
-            if permissions.count > Self.permissionPreview {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        showAllPermissions.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 3) {
-                        Text(showAllPermissions ? "收起" : "展开全部 \(permissions.count) 项")
-                            .font(.system(size: 12))
-                        Image(systemName: showAllPermissions ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 9, weight: .semibold))
-                    }
-                    .foregroundStyle(Theme.accent(scheme))
-                    .frame(minHeight: Metrics.minTouchTarget)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(showAllPermissions
-                                    ? "收起权限列表"
-                                    : "展开全部 \(permissions.count) 项权限")
-            }
-        } else {
-            Text(store.permissions == nil
-                 ? "尚未取到权限包，界面按「全部显示」处理。"
-                 : "服务端确认这台车没有任何权限包。")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textTertiary(scheme))
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    /// 卡片脚注。
+    /// 一个权限 chip：`.v2-set-grants .v2-set-chip`（r12 / 内距 8 10 / 居中 / 单行省略）
+    private func grantChip(_ text: String, off: Bool) -> some View {
+        Text(text)
+            .v2Text(.grantChip, color: off ? V2Color.muted : V2Color.accent)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(off ? V2Color.tintMuted : V2Color.tintAccent)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.90), lineWidth: 1)
+            )
+    }
+
+    // MARK: - 关于当前数据
+
+    /// 「关于当前数据」—— 对齐网页同名卡片，只在非 live 时出现。
     ///
-    /// **不再写数据来源**（`ms-app-bff/api/1.0/permissions` 是实现细节，
-    /// 对用户没有意义，网页那边也已删掉）。这里只解释一件事：
-    /// 那些灰色 chip 是什么意思。一个个点名没必要 —— 灰 chip 本身已经列出来了。
-    /// 没有灰 chip 时返回空串，调用处直接不渲染这一行。
-    private var capabilityHint: String {
-        guard let permissions = store.permissions, !permissions.isEmpty else {
-            return ""   // 取不到权限包的情况由 permissionChips 的空态文案负责
+    /// 这一段的用处不是装饰：模拟数据长得像真的，不写清楚「现在看到的不是真实车况」，
+    /// 用户会把演示数据当成车。网页那边是一整张卡，这里保持一致。
+    private var dataSourceNoticeCard: some View {
+        SettingsCard(title: "关于当前数据") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(store.dataMode == .mock
+                     ? "服务地址未配置或指向本机，界面展示的是内置模拟数据，不是真实车况。"
+                     : "服务地址已配置，但后端当前不可达，已暂时切换为模拟数据，不是真实车况。")
+                    .v2Text(.text12, color: V2Color.text2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("在上方「服务端」里填写后端地址即可切换到真实数据。")
+                    .v2Text(.foot11, color: V2Color.text3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        return hiddenCommandNames.isEmpty
-            ? ""
-            : "灰项为本账号未开通、已从界面隐藏的功能"
+    }
+
+    /// 「待配置项」—— 对齐网页独立卡片。
+    ///
+    /// 与「诊断」里那行分开：这里说的是"服务端缺什么密钥"，
+    /// 是用户下一步要去改 `.env` 的清单，不该埋在诊断数字里。
+    private var pendingConfigCard: some View {
+        SettingsCard(title: "待配置项") {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(model.missingKeys, id: \.self) { key in
+                    Text("· \(key)")
+                        .font(Font.custom(V2Font.regular, size: 11).monospaced())
+                        .foregroundStyle(V2Color.text2)
+                }
+
+                Text("填入服务端 .env 后重启服务即可切换到真实数据。")
+                    .v2Text(.foot11, color: V2Color.text3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     // MARK: - 诊断
@@ -608,9 +597,9 @@ struct SettingsView: View {
         SettingsCard(title: "诊断") {
             VStack(spacing: 0) {
                 diagnosticRow("数据来源", value: diagnosticsSourceText)
-                Divider().overlay(Theme.separator(scheme))
+                separator
                 diagnosticRow("配置完整", value: model.isLiveConfigured ? "是" : "否")
-                Divider().overlay(Theme.separator(scheme))
+                separator
                 // 「服务端车控」已移到「车辆控制」卡（和客户端总开关放一起看才讲得清）。
                 // 同一个信息不在一处之外再摆一遍 —— 两处都可能过期，还容易只改一处。
                 diagnosticRow("上次刷新", value: store.lastRefresh.map {
@@ -623,15 +612,22 @@ struct SettingsView: View {
         }
     }
 
+    /// 诊断区展示的数据来源文案
+    private var diagnosticsSourceText: String {
+        switch store.dataMode {
+        case .mock:    return "本地模拟数据"
+        case .live:    return "真实服务端"
+        case .offline: return "模拟数据（后端不可达）"
+        }
+    }
+
     private func diagnosticRow(_ title: String, value: String) -> some View {
         HStack {
             Text(title)
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.textSecondary(scheme))
+                .v2Text(.text13m, color: V2Color.text2)
             Spacer()
             Text(value)
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.textPrimary(scheme))
+                .v2Text(.text13m)
         }
         .padding(.vertical, 9)
     }
@@ -641,40 +637,96 @@ struct SettingsView: View {
     private var aboutSection: some View {
         SettingsCard(title: "关于") {
             VStack(alignment: .leading, spacing: 8) {
-                Text("ZeekrDash")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Theme.textPrimary(scheme))
+                // `.v2-set-ver`：14/500，文案是「ZeekrDash v5.0.7 · iOS 26」
+                Text("ZeekrDash v5.0.7 · iOS 26")
+                    .v2Text(.body14m)
 
                 Text("非官方工具，基于社区逆向研究成果实现。与极氪、吉利无任何关联，仅供个人自用。")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textTertiary(scheme))
+                    .v2Text(.foot11, color: V2Color.text3)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    // MARK: - 高级与调试（`.v2-set-adv`）
+
+    /// HTML：`<details class="v2-set-adv"><summary>高级与调试</summary>…</details>`，
+    /// summary 是 11/500 text-3，`::before` 加了「ⓘ 」前缀；展开后里面的卡片带 8pt 上距。
+    private var advancedSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) { showAdvanced.toggle() }
+            } label: {
+                HStack(spacing: 0) {
+                    Text("ⓘ 高级与调试")
+                        .v2Text(.label11, color: V2Color.text3)
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("高级与调试")
+            .accessibilityAddTraits(showAdvanced ? [.isSelected] : [])
+
+            if showAdvanced {
+                VStack(spacing: V2Metrics.screenGap) {
+                    // 只有非 live 时才有意义（真实数据没什么好提示的）
+                    if store.dataMode != .live {
+                        dataSourceNoticeCard
+                    }
+                    if !model.missingKeys.isEmpty {
+                        pendingConfigCard
+                    }
+                    diagnosticsSection
+                }
+                .padding(.top, 8)
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    /// `.v2-set-fn`：11/500、居中、text-3
+    private var footNote: some View {
+        Text("车辆数据仅存本机 · 不上传云端")
+            .v2Text(.label11, color: V2Color.text3)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, 4)
     }
 }
 
 // MARK: - 设置卡片容器
 
+/// v2 的区块：**标题在卡片内部**（`.v2-set-col` 的第一行），
+/// 不是 v1 那种「卡外小标题 + 白卡」。这一条决定整屏的纵向节奏，
+/// 所以所有区块共用它，不许各自拼。
 private struct SettingsCard<Content: View>: View {
 
     let title: String
+    /// 标题右侧的计数徽标（如「20 项」），`.v2-set-badge`
+    var badge: String?
     @ViewBuilder let content: () -> Content
-
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.textTertiary(scheme))
-                .padding(.leading, 4)
+            HStack(spacing: 8) {
+                Text(title)
+                    .v2Text(.setSub13, color: V2Color.text2)
+                if let badge {
+                    Text(badge)
+                        .v2Text(.chip11, color: V2Color.info)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(V2Color.tintInfo)
+                        .clipShape(Capsule())
+                }
+            }
 
             content()
-                .padding(Metrics.cardPadding)
-                .background(Theme.surface(scheme))
-                .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .v2Card()
     }
 }
 
@@ -686,33 +738,35 @@ private struct SMSCodeSheet: View {
     let phone: String
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var scheme
     @Environment(AppStore.self) private var store
     @State private var code = ""
     @FocusState private var focused: Bool
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 20) {
+        V2BottomSheet(
+            title: "输入验证码",
+            closeTitle: "取消",
+            onClose: { dismiss() },
+            heightRatio: 0.56
+        ) {
+            VStack(spacing: 16) {
                 Text("验证码已发送至 \(phone)")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textSecondary(scheme))
-                    .padding(.top, 20)
+                    .v2Text(.text13m, color: V2Color.text2)
+                    .padding(.top, 4)
 
                 // 极氪**国区的验证码是 4 位**（2026-10-16 实测）。此前写死 6 位，
                 // 用户收到 4 位码时永远凑不满，「确认登录」点不动 —— 登录链路直接死在这里。
                 // 长度上限放宽到 8 位（与后端 `4 <= len(code) <= 8` 的校验一致），
                 // 具体几位由网关判断，客户端只做基本格式校验。
                 TextField("4 位验证码", text: $code)
-                    .font(.system(size: 26, weight: .medium, design: .rounded))
+                    .v2Text(.hero26)
                     .multilineTextAlignment(.center)
                     .keyboardType(.numberPad)
                     .textContentType(.oneTimeCode)
                     .focused($focused)
-                    .frame(height: 56)
-                    .background(Theme.surfaceAlt(scheme))
+                    .frame(height: 52)
+                    .background(Color.white.opacity(0.45))
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .padding(.horizontal, 32)
                     .onChange(of: code) { _, value in
                         // 只保留数字，最多 8 位
                         let filtered = String(value.filter(\.isNumber).prefix(8))
@@ -721,8 +775,7 @@ private struct SMSCodeSheet: View {
 
                 if let error = model.loginError {
                     Text(error)
-                        .font(.system(size: 12))
-                        .foregroundStyle(ChineseColor.statusBad)
+                        .v2Text(.foot11, color: V2Color.bad)
                 }
 
                 Button {
@@ -740,32 +793,25 @@ private struct SMSCodeSheet: View {
                         }
                     }
                 } label: {
-                    HStack {
+                    HStack(spacing: 6) {
                         if model.isVerifying {
                             ProgressView().controlSize(.small)
                         }
                         Text(model.isVerifying ? "验证中" : "确认登录")
-                            .font(.system(size: 15, weight: .medium))
+                            .v2Text(.btn15, color: .white)
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: Metrics.minTouchTarget)
-                    .foregroundStyle(ChineseColor.xiangYaBai)
-                    .background(canSubmit ? Theme.accent(scheme) : Theme.textTertiary(scheme).opacity(0.4))
+                    .frame(height: 48)
+                    .background(canSubmit ? V2Color.accent : V2Color.text3.opacity(0.4))
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
+                .buttonStyle(.plain)
                 .disabled(!canSubmit)
-                .padding(.horizontal, 32)
 
-                Spacer()
+                Spacer(minLength: 0)
             }
-            .background(Theme.background(scheme))
-            .navigationTitle("输入验证码")
-            .toolbar(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") { dismiss() }
-                }
-            }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
         }
         .onAppear { focused = true }
     }
