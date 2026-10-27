@@ -12,6 +12,7 @@ import Foundation
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
+import PhotosUI
 
 /// 充电页
 ///
@@ -27,7 +28,10 @@ struct ChargesView: View {
     @State private var model = ChargesViewModel()
 
     @State private var showMonthPicker = false
-    @State private var showImporter = false
+    /// 相册选图弹层的开关（截图识别入口）
+    @State private var showPhotoPicker = false
+    /// 相册里选中的那一张；变化即触发上传识别
+    @State private var pickedPhoto: PhotosPickerItem?
     @State private var showOcrReview = false
     @State private var showManualEntry = false
     @State private var showPayments = false
@@ -44,6 +48,27 @@ struct ChargesView: View {
     private func exitOcr(_ action: OcrExitAction) {
         pendingOcrExit = action
         showOcrReview = false
+    }
+
+    /// 相册选完一张 → 取字节 → 交给服务端识别 → 有结果就弹核对框。
+    ///
+    /// loadTransferable 不保证有值：iCloud 原图还没下载完、选中的是 Live Photo
+    /// 只剩视频轨、文件本身损坏，都会返回 nil。这种情况必须给可见提示 ——
+    /// 静默 return 会让人以为按钮是坏的。
+    @MainActor
+    private func handlePickedPhoto(_ item: PhotosPickerItem) async {
+        // 先清掉选中项：否则用户再选同一张图不会触发 onChange（值没变）。
+        pickedPhoto = nil
+
+        guard let data = try? await item.loadTransferable(type: Data.self) else {
+            model.showToast("这张图读不出来（可能还在 iCloud 下载），换一张试试")
+            return
+        }
+
+        let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
+        await model.runOcr(imageData: data, filename: "screenshot.\(ext)")
+
+        if model.ocrResult != nil { showOcrReview = true }
     }
 
     /// 首次加载中（还没拿到任何月度汇总）
@@ -79,17 +104,19 @@ struct ChargesView: View {
                 Task { await model.select(month: picked) }
             }
         }
-        // 截图识别：选图 → 服务端识别 → **先核对再入库**
-        .fileImporter(
-            isPresented: $showImporter,
-            allowedContentTypes: [.image],
-            allowsMultipleSelection: false
-        ) { result in
-            Task {
-                guard case .success(let urls) = result, let url = urls.first else { return }
-                await model.runOcr(fileURL: url)
-                if model.ocrResult != nil { showOcrReview = true }
-            }
+        /* 截图识别：**从相册选图** → 服务端识别 → 先核对再入库。
+           原来是 .fileImporter：它打开的是「文件」App，而用户的截图在相册里，
+           等于点了个用不上的入口。PhotosPicker 直接进系统相册（支持截图、
+           最近项目、iCloud），和 HTML 版 input[type=file] 在 iOS 上的行为一致。 */
+        .photosPicker(
+            isPresented: $showPhotoPicker,
+            selection: $pickedPhoto,
+            matching: .images,
+            photoLibrary: .shared()
+        )
+        .onChange(of: pickedPhoto) { _, item in
+            guard let item else { return }
+            Task { await handlePickedPhoto(item) }
         }
         // 核对弹层用自绘面板（不是系统 sheet）：与 v2 的圆角/遮罩/把手一致
         .fullScreenCover(isPresented: $showOcrReview) {
@@ -114,7 +141,7 @@ struct ChargesView: View {
             Task {
                 try? await Task.sleep(nanoseconds: 400_000_000)
                 switch action {
-                case .reselect: showImporter = true
+                case .reselect: showPhotoPicker = true
                 case .manual:   showManualEntry = true
                 }
             }
@@ -145,7 +172,7 @@ struct ChargesView: View {
             showMonthPicker = true
         } label: {
             Text(model.selectedMonthLabel)
-                .v2Text(.month13, color: V2Color.accent)
+                .v2Text(V2Type.month13.bumped(), color: V2Color.accent)
                 .padding(.horizontal, 14)
                 .frame(minWidth: V2Metrics.monthChipMinWidth, minHeight: V2Metrics.monthChipHeight)
                 .glassSurface(cornerRadius: V2Metrics.monthChipRadius)
@@ -205,13 +232,13 @@ struct ChargesView: View {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("本月充入电量")
-                        .v2Text(.label12, color: V2Color.text2)
+                        .v2Text(V2Type.label12.bumped(), color: V2Color.text2)
                     HStack(alignment: .firstTextBaseline, spacing: 3) {
                         Text(number(stat.totalKwh, 1))
-                            .v2Text(.hero34)
+                            .v2Text(V2Type.hero34.bumped())
                             .v2Numeric()
                         Text("kWh")
-                            .v2Text(.body14m, color: V2Color.text2)
+                            .v2Text(V2Type.body14m.bumped(), color: V2Color.text2)
                     }
                     .padding(.top, 12)
                 }
@@ -221,24 +248,24 @@ struct ChargesView: View {
                 VStack(alignment: .trailing, spacing: 14) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text("本月金额")
-                            .v2Text(.label12, color: V2Color.text2)
-                            .frame(width: 52, alignment: .leading)
+                            .v2Text(V2Type.label12.bumped(), color: V2Color.text2)
+                            .frame(width: 56, alignment: .leading)
                         amountChip(stat.amountTotal)
                     }
 
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text("累计")
-                            .v2Text(.label12, color: V2Color.text2)
-                            .frame(width: 52, alignment: .leading)
+                            .v2Text(V2Type.label12.bumped(), color: V2Color.text2)
+                            .frame(width: 56, alignment: .leading)
                         Text(totalAmountText)
-                            .v2Text(.body14m, color: V2Color.text3)
+                            .v2Text(V2Type.body14m.bumped(), color: V2Color.text3)
                             .v2Numeric()
                     }
 
                     // 有金额、也有没补的笔数时说明"合计里不含这几笔"
                     if (stat.amountCount ?? 0) > 0, (stat.unpricedCount ?? 0) > 0 {
                         Text("含 \(stat.unpricedCount ?? 0) 笔未补录")
-                            .v2Text(.label11, color: V2Color.text3)
+                            .v2Text(V2Type.label11.bumped(), color: V2Color.text3)
                             .padding(.top, -6)
                     }
                 }
@@ -246,9 +273,9 @@ struct ChargesView: View {
 
             HStack(spacing: 24) {
                 Text("\(stat.count ?? 0) 次充电")
-                    .v2Text(.stat15, color: V2Color.info)
+                    .v2Text(V2Type.stat15.bumped(), color: V2Color.info)
                 Text("均值 \(number(stat.avgPowerKw, 1)) kW")
-                    .v2Text(.stat15, color: V2Color.text1)
+                    .v2Text(V2Type.stat15.bumped(), color: V2Color.text1)
             }
             .padding(.top, 10)
         }
@@ -260,11 +287,11 @@ struct ChargesView: View {
     private func amountChip(_ amount: Double?) -> some View {
         if let amount {
             Text("¥" + String(format: "%.2f", amount))
-                .v2Text(.amt19)
+                .v2Text(V2Type.amt19.bumped())
                 .v2Numeric()
         } else {
             Text("未补录")
-                .v2Text(.label11, color: V2Color.warn)
+                .v2Text(V2Type.label11.bumped(), color: V2Color.warn)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
                 .background(V2Color.tintWarn)
@@ -283,10 +310,10 @@ struct ChargesView: View {
     private var skeleton: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("本月充入电量").v2Text(.title14)
+                Text("本月充入电量").v2Text(V2Type.title14.bumped())
                 Spacer(minLength: 0)
                 Text("加载中")
-                    .v2Text(.label11, color: V2Color.text2)
+                    .v2Text(V2Type.label11.bumped(), color: V2Color.text2)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(V2Color.tintMuted)
@@ -310,16 +337,16 @@ struct ChargesView: View {
         VStack(spacing: 0) {
             // 注意：HTML 的充电页空态/错误态**没有图标**（只有行程页有 SVG.chart），别自己加
             Text("充电流水没有读到")
-                .v2Text(.emptyTitle)
+                .v2Text(V2Type.emptyTitle.bumped())
                 .padding(.top, 12)
             Text("后端可能正在重启，或登录状态已失效")
-                .v2Text(.emptyDesc, color: V2Color.text3)
+                .v2Text(V2Type.emptyDesc.bumped(), color: V2Color.text3)
                 .padding(.top, 6)
             Button {
                 Task { await model.load() }
             } label: {
                 Text("重试")
-                    .v2Text(.button14, color: V2Color.accent)
+                    .v2Text(V2Type.button14.bumped(), color: V2Color.accent)
                     .frame(height: 32)
                     .padding(.horizontal, 20)
                     .background(V2Color.tintAccent)
@@ -337,9 +364,9 @@ struct ChargesView: View {
     private var emptyMonth: some View {
         VStack(spacing: 0) {
             Text("\(model.selectedMonthLabel)没有充电记录")
-                .v2Text(.emptyTitle)
+                .v2Text(V2Type.emptyTitle.bumped())
             Text("换个月份看看；新流水会在充完电或跨天后的同步里出现")
-                .v2Text(.emptyDesc, color: V2Color.text3)
+                .v2Text(V2Type.emptyDesc.bumped(), color: V2Color.text3)
                 .multilineTextAlignment(.center)
                 .padding(.top, 6)
         }
@@ -353,7 +380,7 @@ struct ChargesView: View {
 
     private var recordCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("充电记录").v2Text(.title14)
+            Text("充电记录").v2Text(V2Type.title14.bumped())
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(model.records) { record in
                     ChargeRecordRow(record: record)
@@ -381,10 +408,10 @@ struct ChargesView: View {
 
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Text("金额补录").v2Text(.title14)
+                Text("金额补录").v2Text(V2Type.title14.bumped())
                 Spacer(minLength: 0)
                 Text(badge)
-                    .v2Text(.chip11, color: V2Color.accent)
+                    .v2Text(V2Type.chip11.bumped(), color: V2Color.accent)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(V2Color.accent.opacity(0.12))
@@ -394,7 +421,7 @@ struct ChargesView: View {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(Array(costNotes.enumerated()), id: \.offset) { _, note in
                     Text(note)
-                        .v2Text(.note11b, color: V2Color.text3)
+                        .v2Text(V2Type.note11b.bumped(), color: V2Color.text3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -402,7 +429,7 @@ struct ChargesView: View {
 
             if let error = model.ocrErrorMessage {
                 Text("识别失败：\(error)，可以手写录入")
-                    .v2Text(.note11b, color: V2Color.bad)
+                    .v2Text(V2Type.note11b.bumped(), color: V2Color.bad)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -414,7 +441,7 @@ struct ChargesView: View {
             // 三个入口：截图识别 / 手写录入 / 待确认
             HStack(spacing: 8) {
                 Button {
-                    showImporter = true
+                    showPhotoPicker = true
                 } label: {
                     HStack(spacing: 5) {
                         if model.isOcrBusy {
@@ -427,7 +454,7 @@ struct ChargesView: View {
                         }
                         Text(model.isOcrBusy ? "识别中…" : "截图识别")
                     }
-                    .v2Text(.text12, color: .white)
+                    .v2Text(V2Type.text12.bumped(), color: .white)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 7)
                     .background(V2Color.accent)
@@ -447,7 +474,7 @@ struct ChargesView: View {
                             .frame(width: 14, height: 14)
                         Text("手写录入")
                     }
-                    .v2Text(.text12, color: V2Color.text1)
+                    .v2Text(V2Type.text12.bumped(), color: V2Color.text1)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 7)
                     .background(Color.white.opacity(0.50))
@@ -463,7 +490,7 @@ struct ChargesView: View {
                         showPayments = true
                     } label: {
                         Text("待确认 \(pending)")
-                            .v2Text(.text12, color: V2Color.warn)
+                            .v2Text(V2Type.text12.bumped(), color: V2Color.warn)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 7)
                             .background(V2Color.tintWarn)
@@ -524,7 +551,7 @@ struct ChargesView: View {
             }
             Text("数据来自非官方接口，仅供参考")
         }
-        .v2Text(.foot11, color: V2Color.text3)
+        .v2Text(V2Type.foot11.bumped(), color: V2Color.text3)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 8)
     }
@@ -547,20 +574,20 @@ private struct ChargeRecordRow: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(whenText)
-                    .v2Text(.label12, color: V2Color.text3)
+                    .v2Text(V2Type.label12.bumped(), color: V2Color.text3)
                 Spacer(minLength: 0)
                 HStack(alignment: .firstTextBaseline, spacing: 2) {
                     Text(String(format: "%.1f", record.energyKwh ?? 0))
-                        .v2Text(.body15)
+                        .v2Text(V2Type.body15.bumped())
                         .v2Numeric()
                     Text("kWh")
-                        .v2Text(.label11, color: V2Color.text3)
+                        .v2Text(V2Type.label11.bumped(), color: V2Color.text3)
                 }
             }
 
             HStack(alignment: .center, spacing: 8) {
                 Text(record.stationName ?? record.kindText)
-                    .v2Text(.label12, color: V2Color.text1)
+                    .v2Text(V2Type.label12.bumped(), color: V2Color.text1)
                     .lineLimit(1)
                     .truncationMode(.tail)
 
@@ -601,7 +628,7 @@ private struct ChargeRecordRow: View {
 
     private func chip(_ text: String) -> some View {
         Text(text)
-            .v2Text(.label11, color: V2Color.warn)
+            .v2Text(V2Type.label11.bumped(), color: V2Color.warn)
             .padding(.horizontal, 7)
             .padding(.vertical, 4)
             .background(V2Color.tintWarn)

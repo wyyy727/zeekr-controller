@@ -103,13 +103,13 @@ struct NearbyStationsCard: View {
     private var listCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Text("附近充电站").v2Text(.title14)
+                Text("附近充电站").v2Text(V2Type.title14.bumped())
                 Spacer(minLength: 0)
                 Button {
                     showSheet = true
                 } label: {
                     Text("\(countText) ›")
-                        .v2Text(.segLabelOn, color: V2Color.accent)
+                        .v2Text(V2Type.segLabelOn.bumped(), color: V2Color.accent)
                 }
                 .buttonStyle(.plain)
             }
@@ -132,24 +132,24 @@ struct NearbyStationsCard: View {
     private func promptCard(badge: String, note: String, action: String) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("附近充电站").v2Text(.title14)
+                Text("附近充电站").v2Text(V2Type.title14.bumped())
                 Spacer(minLength: 0)
                 Text(badge)
-                    .v2Text(.label11, color: V2Color.text2)
+                    .v2Text(V2Type.label11.bumped(), color: V2Color.text2)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(V2Color.tintMuted)
                     .clipShape(Capsule())
             }
             Text(note)
-                .v2Text(.label12, color: V2Color.text3)
+                .v2Text(V2Type.label12.bumped(), color: V2Color.text3)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 8)
             Button {
                 Task { await model.locate() }
             } label: {
                 Text(action)
-                    .v2Text(.text12, color: V2Color.accent)
+                    .v2Text(V2Type.text12.bumped(), color: V2Color.accent)
                     .frame(maxWidth: .infinity, minHeight: 36)
                     .background(V2Color.tintAccent)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -164,17 +164,17 @@ struct NearbyStationsCard: View {
     private func failedCard(_ reason: String) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("附近充电站").v2Text(.title14)
+                Text("附近充电站").v2Text(V2Type.title14.bumped())
                 Spacer(minLength: 0)
                 Text("需定位")
-                    .v2Text(.label11, color: V2Color.warn)
+                    .v2Text(V2Type.label11.bumped(), color: V2Color.warn)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(V2Color.tintWarn)
                     .clipShape(Capsule())
             }
             Text(reason)
-                .v2Text(.label12, color: V2Color.text3)
+                .v2Text(V2Type.label12.bumped(), color: V2Color.text3)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 8)
 
@@ -182,7 +182,7 @@ struct NearbyStationsCard: View {
                 Task { await model.locate() }
             } label: {
                 Text("重试定位")
-                    .v2Text(.text12, color: V2Color.accent)
+                    .v2Text(V2Type.text12.bumped(), color: V2Color.accent)
                     .frame(maxWidth: .infinity, minHeight: 36)
                     .background(V2Color.tintAccent)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -194,7 +194,7 @@ struct NearbyStationsCard: View {
             if showManualField {
                 HStack(spacing: 8) {
                     TextField("纬度, 经度", text: $manualText)
-                        .v2Text(.label12)
+                        .v2Text(V2Type.label12.bumped())
                         .textFieldStyle(.plain)
                         .keyboardType(.numbersAndPunctuation)
                         .padding(.horizontal, 10)
@@ -208,7 +208,7 @@ struct NearbyStationsCard: View {
                         }
                     } label: {
                         Text("使用")
-                            .v2Text(.text12, color: V2Color.text1)
+                            .v2Text(V2Type.text12.bumped(), color: V2Color.text1)
                             .padding(.horizontal, 14)
                             .frame(height: 36)
                             .background(Color.white.opacity(0.55))
@@ -219,14 +219,14 @@ struct NearbyStationsCard: View {
                 .padding(.top, 8)
             } else {
                 Button("或手动输入坐标") { showManualField = true }
-                    .v2Text(.label11, color: V2Color.text3)
+                    .v2Text(V2Type.label11.bumped(), color: V2Color.text3)
                     .buttonStyle(.plain)
                     .padding(.top, 8)
             }
 
             if let hint {
                 Text(hint)
-                    .v2Text(.label11, color: V2Color.bad)
+                    .v2Text(V2Type.label11.bumped(), color: V2Color.bad)
                     .padding(.top, 6)
             }
         }
@@ -237,10 +237,10 @@ struct NearbyStationsCard: View {
     private var skeletonCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("附近充电站").v2Text(.title14)
+                Text("附近充电站").v2Text(V2Type.title14.bumped())
                 Spacer(minLength: 0)
                 Text("加载中")
-                    .v2Text(.label11, color: V2Color.text2)
+                    .v2Text(V2Type.label11.bumped(), color: V2Color.text2)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(V2Color.tintMuted)
@@ -256,7 +256,7 @@ struct NearbyStationsCard: View {
             }
             .frame(height: 66 + 8)
             Text("正在查找附近充电站…")
-                .v2Text(.label11, color: V2Color.text3)
+                .v2Text(V2Type.label11.bumped(), color: V2Color.text3)
                 .padding(.top, 4)
         }
         .v2Card()
@@ -266,10 +266,10 @@ struct NearbyStationsCard: View {
     private var emptyCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("附近充电站").v2Text(.title14)
+                Text("附近充电站").v2Text(V2Type.title14.bumped())
                 Spacer(minLength: 0)
                 Text(model.hasAnyFilter ? "已筛选" : "无数据")
-                    .v2Text(.label11, color: V2Color.text2)
+                    .v2Text(V2Type.label11.bumped(), color: V2Color.text2)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(V2Color.tintMuted)
@@ -278,7 +278,7 @@ struct NearbyStationsCard: View {
             Text(model.hasAnyFilter
                  ? "附近没有符合当前筛选条件的站。放宽条件或清除筛选再看看。"
                  : (hint ?? "附近没有查到充电站。"))
-                .v2Text(.label12, color: V2Color.text3)
+                .v2Text(V2Type.label12.bumped(), color: V2Color.text3)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 8)
 
@@ -288,7 +288,7 @@ struct NearbyStationsCard: View {
                 }
             } label: {
                 Text(model.hasAnyFilter ? "清除筛选" : "重新定位")
-                    .v2Text(.text12, color: V2Color.accent)
+                    .v2Text(V2Type.text12.bumped(), color: V2Color.accent)
                     .frame(maxWidth: .infinity, minHeight: 36)
                     .background(V2Color.tintAccent)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -322,7 +322,13 @@ struct NearbyStationsCard: View {
             return station
         }
 
+        /* 「最近自营」不能只从已加载的这一页里挑：首屏 10 条经常**一个自营站都没有**
+           （实测附近 50 个站里才 11 个自营，最近的那个 1.6 km 排在十几位之后），
+           于是第一行永远退化成「最近」，用户看到的就和 HTML 演示数据不一样了。
+           这里多一次 `self_only=true&limit=1` 的单站查询（服务端已按距离升序），
+           查到就用它；查不到（未登录 / 价格服务挂了）再退回本页里的自营站。 */
         let selfPick = take(sorted.first { !used.contains($0.stationId) && $0.selfOperate == true })
+            ?? take(model.nearestSelf)
         /* 最便宜的快充：必须有价、必须是快充；缺价的站不能当 0 元排到第一 */
         let cheap = take(sorted
             .filter { !used.contains($0.stationId) && ($0.dcCount ?? 0) > 0 && $0.price?.totalPrice != nil }
@@ -363,21 +369,25 @@ struct NearbyStationsCard: View {
 
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                HStack(spacing: 4) {
-                    /* `.v2-st-pick` 在 HTML 里**没有样式规则**（grep 全文件 0 命中），
-                       实际渲染就是 `<i>` 的默认斜体、继承父级 13/600。
-                       这里照抄真实渲染，不自造 chip —— 要不要给它设计成徽章，问过再改。 */
+                HStack(spacing: 6) {
+                    /* 推荐标签是**淡紫胶囊**，不是斜体纯文字：HTML 用 `<i class="v2-st-pick">`，
+                       样式在 index-v2.html:2047-2049（10px/600、accent 字、#EEF0FE 底、
+                       1px 6px 内边距、999 圆角、右侧 6px 间距）。
+                       本项目曾误判成「没有样式规则、就是 <i> 的默认斜体」并照斜体实现了一遍 —— 已纠正。 */
                     Text(item.label)
-                        .italic()
-                        .v2Text(.recName13, color: V2Color.text1)
+                        .v2Text(V2Type.pickTag10.bumped(), color: V2Color.accent)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(V2Color.chipFill)
+                        .clipShape(Capsule())
                     Text(station.displayName)
-                        .v2Text(.recName13, color: V2Color.text1)
+                        .v2Text(V2Type.recName13.bumped(), color: V2Color.text1)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
                 if station.selfOperate == true, item.label != "最近自营" {
                     Text("自营")
-                        .v2Text(.label11, color: V2Color.warn)
+                        .v2Text(V2Type.stTag10.bumped(), color: V2Color.warn)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
                         .background(V2Color.tintWarn)
@@ -387,28 +397,30 @@ struct NearbyStationsCard: View {
 
             HStack(alignment: .center, spacing: 10) {
                 Text(metaText(station))
-                    .v2Text(.label12, color: V2Color.text3)
+                    .v2Text(V2Type.label12.bumped(), color: V2Color.text3)
                     .lineLimit(1)
                 Spacer(minLength: 0)
                 if let price {
                     HStack(alignment: .firstTextBaseline, spacing: 1) {
                         Text("¥" + String(format: "%.2f", price))
-                            .v2Text(.segLabelOn, color: V2Color.info)
+                            .v2Text(V2Type.segLabelOn.bumped(), color: V2Color.info)
                             .v2Numeric()
                         Text("/kWh")
-                            .v2Text(.label11, color: V2Color.text3)
+                            .v2Text(V2Type.stUnit11.bumped(), color: V2Color.text3)
                     }
                 } else {
+                    // 缺价时是 `.p` 的规格换了颜色（12/600 #666F7E），不是小一号的灰字
                     Text("价格 --")
-                        .v2Text(.label12, color: V2Color.text3)
+                        .v2Text(V2Type.segLabelOn.bumped(), color: V2Color.text3)
                 }
                 Button {
                     requestNavigation(station)
                 } label: {
+                    /* `.v2-btn.primary.sm`：覆盖 `.v2-btn` 的 12/18 成 11/16，内边距 4×10 */
                     Text("导航")
-                        .v2Text(.label11, color: .white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
+                        .v2Text(V2Type.navSm11.bumped(), color: .white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
                         .background(V2Color.accent)
                         .clipShape(Capsule())
                 }
@@ -432,27 +444,29 @@ struct NearbyStationsCard: View {
         } label: {
             HStack(spacing: 8) {
                 HStack(spacing: 6) {
+                    // 与高亮行同一枚 `.v2-st-pick` 胶囊（10/600、accent on #EEF0FE）
                     Text(item.label)
-                        .v2Text(.label11, color: V2Color.accent)
+                        .v2Text(V2Type.pickTag10.bumped(), color: V2Color.accent)
                         .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(V2Color.tintAccent)
-                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .padding(.vertical, 1)
+                        .background(V2Color.chipFill)
+                        .clipShape(Capsule())
                     Text(station.displayName)
-                        .v2Text(.label12, color: V2Color.text1)
+                        .v2Text(V2Type.label12.bumped(), color: V2Color.text1)
                         .lineLimit(1)
+                    // `.v2-st-line .n em`：枪数是 11/500 #666F7E，比站名小一号、更淡
                     if let guns = gunText(station) {
                         Text(guns)
-                            .v2Text(.label11, color: V2Color.text2)
+                            .v2Text(V2Type.stInfo11.bumped(), color: V2Color.text3)
                             .lineLimit(1)
                     }
                 }
                 Spacer(minLength: 0)
                 Text(distanceText(station))
-                    .v2Text(.xAxis11, color: V2Color.text3)
+                    .v2Text(V2Type.xAxis11.bumped(), color: V2Color.text3)
                     .v2Numeric()
                 Text(price.map { "¥" + String(format: "%.2f", $0) } ?? "--")
-                    .v2Text(.segLabelOn, color: V2Color.info)
+                    .v2Text(V2Type.segLabelOn.bumped(), color: V2Color.info)
                     .v2Numeric()
             }
             .padding(.vertical, 8)
@@ -469,7 +483,7 @@ struct NearbyStationsCard: View {
                 Text((model.isPriceAvailable
                      ? "点卡片看分时电价"
                      : "价格服务暂时不可用，以下仅显示距离与枪数。"))
-                    .v2Text(.label11, color: V2Color.text3)
+                    .v2Text(V2Type.label11.bumped(), color: V2Color.text3)
                 Spacer(minLength: 0)
                 sortSegmented
             }
@@ -502,16 +516,20 @@ struct NearbyStationsCard: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(model.sortedStations) { station in
-                        sheetRow(station)
-                            .task { await model.loadMoreIfNeeded(current: station) }
+                        // 最后一行不画分隔线（`.st:last-child`），其余行自己画 1px 实色线
+                        sheetRow(
+                            station,
+                            showsDivider: station.stationId != model.sortedStations.last?.stationId
+                        )
+                        .task { await model.loadMoreIfNeeded(current: station) }
                     }
                     if model.isLoadingMore {
                         Text("正在加载更多…")
-                            .v2Text(.label11, color: V2Color.text3)
+                            .v2Text(V2Type.label11.bumped(), color: V2Color.text3)
                             .padding(.vertical, 10)
                     } else if !model.hasMore, !model.sortedStations.isEmpty {
                         Text("已全部显示")
-                            .v2Text(.label11, color: V2Color.text3)
+                            .v2Text(V2Type.label11.bumped(), color: V2Color.text3)
                             .padding(.vertical, 10)
                     }
                 }
@@ -520,7 +538,7 @@ struct NearbyStationsCard: View {
             .frame(maxHeight: .infinity)
 
             Text("位置仅用于本次查询，不落盘、不发给第三方。")
-                .v2Text(.label11, color: V2Color.text3)
+                .v2Text(V2Type.label11.bumped(), color: V2Color.text3)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -535,7 +553,7 @@ struct NearbyStationsCard: View {
                     model.sort = item
                 } label: {
                     Text(item.title)
-                        .v2Text(on ? .segLabelOn : .segLabel,
+                        .v2Text((on ? V2Type.segLabelOn : V2Type.segLabel).bumped(),
                                 color: on ? V2Color.text1 : V2Color.text3)
                         .frame(maxWidth: .infinity)
                         .frame(height: 24)
@@ -556,70 +574,215 @@ struct NearbyStationsCard: View {
         .glassSurface(cornerRadius: V2Metrics.segRadius)
     }
 
+    /// 筛选 chip（`.v2-sheet .st-chip`，index-v2.html:2152-2155）
+    ///
+    /// 高 28、12 号字、1px #E7EBF3 描边、999 圆角；选中态是**淡紫底 + accent 字**
+    /// （`rgba(103,66,232,.12)` 底 + 字变 accent 600），不是实色紫底白字 —— 后者在这里
+    /// 比 HTML 抢眼太多，而且白字配 12 号在浅底上会显得更小。
     private func filterChip(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .v2Text(.label11, color: on ? .white : V2Color.text2)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(on ? V2Color.accent : Color.white.opacity(0.55))
+                .v2Text((on ? V2Type.segLabelOn : V2Type.segLabel).bumped(),
+                        color: on ? V2Color.accent : V2Color.text2)
+                .padding(.horizontal, 8)
+                .frame(height: 28)
+                .background(on ? V2Color.accent.opacity(0.12) : Color.white)
+                .overlay(
+                    Capsule().stroke(on ? V2Color.accent.opacity(0.24) : V2Color.hairline,
+                                     lineWidth: 1)
+                )
                 .clipShape(Capsule())
         }
         .buttonStyle(.plain)
     }
 
-    private func sheetRow(_ station: ChargingStation) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Text(station.displayName)
-                    .v2Text(.label12, color: V2Color.text1)
-                    .lineLimit(1)
-                if station.selfOperate == true {
-                    Text("自营")
-                        .v2Text(.label11, color: V2Color.warn)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(V2Color.tintWarn)
-                        .clipShape(Capsule())
-                }
-                Spacer(minLength: 0)
-                Text(station.price?.totalPrice.map { "¥" + String(format: "%.2f", $0) } ?? "--")
-                    .v2Text(.body15)
-                    .v2Numeric()
-            }
+    // MARK: - 展开列表的行（`.v2-sheet-list` 覆盖块：index-v2.html 2157-2186）
+    //
+    // ⚠️ 这一组是**覆盖值**，不是 :649-720 那套旧的 `.st` 基础样式，也不是收起态那三行的
+    // `.v2-st`：站名/价格从 15 号压到 13 号、单位 11 号，行间是 1px 实色发丝线（不是间距），
+    // 行内**没有**导航按钮 —— 导航只出现在展开区里、全宽一个。
+    // 早先照旧样式实现，表现正是用户说的「整体比 HTML 小一号」+「展开只剩 4 行摘要」。
 
-            HStack(spacing: 8) {
-                Text("\(distanceText(station))\(gunText(station).map { " · " + $0 } ?? "")")
-                    .v2Text(.label11, color: V2Color.text3)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                Button {
-                    requestNavigation(station)
-                } label: {
-                    Text("导航")
-                        .v2Text(.label11, color: V2Color.accent)
-                }
-                .buttonStyle(.plain)
-            }
+    private func sheetRow(_ station: ChargingStation, showsDivider: Bool) -> some View {
+        let isOpen = model.expanded == station.stationId
 
-            // 分时电价：HTML 里点卡片就地展开（`stationRow` 的 expanded 分支）
-            if model.expanded == station.stationId {
-                VStack(alignment: .leading, spacing: 2) {
-                    if let price = station.price {
-                        detailLine("当前时段", price.currentPeriod ?? "--")
-                        detailLine("电费", money(price.feeElectric))
-                        detailLine("服务费", money(price.serviceFee))
-                        detailLine("停车", price.parkingFee ?? (price.parkFree == true ? "免费" : "--"))
-                    } else {
-                        detailLine("价格", "第三方暂时没给这个站的价格")
-                    }
-                }
-                .padding(.top, 4)
+        return VStack(alignment: .leading, spacing: 0) {
+            sheetHead(station)
+            sheetMeta(station)
+            if isOpen { sheetDetail(station) }
+        }
+        .padding(.vertical, 2)
+        .frame(minHeight: 42, alignment: .top)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .bottom) {
+            // `.st:last-child { border-bottom: 0 }`
+            if showsDivider {
+                Rectangle()
+                    .fill(V2Color.hairline)
+                    .frame(height: 1)
             }
         }
-        .padding(.vertical, 9)
         .contentShape(Rectangle())
         .onTapGesture { model.toggleExpanded(station.stationId) }
+    }
+
+    /// 行头：站名 + 价格（`.st-head` / `.st-name` / `.st-price`）
+    ///
+    /// 价格是「¥1.90」+ 11 号「/度」拼出来的一行，右对齐、不换行；
+    /// 无价时整块退成 11/500 的灰字「价格 --」（`.st-price.na`）。
+    private func sheetHead(_ station: ChargingStation) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(station.displayName)
+                .v2Text(V2Type.stName13.bumped(), color: V2Color.text1)
+                .lineLimit(2)
+            Spacer(minLength: 8)
+            if let price = station.price?.totalPrice {
+                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                    Text("¥" + String(format: "%.2f", price))
+                        .v2Text(V2Type.stName13.bumped(), color: V2Color.info)
+                        .v2Numeric()
+                    Text("/度")
+                        .v2Text(V2Type.stUnit11.bumped(), color: V2Color.info)
+                }
+                .fixedSize()
+            } else {
+                Text("价格 --")
+                    .v2Text(V2Type.stUnit11.bumped(), color: V2Color.muted)
+                    .fixedSize()
+            }
+        }
+    }
+
+    /// 元信息行：距离 · 枪数 · 评分 · 自营（`.st-meta`，11/500、项间 4pt）
+    ///
+    /// 上游的 tags 在这里**不显示**（`.st-tag.t { display: none }`）—— 它们是充电站的
+    /// 运营商/设施标签，展开列表这么密的地方再塞会挤掉枪数。
+    private func sheetMeta(_ station: ChargingStation) -> some View {
+        HStack(spacing: 4) {
+            Text(distanceText(station))
+                .v2Text(V2Type.stMeta11.bumped(), color: V2Color.text3)
+            if let guns = gunText(station) {
+                // 一个可用枪都没有时压暗（`.st-meta .gone`）—— 仍然要显示，让人自己判断去不去
+                Text(guns)
+                    .v2Text(V2Type.stMeta11.bumped(), color: hasFreeGun(station) ? V2Color.text3 : V2Color.muted)
+            }
+            if let score = scoreText(station) {
+                Text("评分 \(score)")
+                    .v2Text(V2Type.stMeta11.bumped(), color: V2Color.text3)
+            }
+            if station.selfOperate == true {
+                Text("自营")
+                    .v2Text(V2Type.stTag10.bumped(), color: V2Color.warn)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(V2Color.tintWarn)
+                    .clipShape(Capsule())
+            }
+            Spacer(minLength: 0)
+        }
+        .lineLimit(1)
+        .padding(.top, 2)
+    }
+
+    /// 展开区：分时电价表 + 枪数/地址 + 备注 + 全宽「导航到这里」
+    ///
+    /// 出处：`stationDetail()`（index-v2.html:5601-5639）。左侧统一缩进 8pt，
+    /// 这是 HTML 里 `.st-periods / .st-info / .st-note / .st-actions` 共有的 margin-left。
+    private func sheetDetail(_ station: ChargingStation) -> some View {
+        let price = station.price
+
+        return VStack(alignment: .leading, spacing: 0) {
+            sheetPeriods(price)
+
+            // `.st-info`：枪数一行 + 地址一行（列表行放不下地址）
+            VStack(alignment: .leading, spacing: 2) {
+                if let guns = gunText(station) {
+                    Text(guns)
+                        .v2Text(V2Type.stInfo11.bumped(), color: V2Color.text3)
+                }
+                if let address = station.address, !address.isEmpty {
+                    Text(address)
+                        .v2Text(V2Type.stInfo11.bumped(), color: V2Color.text3)
+                }
+            }
+            .padding(.leading, 8)
+            .padding(.top, 2)
+
+            // `.st-note`：费用说明 / 停车 / 占位费，HTML 用 <br> 连成一段
+            let notes = noteLines(price)
+            if !notes.isEmpty {
+                Text(notes.joined(separator: "\n"))
+                    .v2Text(V2Type.stNote11.bumped(), color: V2Color.muted)
+                    .padding(.leading, 8)
+                    .padding(.top, 4)
+                    .padding(.bottom, 2)
+            }
+
+            Button {
+                requestNavigation(station)
+            } label: {
+                Text("导航到这里")
+                    .v2Text(V2Type.stBtn13.bumped(), color: .white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background(V2Color.accent)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 8)
+            .padding(.top, 6)
+            .padding(.bottom, 4)
+        }
+    }
+
+    /// 分时电价表（`.st-periods`：列间距 6、行高 22）
+    private func sheetPeriods(_ price: StationPrice?) -> some View {
+        let periods = price?.periods ?? []
+
+        return VStack(alignment: .leading, spacing: 6) {
+            if price == nil {
+                periodRow(time: "该站点暂时取不到价格", value: "--", now: false)
+            } else if periods.isEmpty {
+                periodRow(time: "分时电价未提供", value: "--", now: false)
+            } else {
+                ForEach(periods.indices, id: \.self) { index in
+                    let period = periods[index]
+                    let now = period.isCurrent(price?.currentPeriod)
+                    periodRow(
+                        time: (period.timeFrame ?? "--") + (now ? " · 当前" : ""),
+                        value: period.total.map { String(format: "%.2f", $0) + " 元/度" } ?? "--",
+                        now: now
+                    )
+                }
+            }
+        }
+        .padding(.leading, 8)
+        .padding(.top, 6)
+        .padding(.bottom, 2)
+    }
+
+    /// 电价表的一行。当前段：高 24、左右 6、淡蓝底 #E9F6FD、600、accent 字；
+    /// 其余行：高 22、11/500、左灰右深。
+    private func periodRow(time: String, value: String, now: Bool) -> some View {
+        HStack(spacing: 8) {
+            Text(time)
+                .v2Text((now ? V2Type.stPeriodNow11 : V2Type.stPeriod11).bumped(),
+                        color: now ? V2Color.info : V2Color.text3)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Text(value)
+                .v2Text((now ? V2Type.stPeriodNow11 : V2Type.stPeriod11).bumped(),
+                        color: now ? V2Color.info : V2Color.text1)
+                .v2Numeric()
+        }
+        .padding(.horizontal, now ? 6 : 0)
+        .frame(height: now ? 24 : 22)
+        .background {
+            if now {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(V2Color.tintInfo)
+            }
+        }
     }
 
     // MARK: - 文案
@@ -633,20 +796,29 @@ struct NearbyStationsCard: View {
         return "\(model.total) 站"
     }
 
-    private func detailLine(_ title: String, _ value: String) -> some View {
-        HStack(spacing: 8) {
-            Text(title)
-                .v2Text(.label11, color: V2Color.text3)
-                .frame(width: 56, alignment: .leading)
-            Text(value)
-                .v2Text(.label11, color: V2Color.text1)
-            Spacer(minLength: 0)
+    /// 展开区备注（HTML `stationDetail()` 里 notes 的三条来源）
+    private func noteLines(_ price: StationPrice?) -> [String] {
+        guard let price else { return [] }
+        var lines: [String] = []
+        if let desc = price.feeDesc, !desc.isEmpty { lines.append(desc) }
+        if let parking = price.parkingFee, !parking.isEmpty {
+            lines.append("停车：\(parking)" + (price.parkFree == true ? "（免费）" : ""))
         }
+        if price.holdFee == true { lines.append("超时占用另收占位费") }
+        return lines
     }
 
-    private func money(_ value: Double?) -> String {
-        guard let value else { return "--" }
-        return "¥" + String(format: "%.2f", value) + "/kWh"
+    /// 评分。浩汉对所有站一律返回 3.8（实测 20 站全一样），那是上游兜底分、
+    /// 不是真实评价 —— 全站同分没有信息量，3.8 不显示；真出现 4.6 这种差异化评分照常显示。
+    private func scoreText(_ station: ChargingStation) -> String? {
+        guard let score = station.score, score > 0, score != 3.8 else { return nil }
+        return String(format: "%g", score)
+    }
+
+    /// 有没有一个可用枪（CSS `.st-meta .gone` 的判定：总枪数 > 0 且可用为 0）
+    private func hasFreeGun(_ station: ChargingStation) -> Bool {
+        guard let total = station.totalCount, total > 0 else { return true }
+        return (station.availableCount ?? -1) != 0
     }
 
     private func distanceText(_ station: ChargingStation) -> String {
@@ -654,13 +826,20 @@ struct NearbyStationsCard: View {
         return String(format: "%.2f km", km)
     }
 
+    /// 枪数文案（HTML `stationRow()` 5555-5560）。
+    ///
+    /// 两条规矩：① 快慢充分开写，各自「可用/总数」；② 上游没给快慢充分类时退回总枪数
+    /// 「可用 a/t」—— 不能显示成「0/x」，那会让人白白放弃一个站。
     private func gunText(_ station: ChargingStation) -> String? {
         var parts: [String] = []
-        if (station.dcCount ?? 0) > 0 {
-            parts.append("快充 \(station.ableDcCount.map(String.init) ?? "--")/\(station.dcCount ?? 0)")
+        if let dc = station.dcCount, dc > 0 {
+            parts.append("快充 \(station.ableDcCount.map(String.init) ?? "--")/\(dc)")
         }
-        if (station.acCount ?? 0) > 0 {
-            parts.append("慢充 \(station.ableAcCount.map(String.init) ?? "--")/\(station.acCount ?? 0)")
+        if let ac = station.acCount, ac > 0 {
+            parts.append("慢充 \(station.ableAcCount.map(String.init) ?? "--")/\(ac)")
+        }
+        if parts.isEmpty, let total = station.totalCount, total > 0 {
+            parts.append("可用 \(station.availableCount.map(String.init) ?? "--")/\(total)")
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }

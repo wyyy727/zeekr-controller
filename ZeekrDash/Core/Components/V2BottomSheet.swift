@@ -58,6 +58,10 @@ struct V2BottomSheet<Content: View>: View {
     /// hug 模式下量到的正文高度
     @State private var measuredBody: CGFloat = 0
 
+    /// 键盘遮住屏幕底边的高度（收起时 0）。
+    /// 在 body 里读它 → 随 `KeyboardHeight` 的 `@Observable` 自动重绘。
+    private var keyboardInset: CGFloat { KeyboardHeight.shared.value }
+
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .bottom) {
@@ -89,6 +93,10 @@ struct V2BottomSheet<Content: View>: View {
                     }
                 }
                 // hug 模式传 nil：由子视图自己撑高
+                /* 高度：常规按屏高比例锁死（最小 320，保证正文塞得下）。
+                   键盘占掉下半屏时，`proxy.size.height` 已经被键盘缩过，
+                   按比例算出来会矮于 320，所以下限还是 320；
+                   面板上移的 keyboardInset 不参与高度计算 —— 两者相加才是屏幕占用。 */
                 .frame(height: hugContent ? nil : max(320, proxy.size.height * heightRatio))
                 .offset(y: dragOffset)
                 .frame(maxWidth: .infinity)
@@ -103,8 +111,15 @@ struct V2BottomSheet<Content: View>: View {
                     )
                 )
                 .shadow(color: V2Color.glassShadow, radius: 16, x: 0, y: -4)
+                /* 键盘弹起时把面板整体抬到键盘上沿。
+                   面板是自绘的，不走系统避让（见 KeyboardHeight.swift 的注释），
+                   不补这一段就会被键盘整块压住 —— 验证码弹窗的输入框和
+                   「确认登录」全在键盘下面，只透出一条淡紫。 */
+                .padding(.bottom, keyboardInset)
             }
             .ignoresSafeArea(edges: .bottom)
+            // 跟手系统键盘的动画时长：键盘升起和面板上移要同时到位，不能一个先到
+            .animation(.easeOut(duration: 0.24), value: keyboardInset)
         }
         // 面板本身不透明，其余区域透明 → 由系统层透出页面
         .presentationBackground(.clear)

@@ -219,6 +219,16 @@ final class NearbyStationsViewModel {
     /// 当前展开（看分时电价）的站点 ID
     var expanded: String?
 
+    /// 附近**最近的一个极氪自营站**，用于收起态第一行那个「最近自营」推荐位。
+    ///
+    /// 为什么要单独一次请求：首屏只取 10 条，而这 10 条里经常**一个自营站都没有**
+    /// （实测附近 50 个站才 11 个自营，最近的那个 1.6 km 排在十几位之后）。
+    /// 只从已加载页里挑，第一行就永远退化成「最近」—— 和 HTML 演示数据看到的完全不同。
+    /// 服务端支持 `self_only=true` 且按距离升序，`limit=1` 拿一条就够。
+    ///
+    /// 与当前筛选（快充 / 自营 / 停车免费）**无关**：那一行问的永远是「最近的极氪自营站在哪」。
+    var nearestSelf: ChargingStation?
+
     // MARK: - 筛选
 
     /// 只看快充（`connector=dc`）。
@@ -431,6 +441,10 @@ final class NearbyStationsViewModel {
             // 显式判 `!= false`：后端不返回该字段时按"可用"处理，避免误报不可用
             isPriceAvailable = data.isPriceAvailable
             state = .loaded
+
+            /* 顺手把「最近自营」也查回来。放后台任务里：它有自己的一次网络往返，
+               串在这里会让首屏多等一个 RTT（这页本来就慢，取价是逐站请求的）。 */
+            Task { [weak self] in await self?.loadNearestSelf() }
         } catch {
             // 过期请求的失败不该清屏 —— 那会把新查询已经拿到的列表抹掉
             guard generation == loadGeneration else { return }
@@ -442,6 +456,33 @@ final class NearbyStationsViewModel {
             state = .failed(
                 (error as? ApiError)?.errorDescription ?? error.localizedDescription
             )
+        }
+    }
+
+    /// 拉一次「附近最近的极氪自营站」（见 `nearestSelf` 的说明）。
+    ///
+    /// 失败一律静默：这只是一条推荐位的兜底来源，拿不到时界面会退回本页里的自营站、
+    /// 再拿不到就显示「最近」—— 不该为它弹错误提示或打断正常列表。
+    func loadNearestSelf() async {
+        guard let coordinate, !SettingsStore.shared.prefersMockData else { return }
+        // 与列表同属一次查询：期间换了坐标/筛选就不该再写回来
+        let generation = loadGeneration
+        let query = [
+            "lat": String(coordinate.latitude),
+            "lng": String(coordinate.longitude),
+            "limit": "1",
+            "self_only": "true",
+        ]
+        do {
+            let data: NearbyStations = try await APIClient.shared.get(
+                APIRoutes.stationsNearby,
+                query: query
+            )
+            guard generation == loadGeneration else { return }
+            nearestSelf = data.stations?.first
+        } catch {
+            guard generation == loadGeneration else { return }
+            nearestSelf = nil
         }
     }
 
@@ -515,6 +556,7 @@ final class NearbyStationsViewModel {
         isRefreshing = false
         nextOffset = 0
         expanded = nil
+        nearestSelf = nil
         // 筛选条件也要清 —— 下一位登录者不该继承别人"只看快充"的偏好
         onlyFastCharge = false
         selfOnly = false

@@ -65,6 +65,12 @@ enum V2Color {
     /// 分隔线（`--separator: rgba(27,31,36,.07)`）
     static let separator = Color(hex: 0x1B1F24).opacity(0.07)
 
+    /// 实色发丝线 `#E7EBF3`（出处：`index-v2.html:2158` `.v2-sheet-list .st` 的 border-bottom）。
+    ///
+    /// 与 `separator` 的区别：那条是 7% 黑的半透明，铺在玻璃卡上会随背景变色；
+    /// 充电站 sheet 的行间线在 HTML 里是**实色**，且 sheet 底是纯白 —— 用半透明会偏浅。
+    static let hairline = Color(hex: 0xE7EBF3)
+
     /// BlobViolet —— 300×300 @(170, -70)，四停 radial
     static let auraViolet = Color(hex: 0xC4B5FD)
     /// BlobCyan —— 260×260 @(-90, 540)，四停 radial
@@ -158,6 +164,14 @@ struct V2Type {
     /// 行高与字距一起缩放，比例才不会散。
     func scaled(_ factor: CGFloat) -> V2Type {
         V2Type(size * factor, name, lineHeight * factor, tracking * factor)
+    }
+    /// 整体微调：字号与行高同时 +delta（默认 1pt），字距不动。
+    ///
+    /// 为什么不用 scaled()：那张表是照 HTML 真源 1:1 抄的，比例缩放会让
+    /// 11pt 的小字几乎不动、34pt 的大数却涨 3pt，页内层级关系就歪了。
+    /// 加法式微调只把整体观感抬一档，「谁比谁大多少」保持不变。
+    func bumped(_ delta: CGFloat = 1) -> V2Type {
+        V2Type(size + delta, name, lineHeight + delta, tracking)
     }
 
     /// 补到 CSS `line-height` 还差多少。
@@ -306,6 +320,34 @@ extension V2Type {
     static let alertMsg = V2Type(12.5, V2Font.regular, 19, 0)
     /// 按钮文字 13 / 600 / 18（`.v2-alert .acts .v2-btn` 覆盖了 `.v2-btn` 的 12 号）
     static let alertBtn = V2Type(13, V2Font.semiBold, 18, 0)
+
+    // ── 充电站 sheet 列表（出处：index-v2.html 2157–2181 的 `.v2-sheet-list` 覆盖块）──
+    //
+    // ⚠️ 这一组是**覆盖值**，不是 :649-720 那套旧的 `.st` 基础样式。
+    // 旧的 .st-name 是 15 号、价格 15 号；v2 在文件末尾用同样的选择器整体压小到 13/11，
+    // 因为 sheet 是半屏浮层、信息密度要高于整页卡片。照旧样式写就会「整体大一号」。
+    /// 站名 / 价格 13 / 600 / 17.5（`.st-name`、`.st-price`，line-height 1.35）
+    static let stName13  = V2Type(13, V2Font.semiBold, 17.5, 0)
+    /// 价格单位 11 / 500 / 15（`.st-price .u`）
+    static let stUnit11  = V2Type(11, V2Font.medium, 15, 0)
+    /// 元信息行 11 / 500 / 16.5（`.st-meta`，line-height 1.5）
+    static let stMeta11  = V2Type(11, V2Font.medium, 16.5, 0)
+    /// 自营徽章 10 / 500 / 13.5（`.st-tag`，1px 6px 内边距 + 999 圆角）
+    static let stTag10   = V2Type(10, V2Font.medium, 13.5, 0)
+    /// 分时电价行 11 / 500 / 16（`.st-period`，高 22）
+    static let stPeriod11 = V2Type(11, V2Font.medium, 16, 0)
+    /// 分时电价·当前段 11 / 600 / 16（`.st-period.now`，高 24、底色 #E9F6FD）
+    static let stPeriodNow11 = V2Type(11, V2Font.semiBold, 16, 0)
+    /// 详情信息行 11 / 500 / 16（`.st-info-l`，line-height 1.45）
+    static let stInfo11  = V2Type(11, V2Font.medium, 16, 0)
+    /// 备注行 11 / 500 / 16.5（`.st-note`，line-height 1.5、色 #6B7484）
+    static let stNote11  = V2Type(11, V2Font.medium, 16.5, 0)
+    /// 「导航到这里」13 / 600 / 18（`.st-btn`，44 高、12 圆角、全宽）
+    static let stBtn13   = V2Type(13, V2Font.semiBold, 18, 0)
+    /// 收起态推荐标签 10 / 600 / 14（`.v2-st-pick`：1px 6px、999 圆角、accent 字 on chipFill）
+    static let pickTag10 = V2Type(10, V2Font.semiBold, 14, 0)
+    /// 收起态小按钮 11 / 600 / 16（`.v2-btn.sm` 覆盖 `.v2-btn` 的 12/18：4px 10px 内边距）
+    static let navSm11   = V2Type(11, V2Font.semiBold, 16, 0)
 }
 
 extension View {

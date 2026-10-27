@@ -71,14 +71,6 @@ struct RootView: View {
             }
             .animation(.easeInOut(duration: 0.22), value: store.toast)
         }
-        /* 越过底部安全区：这一层（含页面 ScrollView）要能铺到**屏幕物理底边**，
-           否则底栏只能锚在安全区上沿，下沿被顶高 34pt。 */
-        .ignoresSafeArea(.container, edges: .bottom)
-        /* 键盘同样**不参与布局**。
-           之前没写这一条，键盘一弹出系统的键盘安全区就把整棵子树压扁：
-           页面内容上移、顶栏跟着被顶到状态栏下面（截图里「远程车控」压住了时钟），
-           底栏胶囊则浮到屏幕中部压住内容。顶栏/底栏是固定 chrome，不该随键盘动。 */
-        .ignoresSafeArea(.keyboard, edges: .bottom)
         /* 底部胶囊钉在**屏幕物理底边**（+ `V2Metrics.tabBarBottomGap` = 14）。
            为什么不用 `safeAreaBar(edge: .bottom)`：实测它把 bar 摆在**安全区上沿**，
            外层 `.ignoresSafeArea(.container, edges: .bottom)` 对它无效 ——
@@ -107,6 +99,19 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.18), value: NetworkActivity.shared.isBusy)
+        /* 越过底部安全区：容器（底栏要压到 Home Indicator 上）+ 键盘（顶栏/底栏是固定
+           chrome，键盘弹出时不该被顶上去、不该被压扁）。
+
+           ⚠️ **必须一次调用**：`.ignoresSafeArea(.container, .bottom)` 之后再链一个
+           `.ignoresSafeArea(.keyboard, .bottom)` 的写法**只有前一条生效** —— 实测真机
+           键盘弹出时，底栏胶囊下沿落在 545pt，而键盘上沿是 559pt，差的正是 14pt 留白：
+           说明布局底边被算成了键盘上沿，键盘那条 region 根本没被忽略。
+           一次传两个 region 才两个都生效。
+
+           ⚠️ 位置也有讲究：写成 `.ignoresSafeArea(…).overlay { 底栏 }` 时，overlay 拿到的是
+           **没扩张**的 frame（就是这个 545pt 的来源）；把两个 overlay 放在前面、
+           越过安全区放最后，底栏/请求条才会跟着扩张后的 frame 贴到物理底边。 */
+        .ignoresSafeArea([.container, .keyboard], edges: .bottom)
         /* 充电结束的**全局**标记：监听不能只挂在充电页上 ——
            切 tab 会销毁 ChargesView，用户充完电去看车况，那次同步就丢了，
            而"当天已同步"又会拦住后续补同步，于是新流水要到第二天才出现。
@@ -305,14 +310,24 @@ struct ScreenContainer<Content: View, Accessory: View>: View {
     var body: some View {
         /* 底部留白由这里自己给：底栏是 overlay（见 RootView），不再内缩安全区，
            所以滚到底要留出「下留白 14 + 胶囊 62 + 间隙 29 = 105」，
-           与网页 `.wrap{padding-bottom:105px}` 一致。 */
+           与网页 `.wrap{padding-bottom:105px}` 一致。
+
+           键盘弹起时改成跟着键盘走（见 `KeyboardHeight`）：根视图已经
+           `.ignoresSafeArea(.keyboard)`（底栏不许被顶上去），代价是滚动视图
+           不再自动为键盘让位；这里把「底部可滚动余量」临时撑到键盘高度，
+           否则靠近屏幕下半段的输入框（附近站点搜索、充电详情里的备注）会
+           藏在键盘下面，既看不见也滚不上来。 */
         ScrollView {
             VStack(spacing: sectionGap) {
                 content()
             }
             .padding(.horizontal, V2Metrics.screenPadding)
         }
-        .contentMargins(.bottom, V2Metrics.tabBarClearance, for: .scrollContent)
+        .contentMargins(
+            .bottom,
+            max(V2Metrics.tabBarClearance, KeyboardHeight.shared.value + 12),
+            for: .scrollContent
+        )
         .background(Color.clear)
         .safeAreaInset(edge: .top, spacing: 0) {
             topBar

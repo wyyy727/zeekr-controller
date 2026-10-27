@@ -68,9 +68,10 @@ final class ChargesViewModel {
 
     var isCurrentMonth: Bool { selectedMonth == "currentMonth" }
 
+    /// 月份胶囊文案。与行程页同一套真源（HTML `v2MonthText()`）：
+    /// 本月显示「2026年10月」，不是「本月」。
     var selectedMonthLabel: String {
-        if isCurrentMonth { return "本月" }
-        return months.first(where: { $0.yearMonth == selectedMonth })?.label ?? selectedMonth
+        MonthLabel.text(for: selectedMonth)
     }
 
     var records: [ChargeSession] { stat?.records ?? [] }
@@ -299,19 +300,42 @@ final class ChargesViewModel {
         }
     }
 
-    /// 上传一张「补能订单」截图。**不入库** —— 结果进 `ocrResult` 等用户核对。
+    /// 上传一张「补能订单」截图（文件 URL 版）。**不入库** —— 结果进 ocrResult 等用户核对。
     func runOcr(fileURL: URL) async {
+        await runOcrUpload {
+            try await APIClient.shared.uploadFile(
+                APIRoutes.chargeOcr,
+                fileURL: fileURL,
+                fieldName: "file"
+            )
+        }
+    }
+
+    /// 上传一张「补能订单」截图（字节版，**相册选图走这条**）。
+    ///
+    /// 为什么单开一条：iOS 相册选出来的图没有稳定文件 URL，PhotosPicker 直接把
+    /// Data 交给我们；为了复用 fileURL 版先落一个临时文件再读回来，既多一次
+    /// 磁盘往返，又要自己负责删。字节版直接把内存里的字节拼进 multipart。
+    func runOcr(imageData: Data, filename: String) async {
+        await runOcrUpload {
+            try await APIClient.shared.uploadFile(
+                APIRoutes.chargeOcr,
+                data: imageData,
+                filename: filename,
+                fieldName: "file"
+            )
+        }
+    }
+
+    /// 两条入口共用：忙碌标记、错误归一、结果写进 ocrResult（**不入库**）。
+    private func runOcrUpload(_ upload: () async throws -> OcrPayload) async {
         guard !isOcrBusy else { return }
         isOcrBusy = true
         ocrErrorMessage = nil
         defer { isOcrBusy = false }
 
         do {
-            let payload: OcrPayload = try await APIClient.shared.uploadFile(
-                APIRoutes.chargeOcr,
-                fileURL: fileURL,
-                fieldName: "file"
-            )
+            let payload = try await upload()
             if let rows = payload.rows, !rows.isEmpty {
                 ocrResult = payload
                 // 副标题要显示「已识别 N 张 · HH:MM」，记下这一刻

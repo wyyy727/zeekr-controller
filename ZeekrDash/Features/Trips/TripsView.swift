@@ -367,15 +367,18 @@ struct TripsView: View {
     }
 }
 
-// MARK: - 月份选择（iOS 原生双滚轮）
+// MARK: - 月份选择（系统双滚轮）
 
-/// 左轮选年、右轮选月，都是系统原生 `.wheel`，可上下滑动。
-/// 只列出**有数据**的月份，避免选到一个查不到数的月份。
-/// 月份选择弹窗（行程页与充电页共用）。
+/// 月份选择弹窗（行程页与充电页共用）：左轮选年、右轮选月，都是 iOS 原生 wheel。
 ///
-/// 用 `MonthOption` 而不是各自的数据模型：两个页面的月份来源不同
-/// （行程来自官方接口、充电来自本地库），但"选哪个月"这件事完全一样，
-/// 各写一套滚轮只是多一处要同步修改的地方。
+/// 2026-10-27 按用户要求从「自绘 HTML 年份竖列 + 月份网格」回退到系统滚轮：
+/// HTML 那套要自己维护两百行布局，而用户要的只是能选到想要的月份，
+/// 滚轮天然满足，还顺手拿到系统的滚动手感与无障碍。
+///
+/// 两个轮子的选项都来自数据（months）。所以「年份轮里只有 2026」不是筛选
+/// 逻辑的 bug —— 服务端库里最早的充电流水是 2026-01、最早的行程是 2026-09，
+/// 2025 及更早根本没有可查的月份，HTML 版读同一份数据也只会列出 2026。
+/// 一旦库里出现更早的年份，这里会自动多出一项，不用改代码。
 struct MonthPickerSheet: View {
 
     let months: [MonthOption]
@@ -387,42 +390,75 @@ struct MonthPickerSheet: View {
     @State private var year: Int = Calendar.current.component(.year, from: Date())
     @State private var month: Int = Calendar.current.component(.month, from: Date())
 
-    /// 把 `currentMonth` / `2026-09` 统一成 (年, 月)
+    // MARK: - 数据
+
+    /// 把 currentMonth / YYYY-MM 统一折成 (年, 月)。
+    ///
+    /// 必须折成绝对值：currentMonth 是相对 token（今天看是 2026-10），
+    /// 只有页面自己知道它代表哪个月，而滚轮要的是具体数字。
     private var available: [(year: Int, month: Int)] {
-        let calendar = Calendar.current
-        let now = Date()
-        let thisYear = calendar.component(.year, from: now)
-        let thisMonth = calendar.component(.month, from: now)
+        let now = Calendar.current.dateComponents([.year, .month], from: Date())
+        let thisYear = now.year ?? year
+        let thisMonth = now.month ?? month
 
-        return months.map { item in
-            if item.yearMonth == "currentMonth" {
-                return (thisYear, thisMonth)
+        var out: [(year: Int, month: Int)] = []
+        for option in months {
+            if option.yearMonth == "currentMonth" {
+                out.append((thisYear, thisMonth))
+                continue
             }
-            let parts = item.yearMonth.split(separator: "-").compactMap { Int($0) }
-            guard parts.count == 2 else { return (thisYear, thisMonth) }
-            return (parts[0], parts[1])
+            let parts = option.yearMonth.split(separator: "-")
+            guard parts.count == 2, let y = Int(parts[0]), let m = Int(parts[1]) else { continue }
+            out.append((y, m))
         }
+        return out
     }
 
+    /// 年份轮：数据里出现过的年份加今年，降序。
+    ///
+    /// 为什么补今年：今年还没产生流水时（比如年初），数据里没有今年的月份，
+    /// 若只列数据年份就翻不到「本月」。补一项只多一行，少了就是死路。
     private var years: [Int] {
-        let all = Set(available.map { $0.year }).sorted(by: >)
-        return all.isEmpty ? [Calendar.current.component(.year, from: Date())] : all
+        var set = Set(available.map { $0.year })
+        set.insert(Calendar.current.component(.year, from: Date()))
+        return set.sorted(by: >)
     }
 
+    /// 月份轮：该年有数据的月份升序；该年整体没数据时用本月兜底，
+    /// 免得滚轮空着（空 Picker 会让选中值指向不存在的 tag）。
     private var monthsOfYear: [Int] {
-        let all = Set(available.filter { $0.year == year }.map { $0.month }).sorted()
-        return all.isEmpty ? [Calendar.current.component(.month, from: Date())] : all
+        let list = Set(available.filter { $0.year == year }.map { $0.month }).sorted()
+        if list.isEmpty {
+            return [Calendar.current.component(.month, from: Date())]
+        }
+        return list
     }
+
+    /// 本月对应的绝对 key（2026-10），用来判断选中的就是本月。
+    private var thisKey: String {
+        let now = Calendar.current.dateComponents([.year, .month], from: Date())
+        return Self.key(now.year ?? year, now.month ?? month)
+    }
+
+    private static func key(_ y: Int, _ m: Int) -> String {
+        String(format: "%04d-%02d", y, m)
+    }
+
+    // MARK: - 视图
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
                 Button("取消") { dismiss() }
                     .v2Text(.nav15, color: V2Color.text2)
-                Spacer()
+
+                Spacer(minLength: 0)
+
                 Text("选择月份")
                     .v2Text(.stat15)
-                Spacer()
+
+                Spacer(minLength: 0)
+
                 Button("确定") { confirm() }
                     .v2Text(.stat15, color: V2Color.accent)
             }
@@ -454,47 +490,47 @@ struct MonthPickerSheet: View {
         .presentationDragIndicator(.visible)
         .onAppear(perform: syncFromSelection)
         .onChange(of: year) { _, _ in
+            // 切年时右轮要落到该年真实存在的月份上，否则会停在一个没有数据的月，
+            // 用户点确定后拿到的是空图。
             if !monthsOfYear.contains(month) {
                 month = monthsOfYear.first ?? month
             }
         }
     }
 
-    /// 打开时滚到当前选中的年月
+    // MARK: - 行为
+
+    /// 打开时把当前选择摆到轮子上（selection 可能是 currentMonth）。
     private func syncFromSelection() {
-        if selection == "currentMonth" {
-            let calendar = Calendar.current
-            let now = Date()
-            year = calendar.component(.year, from: now)
-            month = calendar.component(.month, from: now)
-            return
+        if selection == "currentMonth" || selection.isEmpty {
+            let now = Calendar.current.dateComponents([.year, .month], from: Date())
+            year = now.year ?? year
+            month = now.month ?? month
+        } else {
+            let parts = selection.split(separator: "-")
+            if parts.count == 2, let y = Int(parts[0]), let m = Int(parts[1]) {
+                year = y
+                month = m
+            }
         }
-        let parts = selection.split(separator: "-").compactMap { Int($0) }
-        if parts.count == 2 {
-            year = parts[0]
-            month = parts[1]
-        }
+
+        if !years.contains(year) { year = years.first ?? year }
+        if !monthsOfYear.contains(month) { month = monthsOfYear.first ?? month }
     }
 
+    /// 提交：拼出绝对 key，再按需折回 currentMonth。
+    ///
+    /// 折回这一步是给服务端的：本月数据会随时间滚动，只有传相对 token
+    /// 才能让「本月」永远指向打开页面那一刻的月份。
     private func confirm() {
-        let calendar = Calendar.current
-        let now = Date()
-        let thisKey = String(
-            format: "%04d-%02d",
-            calendar.component(.year, from: now),
-            calendar.component(.month, from: now)
-        )
-        let key = String(format: "%04d-%02d", year, month)
-
-        // 没有数据的月份不该被选中（滚轮的月份列表本身已过滤，这里再兜一层）
         guard available.contains(where: { $0.year == year && $0.month == month }) else {
             dismiss()
             return
         }
 
-        let hasCurrent = months.contains { $0.yearMonth == "currentMonth" }
-        onPick(key == thisKey && hasCurrent ? "currentMonth" : key)
+        let picked = Self.key(year, month)
+        let isThisMonth = picked == thisKey && months.contains { $0.yearMonth == "currentMonth" }
+        onPick(isThisMonth ? "currentMonth" : picked)
         dismiss()
     }
 }
-

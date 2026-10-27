@@ -113,15 +113,17 @@ final class APIClient {
         return try await run(request)
     }
 
-    // MARK: - 文件上传（账单导入）
+    // MARK: - 文件上传（账单导入 / 截图识别）
 
-    /// multipart/form-data 上传账单文件
+    /// multipart/form-data 上传一个**文件 URL**。
+    ///
+    /// 只给「沙盒里真有一个文件」的调用方用。相册图片不要走这条 ——
+    /// PhotosPicker 交出来的是 Data，没有稳定 URL（把字节先落临时文件再读回来
+    /// 纯属多余，还要自己管清理），那种情况用下面的字节版。
     func uploadFile<T: Codable>(_ path: String, fileURL: URL, fieldName: String = "file") async throws -> T {
-        guard let url = URL(string: normalizedBaseURL + path) else { throw ApiError.invalidURL }
-
         let fileData: Data
         do {
-            // 安全读取用户通过 fileImporter 选择的文件（仅临时授权访问）
+            // 安全读取用户通过文件选择器选的文件（仅临时授权访问）
             let scoped = fileURL.startAccessingSecurityScopedResource()
             defer { if scoped { fileURL.stopAccessingSecurityScopedResource() } }
             fileData = try Data(contentsOf: fileURL)
@@ -129,13 +131,26 @@ final class APIClient {
             throw ApiError.transport(underlying: error)
         }
 
+        return try await uploadFile(path, data: fileData, filename: fileURL.lastPathComponent, fieldName: fieldName)
+    }
+
+    /// multipart/form-data 上传**字节**（相册图片走这条）。
+    ///
+    /// 文件名只用于服务端猜扩展名 / MIME，不要求磁盘上真有这个文件。
+    func uploadFile<T: Codable>(
+        _ path: String,
+        data fileData: Data,
+        filename: String,
+        fieldName: String = "file"
+    ) async throws -> T {
+        guard let url = URL(string: normalizedBaseURL + path) else { throw ApiError.invalidURL }
+
         let boundary = "ZeekrDash-\(UUID().uuidString)"
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         var body = Data()
-        let filename = fileURL.lastPathComponent
         let mime = mimeType(for: filename)
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"\(fieldName)\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)

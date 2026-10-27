@@ -262,6 +262,31 @@ struct MonthOption: Codable, Hashable, Identifiable {
     var label: String
 }
 
+// MARK: - 月份文案
+
+/// 月份文案：`currentMonth` / `2026-09` → `2026年10月` / `2026年9月`。
+///
+/// 逐字对齐 HTML 的 `v2MonthText()`（`preview/index-v2.html:4086-4092`）：
+/// - 本月**也**格式化成具体年月 —— 网页月份胶囊写的就是「2026年10月」；
+/// - 历史月**去掉前导零**（`2026年9月`，不是 `2026年09月`）。
+///
+/// 之前 iOS 侧把本月写成「本月」，与真源不一致；真源里没有这个词，
+/// 已按真源改成具体年月。
+enum MonthLabel {
+    static func text(for yearMonth: String) -> String {
+        if yearMonth.isEmpty || yearMonth == "currentMonth" {
+            let now = Calendar.current.dateComponents([.year, .month], from: Date())
+            return "\(now.year ?? 0)年\(now.month ?? 1)月"
+        }
+        let parts = yearMonth.split(separator: "-")
+        if parts.count == 2, let year = Int(parts[0]), let month = Int(parts[1]) {
+            return "\(year)年\(month)月"
+        }
+        // 解析不出来就原样显示，别把用户选的值吞掉
+        return yearMonth
+    }
+}
+
 // MARK: - 充电消费
 
 /// 充电服务商

@@ -70,9 +70,10 @@ final class TripsViewModel {
         selectedMonth == "currentMonth" || selectedMonth.isEmpty
     }
 
+    /// 月份胶囊文案。真源是 HTML 的 `v2MonthText()`：本月也显示成「2026年10月」，
+    /// 不是「本月」。别再按 `isCurrentMonth` 分叉。
     var selectedMonthLabel: String {
-        if isCurrentMonth { return "本月" }
-        return months.first(where: { $0.yearMonth == selectedMonth })?.label ?? selectedMonth
+        MonthLabel.text(for: selectedMonth)
     }
 
     var series: [DailyEnergyPoint] {
