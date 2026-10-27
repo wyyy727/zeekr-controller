@@ -2,59 +2,59 @@
 //  TripsView.swift
 //  ZeekrDash
 //
-//  行程与能耗（官方「行程统计」同源）
+//  行程屏（v2）
+//
+//  真源：`preview/index-v2.html` 的 `renderTrips()`（4561–4660）
+//  与行程图表样式块（1796–1928）。每个数值都能在那两处指到出处。
 //
 
-import Charts
+import Foundation
 import SwiftUI
 
-/// 行程页：月份筛选 + 四项汇总 + 每日里程柱状 / 每日电耗折线
+/// 行程页：月份胶囊 + 六格汇总 + 7/30 段控件 + 两张自绘柱图
 ///
-/// 数据来自后端的 `GET /api/trips/energy`，它与官方 App「行程统计」页是同一个上游接口，
-/// 所以口径和官方一致（总电耗 = 动态 + 静态；平均动态电耗 = 动态 ÷ 里程）。
+/// 数据来自后端的 `GET /api/trips/energy`，与官方 App「行程统计」同一个上游接口，
+/// 所以口径一致（总电耗 = 动态 + 静态；平均动态电耗 = 动态 ÷ 里程）。
 struct TripsView: View {
 
-    @Environment(\.colorScheme) private var scheme
     @Environment(AppStore.self) private var store
     @State private var model = TripsViewModel()
     @State private var showMonthPicker = false
 
-    /// `.task(id:)` 的键：月份或区间任一变化都重新加载，
-    /// 且 id 变化会自动取消上一次任务，天然避免旧响应覆盖新数据。
+    /// 点柱气泡选中的索引，两张图共享（-1 = 没选）
+    @State private var selection = -1
+    /// 两张图共享的横向偏移（自绘，不用 ScrollView，见 `V2BarChart.horizontalDrag`）
+    @State private var offset: CGFloat = 0
+
+    /// `.task(id:)` 的键：月份或**实际区间**任一变化都重新加载。
+    /// 用 `effectiveDays` 而不是 `selectedDays`：历史月份固定 30 天，
+    /// 否则「本月 7 天 → 切历史月」会因为 id 不变而不重新取数。
     private var loadKey: String {
-        "\(model.selectedMonth)#\(model.selectedDays)"
+        "\(model.selectedMonth)#\(model.effectiveDays)"
     }
 
     var body: some View {
         NavigationStack {
-            ScreenContainer(modeText: store.modeBadgeText) {
-                monthRow
-
-                if model.isLoading && model.monthStats == nil {
-                    LoadingView(text: "正在加载能耗数据")
-                        .padding(.top, 60)
-                } else if let month = model.monthStats {
-                    summaryGrid(month)
-                    rangeRow(month)
-                    chartsCard
-
-                    // 有数据但期间失败过：横幅提示，而不是整页错误态
-                    if let message = model.errorMessage {
-                        /* 重试要**真的重新拉一次**。以前只是把提示清掉 ——
-                           提示没了、数据还是旧的，用户以为好了，其实什么都没变。 */
-                        ErrorBanner(message: message, onRetry: {
-                            Task { await model.load(days: model.selectedDays) }
-                        })
-                    }
-                } else {
-                    emptyState
+            ScreenContainer(
+                modePill: store.modePill,
+                trailingAccessory: {
+                    // 未登录时 HTML 直接渲染登录墙，页头（含月份胶囊）整行不出现
+                    if !store.needsLogin { monthChip }
                 }
+            ) {
+                content
             }
             .toolbar(.hidden, for: .navigationBar)
-            .refreshable { await model.load(days: model.selectedDays) }
+            .refreshable { await model.load() }
         }
         .task(id: loadKey) {
-            await model.load(days: model.selectedDays)
+            await model.load()
+        }
+        // 每次进页面重播图表入场动画（HTML `goTab()` 里把 tripsChartAnim 清零）
+        .onAppear { model.replayChartAnimation() }
+        // 数据换了就把气泡和横向位置复位：render 会重建 DOM，HTML 同样每次复位
+        .onChange(of: loadKey) { _, _ in
+            selection = -1
         }
         .sheet(isPresented: $showMonthPicker) {
             MonthPickerSheet(months: model.monthOptions, selection: model.selectedMonth) { picked in
@@ -63,273 +63,307 @@ struct TripsView: View {
         }
     }
 
-    // MARK: - 月份
+    // MARK: - 内容分派（S1–S4 四态）
 
-    private var monthRow: some View {
+    @ViewBuilder
+    private var content: some View {
+        if store.needsLogin {
+            V2LoginWall { store.selectedTab = .settings }
+        } else {
+            // 页脚在四态里都要出现（HTML 的 `shell()` 无条件拼 `v2Foot()`）
+            VStack(spacing: V2Metrics.screenGap) {
+                stateContent
+                footNote
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var stateContent: some View {
+        if let month = model.monthStats, model.windowStats != nil {
+            loaded(month: month)
+        } else if model.isLoading {
+            skeleton
+        } else if model.errorMessage != nil {
+            errorCard
+        } else {
+            emptyCard
+        }
+    }
+
+    // MARK: - 月份胶囊（`.v2-month-chip`）
+
+    private var monthChip: some View {
+        Button {
+            showMonthPicker = true
+        } label: {
+            Text(model.selectedMonthLabel)
+                .v2Text(.month13, color: V2Color.accent)
+                .padding(.horizontal, 14)
+                .frame(minWidth: V2Metrics.monthChipMinWidth, minHeight: V2Metrics.monthChipHeight)
+                .glassSurface(cornerRadius: V2Metrics.monthChipRadius)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("统计月份 \(model.selectedMonthLabel)")
+    }
+
+    // MARK: - 已加载
+
+    private func loaded(month: DailyEnergy) -> some View {
+        VStack(spacing: V2Metrics.screenGap) {
+            summaryCard(month)
+
+            // 有旧数据但本轮失败：保留数据，明确告知不是刚拿的
+            if let message = model.errorMessage {
+                V2StaleBanner(
+                    text: "这一轮没读到最新能耗，下面是上次读到的数据",
+                    detail: message
+                ) { Task { await model.load() } }
+            }
+
+            distributionRow
+
+            if !model.distancePoints.isEmpty {
+                V2BarChart(
+                    title: "每日里程 (km)",
+                    points: model.distancePoints,
+                    days: model.effectiveDays,
+                    decimals: 0,
+                    unit: "km",
+                    kind: .mileage,
+                    animate: true,
+                    baseDelay: 0,
+                    selection: $selection,
+                    offset: $offset
+                )
+                .id("mileage-\(model.chartAnimToken)")
+
+                V2BarChart(
+                    title: "每日电耗 (kWh)",
+                    points: model.energyPoints,
+                    days: model.effectiveDays,
+                    decimals: 1,
+                    unit: "kWh",
+                    kind: .energy,
+                    animate: true,
+                    baseDelay: 0.12,   // HTML `--base: 120ms`
+                    selection: $selection,
+                    offset: $offset
+                )
+                .id("energy-\(model.chartAnimToken)")
+            } else {
+                emptyCard
+            }
+        }
+    }
+
+    // MARK: - 六格汇总（`.v2-sum-grid`）
+
+    private func summaryCard(_ month: DailyEnergy) -> some View {
+        VStack(spacing: V2Metrics.sumRowGap) {
+            HStack(spacing: V2Metrics.sumColGap) {
+                sumCell("本月里程", month.distanceKm.map { String(format: "%.0f", $0) }, "km")
+                sumCell("总电耗", month.energyKwh.map { String(format: "%.1f", $0) }, "kWh")
+            }
+            HStack(spacing: V2Metrics.sumColGap) {
+                sumCell("动态电耗", month.dynamicEnergyKwh.map { String(format: "%.1f", $0) }, "kWh")
+                sumCell("静态电耗", month.staticEnergyKwh.map { String(format: "%.1f", $0) }, "kWh")
+            }
+            HStack(spacing: V2Metrics.sumColGap) {
+                sumCell("平均动态电耗", month.avgDynamicConsumption.map { String(format: "%.1f", $0) }, "kWh/100km")
+                sumCell("平均电耗", month.avgConsumption.map { String(format: "%.1f", $0) }, "kWh/100km")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .v2Card()
+    }
+
+    /// 一格：标题 11/500、数值 16/600、单位 11/500，数值与单位基线对齐、间距 3。
+    /// 数值缺失一律 `--`（不是 0）。
+    private func sumCell(_ key: String, _ value: String?, _ unit: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(key)
+                .v2Text(.sumKey, color: V2Color.text2)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(value ?? "--")
+                    .v2Text(.sumValue)
+                    .v2Numeric()
+                Text(unit)
+                    .v2Text(.sumKey, color: V2Color.text2)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - 每日分布 + 7/30 段控件（`.v2-dist` / `.v2-seg`）
+
+    private var distributionRow: some View {
         HStack(spacing: 8) {
-            Image(systemName: "calendar")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textTertiary(scheme))
-            Text("统计月份")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textTertiary(scheme))
+            Text("每日分布")
+                .v2Text(.text12, color: V2Color.text3)
 
             Spacer(minLength: 0)
+
+            // 历史月份固定整月，不渲染段控件（HTML 4628）
+            if model.isCurrentMonth {
+                daySegmented
+            }
+        }
+        .frame(height: 30)
+    }
+
+    private var daySegmented: some View {
+        HStack(spacing: 0) {
+            ForEach([7, 30], id: \.self) { days in
+                let on = model.effectiveDays == days
+                Button {
+                    model.setDays(days)
+                } label: {
+                    Text(days == 7 ? "7天" : "30天")
+                        .v2Text(on ? .segLabelOn : .segLabel,
+                                color: on ? V2Color.text1 : V2Color.text3)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 24)
+                        .background {
+                            if on {
+                                RoundedRectangle(cornerRadius: V2Metrics.segThumbRadius, style: .continuous)
+                                    .fill(Color.white.opacity(0.95))
+                                    .shadow(
+                                        color: Color(hex: 0x4A5778).opacity(0.16),
+                                        radius: 3, x: 0, y: 2
+                                    )
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(on ? AccessibilityTraits.isSelected : [])
+            }
+        }
+        .padding(V2Metrics.segInset)
+        .frame(width: V2Metrics.segWidth, height: V2Metrics.segHeight)
+        .glassSurface(cornerRadius: V2Metrics.segRadius)
+    }
+
+    // MARK: - 旧数据横幅
+
+
+    // MARK: - 加载骨架（S2）
+
+    private var skeleton: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("本月里程")
+                    .v2Text(.title14)
+                Spacer(minLength: 0)
+                Text("加载中")
+                    .v2Text(.sumKey, color: V2Color.text2)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(V2Color.tintMuted)
+                    .clipShape(Capsule())
+            }
+
+            // 三条 14pt 高、宽 70% / 35% / 55% 的骨架条，1.6s 呼吸
+            GeometryReader { proxy in
+                VStack(alignment: .leading, spacing: 12) {
+                    skeletonLine(proxy.size.width * 0.70)
+                    skeletonLine(proxy.size.width * 0.35)
+                    skeletonLine(proxy.size.width * 0.55)
+                }
+                .padding(.top, 8)
+            }
+            .frame(height: 66 + 8)
+        }
+        .v2Card()
+        .accessibilityLabel("正在加载能耗数据")
+    }
+
+    private func skeletonLine(_ width: CGFloat) -> some View {
+        SkeletonBar(width: width)
+    }
+
+    // MARK: - 读失败（S3）
+
+    private var errorCard: some View {
+        VStack(spacing: 0) {
+            // 与空态统一用柱状版（用户确认：两处都用 `ic-chart-bar`）
+            Image("ic-chart-bar")
+                .renderingMode(.template)
+                .resizable()
+                .frame(width: 28, height: 28)
+                .foregroundStyle(V2Color.text3)
+
+            Text("能耗数据没有读到")
+                .v2Text(.emptyTitle)
+                .padding(.top, 12)
+
+            Text("后端可能正在重启，或登录状态已失效")
+                .v2Text(.emptyDesc, color: V2Color.text3)
+                .multilineTextAlignment(.center)
+                .padding(.top, 6)
 
             Button {
-                showMonthPicker = true
+                Task { await model.load() }
             } label: {
-                HStack(spacing: 3) {
-                    Text(model.selectedMonthLabel)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.textPrimary(scheme))
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(Theme.textTertiary(scheme))
-                }
-                .padding(.horizontal, 12)
-                .frame(height: 30)
-                .glassEffect(.regular, in: .capsule)
+                Text("重试")
+                    .v2Text(.button14, color: V2Color.accent)
+                    .frame(height: 32)
+                    .padding(.horizontal, 20)
+                    .background(V2Color.tintAccent)
+                    .clipShape(Capsule())
             }
             .buttonStyle(.plain)
+            .padding(.top, 16)
         }
-    }
-
-    // MARK: - 四项汇总
-
-    /// 与官方「能量统计」卡一一对应，**不能少「动态电耗」**：
-    /// 少了它，用户拿「总电耗 ÷ 里程」去对「平均动态电耗」永远对不上。
-    private func summaryGrid(_ month: DailyEnergy) -> some View {
-        LazyVGrid(
-            columns: [
-                GridItem(.flexible(), spacing: 12),
-                GridItem(.flexible(), spacing: 12),
-            ],
-            spacing: 14
-        ) {
-            summaryItem("累计里程",
-                        value: month.distanceKm.map { String(format: "%.0f", $0) } ?? "--",
-                        unit: "km")
-            summaryItem("总电耗",
-                        value: month.energyKwh.map { String(format: "%.1f", $0) } ?? "--",
-                        unit: "kWh")
-            summaryItem("动态电耗",
-                        value: month.dynamicEnergyKwh.map { String(format: "%.1f", $0) } ?? "--",
-                        unit: "kWh")
-            summaryItem("平均动态电耗",
-                        value: month.avgDynamicConsumption.map { String(format: "%.1f", $0) } ?? "--",
-                        unit: "kWh/100km")
-        }
-        .padding(.horizontal, Metrics.cardPadding)
-        .padding(.vertical, 14)
-        .background(Theme.surface(scheme))
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
-    }
-
-    private func summaryItem(_ title: String, value: String, unit: String) -> some View {
-        VStack(spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(value)
-                    .font(.system(size: 17, weight: .medium, design: .rounded))
-                    .foregroundStyle(Theme.textPrimary(scheme))
-                    .monospacedDigit()
-                Text(unit)
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.textTertiary(scheme))
-            }
-            Text(title)
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.textTertiary(scheme))
-        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 22)
         .frame(maxWidth: .infinity)
+        .v2Card()
     }
 
-    // MARK: - 区间与充电次数
+    // MARK: - 真空态（S4）
 
-    private func rangeRow(_ month: DailyEnergy) -> some View {
-        HStack(spacing: 4) {
-            Text("\(model.selectedMonthLabel) \(month.startDate ?? "") — \(month.endDate ?? "")")
-            if model.chargeCount > 0 {
-                Text("· 充电 \(model.chargeCount) 次")
-                Text("· 快充 \(month.fastChargeCount ?? 0) / 慢充 \(month.slowChargeCount ?? 0)")
-            }
-            Spacer(minLength: 0)
+    private var emptyCard: some View {
+        VStack(spacing: 0) {
+            /* HTML 用的是 `SVG.chart`，而那个键在 HTML 里被定义了两次，
+               运行时生效的是折线版。用户已确认这里用柱状版（`ic-chart-bar`）更贴语义 ——
+               这是经确认的偏离，不是取错资产。 */
+            Image("ic-chart-bar")
+                .renderingMode(.template)
+                .resizable()
+                .frame(width: 28, height: 28)
+                .foregroundStyle(V2Color.text3)
+
+            Text("这个时间段没有行程")
+                .v2Text(.emptyTitle)
+                .padding(.top, 12)
+
+            Text("换个月份或切到 30 天看看")
+                .v2Text(.emptyDesc, color: V2Color.text3)
+                .padding(.top, 6)
         }
-        .font(.system(size: 11))
-        .foregroundStyle(Theme.textTertiary(scheme))
-        .lineLimit(1)
-        .minimumScaleFactor(0.8)
-    }
-
-    // MARK: - 图表
-
-    private var distributionTitle: String {
-        let days = model.windowStats?.days ?? model.series.count
-        return model.isCurrentMonth ? "每日分布 · 近 \(days) 天" : "\(model.selectedMonthLabel)共 \(days) 天"
-    }
-
-    private var distanceColor: Color { Color(hex: 0x7C5CFC) }
-    private var energyColor: Color { Color(hex: 0xF0913C) }
-
-    private var chartsCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Text(distributionTitle)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary(scheme))
-                Spacer(minLength: 0)
-                // 历史月份固定整月，不显示区间切换（与网页一致）
-                if model.isCurrentMonth {
-                    Picker("区间", selection: Binding(
-                        get: { model.selectedDays },
-                        set: { model.selectedDays = $0 }
-                    )) {
-                        Text("7 天").tag(7)
-                        Text("30 天").tag(30)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 128)
-                }
-            }
-
-            /* 两张图放在**同一个**横向 ScrollView 里：滑动任意一张，另一张跟着走，
-               方便对照同一天的里程与电耗。各自用固定宽度（每点 56pt）而不是压缩间距。 */
-            ScrollView(.horizontal, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 14) {
-                    chartHeading("每日里程", unit: "km", color: distanceColor)
-                    distanceChart
-                    chartHeading("每日电耗", unit: "kWh", color: energyColor)
-                    energyChart
-                }
-            }
-        }
-        .padding(Metrics.cardPadding)
-        .background(Theme.surface(scheme))
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
-    }
-
-    private func chartHeading(_ title: String, unit: String, color: Color) -> some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(color)
-                .frame(width: 7, height: 7)
-            Text(title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Theme.textPrimary(scheme))
-            Text(unit)
-                .font(.system(size: 10))
-                .foregroundStyle(Theme.textTertiary(scheme))
-            Spacer(minLength: 0)
-        }
-    }
-
-    private var distanceChart: some View {
-        Chart(model.series) { point in
-            BarMark(
-                x: .value("日期", point.shortDate),
-                y: .value("里程", point.distanceKm ?? 0)
-            )
-            .foregroundStyle(distanceColor)
-            .cornerRadius(3)
-            .annotation(position: .top, spacing: 2) {
-                if let value = point.distanceKm {
-                    Text(String(format: "%.0f", value))
-                        .font(.system(size: 9))
-                        .foregroundStyle(distanceColor)
-                }
-            }
-        }
-        .chartYScale(domain: model.distanceRange)
-        .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: min(12, max(2, model.series.count)))) { _ in
-                AxisValueLabel()
-                    .font(.system(size: 9))
-                    .foregroundStyle(Theme.textTertiary(scheme))
-            }
-        }
-        .chartYAxis {
-            AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { _ in
-                AxisGridLine().foregroundStyle(Theme.separator(scheme))
-                AxisValueLabel()
-                    .font(.system(size: 9))
-                    .foregroundStyle(Theme.textTertiary(scheme))
-            }
-        }
-        .frame(width: model.chartWidth, height: 140)
-    }
-
-    private var energyChart: some View {
-        Chart(model.series) { point in
-            if let energy = point.energyKwh {
-                AreaMark(
-                    x: .value("日期", point.shortDate),
-                    y: .value("电耗", energy)
-                )
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [energyColor.opacity(0.22), energyColor.opacity(0.02)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .interpolationMethod(.catmullRom)
-
-                LineMark(
-                    x: .value("日期", point.shortDate),
-                    y: .value("电耗", energy)
-                )
-                .foregroundStyle(energyColor)
-                .interpolationMethod(.catmullRom)
-                .lineStyle(StrokeStyle(lineWidth: 2))
-
-                PointMark(
-                    x: .value("日期", point.shortDate),
-                    y: .value("电耗", energy)
-                )
-                .foregroundStyle(energyColor)
-                .symbolSize(18)
-                .annotation(position: .top, spacing: 2) {
-                    Text(String(format: "%.1f", energy))
-                        .font(.system(size: 9))
-                        .foregroundStyle(energyColor)
-                }
-            }
-        }
-        .chartYScale(domain: model.energyRange)
-        .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: min(12, max(2, model.series.count)))) { _ in
-                AxisValueLabel()
-                    .font(.system(size: 9))
-                    .foregroundStyle(Theme.textTertiary(scheme))
-            }
-        }
-        .chartYAxis {
-            AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { _ in
-                AxisGridLine().foregroundStyle(Theme.separator(scheme))
-                AxisValueLabel()
-                    .font(.system(size: 9))
-                    .foregroundStyle(Theme.textTertiary(scheme))
-            }
-        }
-        .frame(width: model.chartWidth, height: 140)
-    }
-
-    // MARK: - 空态
-
-    private var emptyState: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "chart.bar.xaxis")
-                .font(.system(size: 32, weight: .light))
-                .foregroundStyle(Theme.textTertiary(scheme))
-            Text("暂无能耗数据")
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.textSecondary(scheme))
-            Text("连接后端后显示官方「行程与能耗」统计")
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.textTertiary(scheme))
-        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 22)
         .frame(maxWidth: .infinity)
-        .padding(.top, 60)
+        .v2Card()
+    }
+
+    // MARK: - 页脚（`.v2-foot`）
+
+    private var footNote: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let last = store.lastRefresh {
+                Text("更新于 \(last.formatted(date: .omitted, time: .shortened))")
+            }
+            Text("数据来自非官方接口，仅供参考")
+        }
+        .v2Text(.foot11, color: V2Color.text3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 8)
     }
 }
 
@@ -349,7 +383,6 @@ struct MonthPickerSheet: View {
     let onPick: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var scheme
 
     @State private var year: Int = Calendar.current.component(.year, from: Date())
     @State private var month: Int = Calendar.current.component(.month, from: Date())
@@ -385,16 +418,13 @@ struct MonthPickerSheet: View {
         VStack(spacing: 0) {
             HStack {
                 Button("取消") { dismiss() }
-                    .font(.system(size: 15))
-                    .foregroundStyle(Theme.textSecondary(scheme))
+                    .v2Text(.nav15, color: V2Color.text2)
                 Spacer()
                 Text("选择月份")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary(scheme))
+                    .v2Text(.stat15)
                 Spacer()
                 Button("确定") { confirm() }
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Theme.accent(scheme))
+                    .v2Text(.stat15, color: V2Color.accent)
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
@@ -468,35 +498,3 @@ struct MonthPickerSheet: View {
     }
 }
 
-// MARK: - 图表容器
-
-/// 统一的图表卡片容器，保证视觉一致（充电页也在用）
-struct ChartCard<Content: View>: View {
-
-    let title: String
-    var subtitle: String?
-    @ViewBuilder let content: () -> Content
-
-    @Environment(\.colorScheme) private var scheme
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Text(title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary(scheme))
-                if let subtitle {
-                    Text("· \(subtitle)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textTertiary(scheme))
-                }
-            }
-
-            content()
-                .frame(height: 150)
-        }
-        .padding(Metrics.cardPadding)
-        .background(Theme.surface(scheme))
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
-    }
-}
