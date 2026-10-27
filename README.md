@@ -158,6 +158,12 @@ cd .. && cp .env.example .env
 | `ZEEKR_HAOHAN_HOST` | ⬜ | 第三方充电网关地址，默认 `https://gateway-prod.haohanpower.tech` |
 | `ZEEKR_HAOHAN_CHANNEL_ID` | ⬜ | 第三方充电网关渠道号，默认 `1`（逆向得到的常量，故配置化） |
 | `TENCENT_MAP_KEY` | ⬜ | **车辆位置卡用**。腾讯位置服务 key（需开「逆地理编码」+「静态图」）。留空则只显示经纬度，不显示地址与地图。⚠️ 填了就意味着车坐标会发给腾讯 |
+| `DEEPSEEK_API_KEY` | ⬜ | **充电金额截图识别**用。留空则「截图识别」按钮降级为提示，手写录入仍可用 |
+| `DEEPSEEK_BASE_URL` / `DEEPSEEK_VISION_MODEL` | ⬜ | 上游地址（默认 `https://api.deepseek.com`）/ 识别模型（默认 `deepseek-v4-flash-vision-exp`） |
+| `CHARGE_ESTIMATE_PRICE` | ⬜ | 金额估算兜底的电价（元/度）。估算值**不落库、只展示**；留空或 `0` 关闭 |
+| `ENERGY_SYNC_INTERVAL_HOURS` / `ENERGY_SYNC_DAYS` | ⬜ | 逐日电耗保底同步：每 N 小时拉最近 M 天（默认 6 / 7；`interval=0` 关闭；M 别超 31） |
+| `CORS_ORIGINS` | ⬜ | 跨域白名单（逗号分隔完整来源）。留空 = `*`，填了才收紧 |
+| `ZEEKR_SESSION_FILE` | ⬜ | 登录会话落盘位置，默认数据目录下的 `session.json` |
 | `ALLOW_COMMANDS` | ⬜ | 车控总开关，**默认 `false`** |
 | `API_TOKEN` | ⬜ | 服务端鉴权令牌；留空则不鉴权（见「常见问题」） |
 | `DATA_SOURCE` | ⬜ | `auto`（默认）/ `mock` / `live` |
