@@ -154,6 +154,13 @@ extension View {
 /// 跟屏宽无关，缩放会让紫团在不同机型上高低不一。
 struct V2Background: View {
 
+    /// 临时诊断开关（2026-10-28）。
+    ///
+    /// 为 true 时把整块背景漆成纯红，用来判断这一层到底有没有被画出来、
+    /// 又被哪一层盖住（真机现象：切 Tab 瞬间闪现一下白紫，随后被覆盖）。
+    /// 诊断结束必须删掉这个开关与调用点。
+    var diagnosticRed: Bool = false
+
     /// 设计稿基准宽度（网页 `.screen` 的固定宽度）。
     static let designWidth: CGFloat = 390
 
@@ -180,9 +187,9 @@ struct V2Background: View {
         GeometryReader { proxy in
             LinearGradient(
                 stops: [
-                    .init(color: V2Color.bgTop, location: 0),
-                    .init(color: V2Color.bgMiddle, location: 0.5),
-                    .init(color: V2Color.bgBottom, location: 1),
+                    .init(color: diagnosticRed ? Color.red : V2Color.bgTop, location: 0),
+                    .init(color: diagnosticRed ? Color.red : V2Color.bgMiddle, location: 0.5),
+                    .init(color: diagnosticRed ? Color.red : V2Color.bgBottom, location: 1),
                 ],
                 startPoint: .top,
                 endPoint: .bottom
