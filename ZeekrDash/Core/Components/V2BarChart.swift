@@ -349,14 +349,14 @@ struct V2BarChart: View {
 
                正确做法：外层给一个随动画变化的高度 + `.clipped()`（= `overflow:hidden`），
                内层两段按**目标高度**固定，溢出部分被裁掉 —— 与 HTML 完全等价。
-               裁切后圆角也要保留，否则四角会露出方角。 */
+               裁切后圆角也要保留，否则四角会露出方角。
 
                ⚠️ 对齐方式必须是 `.bottom`（2026-10-28 续修）：`.frame(height:)` 不传
                `alignment` 时默认 `.center`，内层 `targetH` 高的柱体会被**居中**放进
                `h` 高的框里再裁切 —— 动画中看到的是柱子的**中段**：底段（动态色）
                被裁到基线以下，柱子看起来离地悬空往上飘，到 `h == targetH` 才贴回。
                HTML 那边靠 `justify-content: flex-end` 保证底边对齐，这里等价写
-               `.bottom`，才是真正「从基线往上长」。
+               `.bottom`，才是真正「从基线往上长」。 */
             splitBody(d: d, s: s, targetHeight: targetH)
                 .frame(height: h, alignment: .bottom)
                 .clipped()
