@@ -176,8 +176,7 @@ struct RootView: View {
     /// 旧的四团青/橙光斑整体删除：v2 只有两团，且位置与半径都是量出来的定值，
     /// 不是按屏幕比例估的 —— 换成比例会把紫团挪错位置（HTML 注释专门警告过）。
     private var backgroundLayer: some View {
-        // 临时诊断：diagnosticRed 打开后整屏变红（见 V2Background 注释）
-        V2Background(diagnosticRed: true)
+        V2Background()
             .ignoresSafeArea()
     }
 
