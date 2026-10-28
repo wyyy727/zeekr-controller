@@ -317,31 +317,43 @@ struct ScreenContainer<Content: View, Accessory: View>: View {
            不再自动为键盘让位；这里把「底部可滚动余量」临时撑到键盘高度，
            否则靠近屏幕下半段的输入框（附近站点搜索、充电详情里的备注）会
            藏在键盘下面，既看不见也滚不上来。 */
-        ScrollView {
-            VStack(spacing: sectionGap) {
-                content()
+        /* 氛围背景画在**屏内容器里面**，不能只画在 RootView 那一层。
+           `NavigationStack` 在 iOS 26 会给自己的视图铺一层不透明的系统底，
+           它压在 RootView 的 `V2Background` 之上 —— 真机表现就是：静止时全白、
+           切 Tab 的瞬间才闪一下白紫。2026-10-28 用「整屏漆红」的诊断包确认了这点：
+           转场那一帧整屏是红的，静止后红色被盖掉。
+           所以这里再画一份，位置在滚动内容之下、导航视图之上；
+           同时关掉 ScrollView 自带的内容底色，两条可能都被堵上。 */
+        ZStack {
+            V2Background()
+                .ignoresSafeArea()
+
+            ScrollView {
+                VStack(spacing: sectionGap) {
+                    content()
+                }
+                .padding(.horizontal, V2Metrics.screenPadding)
             }
-            .padding(.horizontal, V2Metrics.screenPadding)
-        }
-        .contentMargins(
-            .bottom,
-            max(V2Metrics.tabBarClearance, KeyboardHeight.shared.value + 12),
-            for: .scrollContent
-        )
-        .background(Color.clear)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            topBar
-        }
-        .scrollIndicators(.hidden)
-        /* 键盘收起：
-           · 下拉列表即交互式收起（网页里靠点空白处）；
-           · 数字键盘（手机号 / API 令牌）没有 Return 键，系统不给收起入口，
-             所以在键盘上方常驻一个「完成」—— 这是 iOS 上唯一可靠的出口。 */
-        .scrollDismissesKeyboard(.interactively)
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("完成") { dismissKeyboard() }
+            .contentMargins(
+                .bottom,
+                max(V2Metrics.tabBarClearance, KeyboardHeight.shared.value + 12),
+                for: .scrollContent
+            )
+            .scrollContentBackground(.hidden)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                topBar
+            }
+            .scrollIndicators(.hidden)
+            /* 键盘收起：
+               · 下拉列表即交互式收起（网页里靠点空白处）；
+               · 数字键盘（手机号 / API 令牌）没有 Return 键，系统不给收起入口，
+                 所以在键盘上方常驻一个「完成」—— 这是 iOS 上唯一可靠的出口。 */
+            .scrollDismissesKeyboard(.interactively)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("完成") { dismissKeyboard() }
+                }
             }
         }
     }
