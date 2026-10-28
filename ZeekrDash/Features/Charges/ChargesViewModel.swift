@@ -300,17 +300,6 @@ final class ChargesViewModel {
         }
     }
 
-    /// 上传一张「补能订单」截图（文件 URL 版）。**不入库** —— 结果进 ocrResult 等用户核对。
-    func runOcr(fileURL: URL) async {
-        await runOcrUpload {
-            try await APIClient.shared.uploadFile(
-                APIRoutes.chargeOcr,
-                fileURL: fileURL,
-                fieldName: "file"
-            )
-        }
-    }
-
     /// 上传一张「补能订单」截图（字节版，**相册选图走这条**）。
     ///
     /// 为什么单开一条：iOS 相册选出来的图没有稳定文件 URL，PhotosPicker 直接把

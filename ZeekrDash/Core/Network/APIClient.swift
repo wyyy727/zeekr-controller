@@ -115,26 +115,10 @@ final class APIClient {
 
     // MARK: - 文件上传（账单导入 / 截图识别）
 
-    /// multipart/form-data 上传一个**文件 URL**。
+    /// multipart/form-data 上传**字节**（相册图片、CSV 走这条）。
     ///
-    /// 只给「沙盒里真有一个文件」的调用方用。相册图片不要走这条 ——
-    /// PhotosPicker 交出来的是 Data，没有稳定 URL（把字节先落临时文件再读回来
-    /// 纯属多余，还要自己管清理），那种情况用下面的字节版。
-    func uploadFile<T: Codable>(_ path: String, fileURL: URL, fieldName: String = "file") async throws -> T {
-        let fileData: Data
-        do {
-            // 安全读取用户通过文件选择器选的文件（仅临时授权访问）
-            let scoped = fileURL.startAccessingSecurityScopedResource()
-            defer { if scoped { fileURL.stopAccessingSecurityScopedResource() } }
-            fileData = try Data(contentsOf: fileURL)
-        } catch {
-            throw ApiError.transport(underlying: error)
-        }
-
-        return try await uploadFile(path, data: fileData, filename: fileURL.lastPathComponent, fieldName: fieldName)
-    }
-
-    /// multipart/form-data 上传**字节**（相册图片走这条）。
+    /// 相册图片不要先落临时文件再读回来 —— PhotosPicker 直接给 Data，
+    /// 落盘纯属多一次磁盘往返，还要自己负责清理。
     ///
     /// 文件名只用于服务端猜扩展名 / MIME，不要求磁盘上真有这个文件。
     func uploadFile<T: Codable>(
@@ -283,10 +267,22 @@ final class APIClient {
         return detail
     }
 
+    /// 文件名 → multipart 的 `Content-Type`。
+    ///
+    /// **图片必须给对**：服务端 `_ALLOWED_IMAGE_MIME` 按这个头做白名单，
+    /// 之前这里没有图片分支，一律 `application/octet-stream` —— 截图识别在
+    /// 到达 OCR 之前就被自己服务端判成「不是图片」（400），与 HEIF 无关。
+    /// 注意上游（DeepSeek Vision）只认 jpeg/png/gif/webp，heic/heif 由调用方转码。
     private func mimeType(for filename: String) -> String {
         switch (filename as NSString).pathExtension.lowercased() {
         case "csv":  return "text/csv"
         case "xlsx": return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        case "jpg", "jpeg": return "image/jpeg"
+        case "png":  return "image/png"
+        case "webp": return "image/webp"
+        case "gif":  return "image/gif"
+        case "heic": return "image/heic"
+        case "heif": return "image/heif"
         default:     return "application/octet-stream"
         }
     }

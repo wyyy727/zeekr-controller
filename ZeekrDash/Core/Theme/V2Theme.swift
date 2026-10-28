@@ -86,6 +86,33 @@ enum V2Color {
     static let glassHighlight  = Color.white.opacity(0.60)
     static let glassShadow     = Color(hex: 0x4A5778).opacity(0.12)
 
+    // MARK: 内容卡的**专用**描边与阴影（方案 B，2026-10-28）
+    //
+    // ⚠️ 这两个**不能**复用上面的 `glassEdge` / `glassShadow` ——
+    // 那两个被真玻璃浮层（底栏胶囊、顶部徽标、Toast、底部弹层）和图表复用，
+    // 改了会连带影响它们（它们是真玻璃，有真实折射，本来就立得住，不该跟着变重）。
+    //
+    // **为什么要单独加**（用户反馈「iOS 的卡片看不出是卡片」）：
+    // 用无头浏览器渲染 v2 HTML 实测（390×844 @2x，量卡内 4 点均值 vs 卡外 3pt 四向均值）：
+    //
+    // | 配方 | 卡内 vs 卡外对比度 | 描边 vs 卡外 |
+    // |---|---|---|
+    // | HTML 原版（真 blur+saturate） | 1.124 | 1.166 |
+    // | 白 .90 描边（iOS 原样） | 1.124 | **1.055** ← 描边几乎不可见 |
+    //
+    // 结论：**白 .90 的描边画在浅色背景上等于没画**（对比度仅 1.055），
+    // 它在网页上之所以有效，靠的是 `backdrop-filter` 把背景的紫揉进卡内形成的质感差。
+    // iOS 内容卡刻意不做真模糊（性能），这条质感差就没了 ——
+    // 只剩一条看不见的白边撑着，轮廓自然发糊。
+    //
+    // 所以：描边换成**能看见的冷灰蓝**，阴影加浓，把边界重新立起来。
+    // 数值 .22 是从「浅底上要够明显但不能变成描边框」实测筛出来的，
+    // 对比度 1.160 —— 接近 HTML 原版描边的 1.166，且不像网页那样发飘。
+    static let cardStroke = Color(hex: 0x4A5778).opacity(0.22)
+    /// 内容卡外阴影。比网页的 .12 浓 —— SwiftUI 的 shadow 衰减比 CSS 快，
+    /// 同样 .12 在 iOS 上几乎看不出卡片是「浮起」的。
+    static let cardShadow = Color(hex: 0x4A5778).opacity(0.18)
+
     // MARK: 图表（出处：`index-v2.html` 1893–1928、1857–1865）
     /// 里程柱：`linear-gradient(180deg,#7EDCEE,#B9A5FF)`
     static let barMileageTop    = Color(hex: 0x7EDCEE)

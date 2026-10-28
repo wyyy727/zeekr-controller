@@ -62,6 +62,29 @@ struct V2BottomSheet<Content: View>: View {
     /// 在 body 里读它 → 随 `KeyboardHeight` 的 `@Observable` 自动重绘。
     private var keyboardInset: CGFloat { KeyboardHeight.shared.value }
 
+    /// 键盘上方留给面板的最大高度。
+    ///
+    /// 面板整块上移 `keyboardInset` 之后，**高度不能再按原比例算** ——
+    /// 0.70 比例的手机上高度 590 + 键盘 336 = 926 > 屏高 844，
+    /// 面板顶部（标题行）会被顶出屏幕外。这里留 12pt 呼吸位。
+    private func maxPanelHeight(_ screenHeight: CGFloat) -> CGFloat {
+        max(320, screenHeight - keyboardInset - 12)
+    }
+
+    /// 面板除正文外的固定占用（标题区 + 底部操作 + 内距）。
+    ///
+    /// ⚠️ 逐项算出来的，不是估值（2026-10-28 修）：此前写死 116，比实际少 56pt，
+    /// 于是 hug 面板在键盘弹起时算出的正文上限偏大 56 —— 面板 = 正文 + chrome
+    /// 仍会越过键盘上沿 44pt，标题继续被顶出屏幕，看起来却像「已修好」。
+    /// - header：有把手 22（8+4+10）+ 标题行 44 + 下内距 10 = 76；无把手 18+44+10 = 72
+    /// - footer：按钮 48 + `.padding(.top, 8)` + `.padding(.bottom, 10 + safeArea)`
+    /// footer 的下内距含 `safeAreaInsets.bottom`，所以必须带 `proxy` 取值。
+    private func chromeHeight(_ proxy: GeometryProxy) -> CGFloat {
+        let headerHeight: CGFloat = (showsGrip ? 22 : 0) + 44 + 10
+        let footerHeight: CGFloat = footer == nil ? 0 : 48 + 8 + 10 + proxy.safeAreaInsets.bottom
+        return headerHeight + footerHeight
+    }
+
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .bottom) {
@@ -81,7 +104,14 @@ struct V2BottomSheet<Content: View>: View {
                     .contentShape(Rectangle())
                     .gesture(dismissDrag)
 
-                    bodySection(cap: min(proxy.size.height * bodyMaxHeightRatio, bodyMaxHeight))
+                    bodySection(
+                        cap: min(
+                            proxy.size.height * bodyMaxHeightRatio,
+                            bodyMaxHeight,
+                            // hug 模式没有 frame 兜底，正文区自己要让出「面板固定占用 + 键盘」
+                            max(200, maxPanelHeight(proxy.size.height) - chromeHeight(proxy))
+                        )
+                    )
 
                     if let footer {
                         /* HTML `.sheet` 的底部内距是 `calc(10px + env(safe-area-inset-bottom))`：
@@ -94,10 +124,19 @@ struct V2BottomSheet<Content: View>: View {
                 }
                 // hug 模式传 nil：由子视图自己撑高
                 /* 高度：常规按屏高比例锁死（最小 320，保证正文塞得下）。
-                   键盘占掉下半屏时，`proxy.size.height` 已经被键盘缩过，
-                   按比例算出来会矮于 320，所以下限还是 320；
-                   面板上移的 keyboardInset 不参与高度计算 —— 两者相加才是屏幕占用。 */
-                .frame(height: hugContent ? nil : max(320, proxy.size.height * heightRatio))
+                   键盘弹起时再夹一次上限 —— 面板是整块上移的，高度不减就会顶出屏幕顶。 */
+                .frame(
+                    height: hugContent
+                        ? nil
+                        : min(
+                            max(320, proxy.size.height * heightRatio),
+                            maxPanelHeight(proxy.size.height)
+                        )
+                )
+                /* hug 模式没有比例兜底：正文按 cap 撑高之后，面板 = 正文 + chrome，
+                   chrome 一旦估偏就会越过键盘上沿（2026-10-28 补）。这里显式封顶 ——
+                   宁可让正文内滚，也不让标题跑出屏幕。 */
+                .modifier(PanelMaxHeight(limit: hugContent ? maxPanelHeight(proxy.size.height) : nil))
                 .offset(y: dragOffset)
                 .frame(maxWidth: .infinity)
                 .background(panelBackground)
@@ -110,6 +149,10 @@ struct V2BottomSheet<Content: View>: View {
                         style: .continuous
                     )
                 )
+                /* 键盘收起出口：面板是独立 cover，拿不到 `ScreenContainer` 上那条
+                   `.scrollDismissesKeyboard` —— 手写录入/核对框的数字键盘只能靠它收。
+                   （applied 在面板上，对内部 ScrollView 生效） */
+                .scrollDismissesKeyboard(.interactively)
                 .shadow(color: V2Color.glassShadow, radius: 16, x: 0, y: -4)
                 /* 键盘弹起时把面板整体抬到键盘上沿。
                    面板是自绘的，不走系统避让（见 KeyboardHeight.swift 的注释），
@@ -196,6 +239,23 @@ struct V2BottomSheet<Content: View>: View {
             }
             /* 两个按钮都撑到 44pt 触控高度：视觉上仍是 12/14 号文字，
                但点击区不能再是那 18pt 高的字形本身（HIG 最小 44×44）。 */
+            /* 键盘出口（2026-10-28 补）：面板是独立 cover，拿不到 `RootView` 里那条
+               `.toolbar(.keyboard)` 的「完成」；数字键盘又没有回车键。
+               验证码/手写金额这两个面板此前唯一的收键盘办法是点遮罩 ——
+               那会把整块面板（含已输入内容）一起关掉。键盘弹起时在标题行给一个
+               「完成」，不改变任何布局高度（塞在已有的 44pt 触控行里）。 */
+            if keyboardInset > 0 {
+                Button {
+                    dismissKeyboard()
+                } label: {
+                    Text("完成")
+                        .v2Text(.label12, color: V2Color.text3)
+                        .padding(.horizontal, 8)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
             if let closeTitle {
                 Button(action: onClose) {
                     Text(closeTitle)
@@ -230,5 +290,23 @@ private struct SheetBodyHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
+    }
+}
+
+/// hug 面板的高度兜底：只在 `limit != nil` 时套一层 `.frame(maxHeight:)`。
+///
+/// 为什么不直接写 `.frame(maxHeight: ...)`：非 hug 面板已经按屏高比例锁死高度，
+/// 再叠一层 maxHeight 是多余的约束；而 `limit` 为 nil 时这个修饰符完全透明。
+private struct PanelMaxHeight: ViewModifier {
+
+    let limit: CGFloat?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let limit {
+            content.frame(maxHeight: limit)
+        } else {
+            content
+        }
     }
 }

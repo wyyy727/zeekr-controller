@@ -11,7 +11,7 @@
 import Foundation
 import SwiftUI
 import UIKit
-import UniformTypeIdentifiers
+import ImageIO
 import PhotosUI
 
 /// 充电页
@@ -65,10 +65,116 @@ struct ChargesView: View {
             return
         }
 
-        let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
-        await model.runOcr(imageData: data, filename: "screenshot.\(ext)")
+        // ⚠️ 扩展名**不能**从 `item.supportedContentTypes` 取。
+        // 那是「这个 item 能转成哪些格式」，不是「原文件是什么格式」——
+        // 一张 HEIC 原图通常同时列出 heic/jpeg/png，取 `.first` 是碰运气。
+        // 碰巧取到 jpg 就会把 HEIC 字节标成 image/jpeg 发出去：服务端白名单放行，
+        // DeepSeek 按字节判定 → 拒收 → 用户只看到「识别失败」，错在哪无从查起。
+        // 真实格式必须按字节判定（见 `uploadForm` 里的 ImageIO）。
+        guard let upload = Self.uploadForm(data) else {
+            model.showToast("这张图读不出来（可能已损坏），换一张试试")
+            return
+        }
+        await model.runOcr(imageData: upload.data, filename: "screenshot.\(upload.ext)")
 
         if model.ocrResult != nil { showOcrReview = true }
+    }
+
+    /// 把相册原图规整成上游一定认的格式。
+    ///
+    /// 上游事实（DeepSeek 官方 Vision 文档）：**只支持 JPEG / PNG / GIF / WebP**，
+    /// 且「格式按文件的实际内容检测，不看文件名，也不看声明的 MIME」。
+    /// 我们服务端 `_ALLOWED_IMAGE_MIME` 同样只认这四种（`image/heic` 会被 400 挡掉）。
+    ///
+    /// 规则：
+    /// 1. **按字节判真实格式**（ImageIO 的 `CGImageSourceGetType`），不靠扩展名猜；
+    /// 2. 这四种且方向正常 → **原样上传**（PNG 截图不重新压缩，文字更实）；
+    /// 3. HEIC/HEIF 或任何其他格式，或带 EXIF 旋转 → **重绘成 JPEG**，
+    ///    否则小票在模型眼里可能是躺着的，金额/时间都会读错；
+    /// 4. 长边压到 2048：上游自己也会缩到约 1300×1300，再大只白占上行带宽与 12MB 上限；
+    /// 5. 超过 8MB 的原图也走转码 —— 服务端有 12MB 硬上限，撞上去就是 413「图片过大」。
+    ///
+    /// 返回 nil = 压根不是一张能解码的图片（损坏、选了视频轨、非图片文件），
+    /// 或**能解码但转不出 JPEG**（ImageIO 缩略图/编码失败）——
+    /// 这两种都**不该**往服务端发：白跑一趟网络换回来一个含糊的 400。
+    private static func uploadForm(_ data: Data) -> (data: Data, ext: String)? {
+        // 1. 按字节判定真实格式 + 读 EXIF 方向
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let type = CGImageSourceGetType(source) else {
+            return nil
+        }
+        let realExt = Self.extName(forType: type as String)
+        let orientation = Self.orientation(of: source)
+        let passthrough: Set<String> = ["jpg", "jpeg", "png", "gif", "webp"]
+
+        // 原样上传的门槛：格式在白名单里、方向正常、**体积也别太离谱**。
+        // 服务端有 12MB 硬上限（`_MAX_IMAGE_BYTES`），一张 48MP 的 JPEG 能到 10MB+，
+        // 撞上限就是 413「图片过大」；超阈值的走转码路径，转完通常几百 KB。
+        // 阈值取 8MB：给 multipart 的开销留余量。
+        let oversized = data.count > 8 * 1024 * 1024
+
+        if let realExt, passthrough.contains(realExt), orientation == 1, !oversized {
+            return (data, realExt)
+        }
+
+        // 2. 转码路径：用 ImageIO 直接出缩略图。
+        //    不用 `UIImage(data:)` 全分辨率解码 —— 一张 48MP 原图解开会吃掉几百 MB，
+        //    容易被系统杀掉（jetsam）。`kCGImageSourceThumbnailMaxPixelSize` 让解码器
+        //    直接按目标尺寸出图，内存只跟输出尺寸走。
+        //    `kCGImageSourceCreateThumbnailWithTransform` 顺带把 EXIF 方向摆正，
+        //    不用自己算 orientation 矩阵。
+        let maxSide = 2048
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxSide,
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            // 缩略图都出不来：这张图救不回来了。**不要**退回原图 ——
+            // HEIC/HEIF 会被服务端白名单直接 400，用户只能看到含糊的「识别失败」，
+            // 与「认不出就不发」的约定也自相矛盾（2026-10-28 修）。
+            return nil
+        }
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1        // 尺寸已按像素算好，别再乘屏幕倍率
+        format.opaque = true    // JPEG 不支持 alpha，留着会变黑底
+        let size = CGSize(width: CGFloat(cgImage.width), height: CGFloat(cgImage.height))
+        let rendered = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+            ctx.cgContext.setFillColor(UIColor.white.cgColor)
+            ctx.cgContext.fill(CGRect(origin: .zero, size: size))
+            ctx.cgContext.draw(cgImage, in: CGRect(origin: .zero, size: size))
+        }
+        guard let jpeg = rendered.jpegData(compressionQuality: 0.9) else {
+            // 编码也失败：同上，不发原图 —— 免得用户只拿到一个含糊的 400
+            return nil
+        }
+        return (jpeg, "jpg")
+    }
+
+    /// ImageIO 的 UTI → 我们要的扩展名。
+    ///
+    /// 只有 ImageIO 能报出**容器格式本身**（HEIC 的 `public.heic`、
+    /// WebP 的 `org.webmproject.webp` 等），不会像 `supportedContentTypes`
+    /// 那样把「能转成的格式」混进来。
+    private static func extName(forType type: String) -> String? {
+        switch type {
+        case "public.jpeg":          return "jpg"
+        case "public.png":           return "png"
+        case "com.compuserve.gif":   return "gif"
+        case "org.webmproject.webp": return "webp"
+        case "public.heic", "public.heif": return "heic"
+        default:                     return nil
+        }
+    }
+
+    /// 读 EXIF 方向（1 = 正常朝上）。
+    private static func orientation(of source: CGImageSource) -> Int {
+        guard let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
+            return 1
+        }
+        return (props[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
     }
 
     /// 首次加载中（还没拿到任何月度汇总）
@@ -714,6 +820,9 @@ private struct OcrReviewSheet: View {
     /// 改过时间/电量、原自动匹配已作废的行（HTML `.ocr-rebind`）
     @State private var rebinding: Set<Int> = []
 
+    /// 正在给哪一行的「开始时间」选日期（nil = 没在选）
+    @State private var pickingStartRow: Int?
+
     init(
         payload: OcrPayload,
         records: [ChargeSession] = [],
@@ -759,6 +868,19 @@ private struct OcrReviewSheet: View {
             .padding(.horizontal, 12)
             .padding(.top, 4)
             .padding(.bottom, 2)
+        }
+        /* 原生日期时间选择（2026-10-28 补）：点「开始时间」不再弹数字键盘。
+           用 `isPresented` 包一层而不是 `.sheet(item:)`：`pickingStartRow` 是
+           数组下标，直接当 item 用需要另造 Identifiable 类型，这里没必要。 */
+        .sheet(
+            isPresented: Binding(
+                get: { pickingStartRow != nil },
+                set: { presented in if !presented { pickingStartRow = nil } }
+            )
+        ) {
+            if let index = pickingStartRow, drafts.indices.contains(index) {
+                V2DateTimePickerSheet(title: "充电开始时间", text: $drafts[index].startText)
+            }
         }
     }
 
@@ -906,8 +1028,11 @@ private struct OcrReviewSheet: View {
                   placeholder: "", keyboard: .decimalPad)
             field("充电量", text: $drafts[index].energyText, unit: "kWh",
                   placeholder: "", keyboard: .decimalPad)
-            field("开始时间", text: $drafts[index].startText, unit: nil,
-                  placeholder: "2026-10-16 22:10", keyboard: .numbersAndPunctuation)
+            dateField("开始时间", text: drafts[index].startText, placeholder: "2026-10-16 22:10") {
+                // 先把数字键盘收掉：否则它会压在原生选择器下面，选完还得再点一次遮罩
+                dismissKeyboard()
+                pickingStartRow = index
+            }
             field("站点名", text: $drafts[index].stationText, unit: nil,
                   placeholder: "选填", keyboard: .default)
         }
@@ -948,6 +1073,46 @@ private struct OcrReviewSheet: View {
                         .allowsHitTesting(false)
                 }
             }
+        }
+    }
+
+    /// `.ocr-field` 的日期版：外观与 `field` 一致，但点开是系统原生日期时间选择器。
+    ///
+    /// 用 `Button` 撑成输入框的样子而不是 `TextField`：`TextField` 一定伴随键盘，
+    /// 而这个字段本来就只该由系统日历产生（2026-10-28 修）。
+    private func dateField(
+        _ label: String,
+        text: String,
+        placeholder: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .v2Text(.ocrLabel105, color: V2Color.text3)
+                .padding(.leading, 2)
+
+            Button(action: action) {
+                HStack(spacing: 4) {
+                    Text(text.isEmpty ? placeholder : text)
+                        .v2Text(.ocrInput14, color: text.isEmpty ? V2Color.text3 : V2Color.text1)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                    Spacer(minLength: 0)
+                    Image(systemName: "calendar")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(V2Color.text3)
+                }
+                .padding(.horizontal, 9)
+                .frame(height: 38)
+                .background(V2Color.inputFill)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.90), lineWidth: 1)
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -1184,6 +1349,8 @@ private struct ManualPaymentSheet: View {
     @State private var paidAtText = ""
     @State private var energyText = ""
     @State private var stationText = ""
+    /// 是否正在选「时间」（iOS 原生日期时间选择器）
+    @State private var showPaidAtPicker = false
     @State private var isSaving = false
 
     var body: some View {
@@ -1204,7 +1371,7 @@ private struct ManualPaymentSheet: View {
                         .padding(.bottom, 2)
 
                     field("金额（元）", $amountText, .decimalPad)
-                    field("时间", $paidAtText, .numbersAndPunctuation)
+                    paidAtButton
                     field("电量（度）", $energyText, .decimalPad)
                     field("站点", $stationText, .default)
                 }
@@ -1212,7 +1379,38 @@ private struct ManualPaymentSheet: View {
                 .padding(.top, 4)
                 .padding(.bottom, 28)
             }
+            /* 原生日期时间选择（2026-10-28 补）：原来是 `TextField` + 数字键盘，
+               用户得手敲 `2026-10-27 14:30`，格式一错后端直接 400。 */
+            .sheet(isPresented: $showPaidAtPicker) {
+                V2DateTimePickerSheet(title: "支付时间", text: $paidAtText)
+            }
         }
+    }
+
+    /// 点一下弹系统原生「日期 + 时间」；未选过时显示占位，不当成 0 点。
+    private var paidAtButton: some View {
+        Button {
+            dismissKeyboard()
+            showPaidAtPicker = true
+        } label: {
+            HStack(spacing: 8) {
+                Text("时间")
+                    .v2Text(.label12, color: V2Color.text3)
+                    .frame(width: 64, alignment: .leading)
+                Text(paidAtText.isEmpty ? "选择时间" : paidAtText)
+                    .v2Text(.label12, color: paidAtText.isEmpty ? V2Color.text3 : V2Color.text1)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                Image(systemName: "calendar")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(V2Color.text3)
+            }
+            .frame(minHeight: 44)
+            .padding(.horizontal, 10)
+            .background(Color.white.opacity(0.45))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var isValid: Bool {

@@ -145,23 +145,20 @@ struct V2BarChart: View {
                 plot
             }
         }
+        /* 图表卡 = 内容卡，复用 `v2Card()`（方案 B 的描边/阴影都在那里）。
+           以前这里是把卡片样式**复制**了一份（fill/描边/内高光/阴影四项），
+           改卡片样式时最容易漏掉这一处 —— 现在只有一份真源。
+
+           `padding: 0` 是因为上面的 `.padding(V2Metrics.cardPadding)` 已经加过了；
+           `v2Card()` 会再加一次内距，不传 0 会把内容挤扁。
+
+           `widthReader` 的位置有讲究：它必须量到**卡片外宽**（内容宽 + 左右各 16 内距），
+           因为 `viewportW` 是用 `cardWidth - cardPadding*2 - yAxisW - rowGap` 算绘图区宽的。
+           放在 `.padding(16)` 之后 → 量到内容宽+32 = 卡片外宽 ✅；
+           若放在 `v2Card()` 之后，量到的会是带描边/阴影的外框，绘图区会算窄。 */
         .padding(V2Metrics.cardPadding)
-        .background(
-            RoundedRectangle(cornerRadius: V2Metrics.cardRadius, style: .continuous)
-                .fill(V2Color.glassFill)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: V2Metrics.cardRadius, style: .continuous)
-                .strokeBorder(V2Color.glassEdge, lineWidth: 1)
-        )
-        .overlay(highlight)
         .background(widthReader)
-        .shadow(
-            color: V2Color.glassShadow,
-            radius: V2Metrics.cardShadowRadius,
-            x: 0,
-            y: 8
-        )
+        .v2Card(padding: 0)
         .overlay(alignment: .topLeading) { tipLayer }
         .onAppear(perform: startAnimation)
         // 横滑时选中跟到视口中心那根柱（HTML `onChartScroll`，且只在已选中时跟）
@@ -298,8 +295,11 @@ struct V2BarChart: View {
                原来是把 0 高 frame 套在未裁剪的柱体外面 —— SwiftUI 的 frame 只改
                布局尺寸、不裁剪子视图，柱体照旧按 h 全高绘制，于是从一开始就是满高，
                动画根本没有可看的中间态（数值行的 opacity 有动画，所以显得「只有数字在弹」）。
-               HTML 那边的 @keyframes v2BarGrow 动的也是 height（1898 行），这里等价。 */
-            barBody(point, height: grown ? targetH : 0)
+               HTML 那边的 @keyframes v2BarGrow 动的也是 height（1898 行），这里等价。
+
+               ⚠️ 拆分柱还差一步「裁切」—— 详见 `barBody` 里拆分柱分支的注释。
+               没有它的话电耗柱会「啪」一下满高，只有里程柱有生长动画。 */
+            barBody(point, height: grown ? targetH : 0, targetH: targetH)
                 .frame(width: barW)
                 .animation(barAnimation(delay), value: grown)
                 .overlay(alignment: .center) {
@@ -316,8 +316,13 @@ struct V2BarChart: View {
     }
 
     /// 柱体：缺数据 → 虚线空槽；有动态/静态拆分 → 上下两段；否则单色柱。
+    ///
+    /// - Parameters:
+    ///   - h: **动画中的**可见高度（0 → 目标高）。
+    ///   - targetH: 柱子的**目标高度**。拆分柱的两段要按它固定，
+    ///     再由外层裁切实现「从 0 长出来」（见下面拆分柱分支的注释）。
     @ViewBuilder
-    private func barBody(_ point: V2ChartPoint, height h: CGFloat) -> some View {
+    private func barBody(_ point: V2ChartPoint, height h: CGFloat, targetH: CGFloat) -> some View {
         if point.value == nil {
             // `.v2-bar .b.ph`：高 8、虚线框 —— 不画会让图表「跳日」
             RoundedRectangle(cornerRadius: V2Metrics.barRadius, style: .continuous)
@@ -331,8 +336,30 @@ struct V2BarChart: View {
                 )
                 .frame(height: h)
         } else if let d = point.dynamic, let s = point.staticPart, d + s > 0 {
-            splitBody(d: d, s: s, height: h)
-                .frame(height: h)
+            /* 拆分柱：**必须裁切**，否则入场动画不生效。
+               （2026-10-28 修：里程柱有生长动画、电耗柱没有，根因就在这里。）
+
+               HTML 那边 `.b.split` 外层的 `height` 从 0 动画到目标高，
+               内层 `.s-stat` / `.s-dyn` 两段高度**固定**（`v2BarBody` 里按目标 h 算好），
+               靠外层 `overflow:hidden` 把超出部分裁掉 —— 于是看到的是柱子从 0 长出来。
+
+               SwiftUI 这边 `.frame()` **不裁剪子视图**（SwiftUI 的 frame 只改布局尺寸）：
+               若照 HTML 那样把两段的固定高度直接摆进去，它们会**溢出**外层，
+               视觉上就是「一下子满高」，完全看不到生长过程。
+
+               正确做法：外层给一个随动画变化的高度 + `.clipped()`（= `overflow:hidden`），
+               内层两段按**目标高度**固定，溢出部分被裁掉 —— 与 HTML 完全等价。
+               裁切后圆角也要保留，否则四角会露出方角。 */
+
+               ⚠️ 对齐方式必须是 `.bottom`（2026-10-28 续修）：`.frame(height:)` 不传
+               `alignment` 时默认 `.center`，内层 `targetH` 高的柱体会被**居中**放进
+               `h` 高的框里再裁切 —— 动画中看到的是柱子的**中段**：底段（动态色）
+               被裁到基线以下，柱子看起来离地悬空往上飘，到 `h == targetH` 才贴回。
+               HTML 那边靠 `justify-content: flex-end` 保证底边对齐，这里等价写
+               `.bottom`，才是真正「从基线往上长」。
+            splitBody(d: d, s: s, targetHeight: targetH)
+                .frame(height: h, alignment: .bottom)
+                .clipped()
                 .clipShape(RoundedRectangle(cornerRadius: V2Metrics.barRadius, style: .continuous))
         } else {
             RoundedRectangle(cornerRadius: V2Metrics.barRadius, style: .continuous)
@@ -342,30 +369,23 @@ struct V2BarChart: View {
     }
 
     /// 静态在上、动态在下；静态段最少 2pt，否则 0.2 kWh 在 112pt 绘图区里看不见
-    /// 返回 AnyView：两条分支形状不同（矮柱走单段矩形、正常柱走两段 VStack），
-    /// 而高度是动画量，没法用 @ViewBuilder 的隐式分支收口。
-    private func splitBody(d: Double, s: Double, height h: CGFloat) -> AnyView {
-        // 入场动画会从 0 一路长到目标高：h 很小时两段都得夹在 0...h 内，
-        // 否则 hs 被强制拉成 2、hd 变负数，柱子会瞬间「跳」到 2pt。
-        if h < 3 {
-            return AnyView(
-                Rectangle().fill(
-                    LinearGradient(
-                        colors: [V2Color.barDynTop, V2Color.barDynBottom],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                )
-                .frame(height: max(0, h))
-            )
-        }
-
+    ///
+    /// ⚠️ `targetHeight` 是**目标高度**，不是动画中的当前高度。
+    /// 两段固定高、由外层裁切，才是 HTML 的生长效果（见 `barBody` 的注释）。
+    ///
+    /// 返回 `some View` 而不是 `AnyView`：这里曾经返回 `AnyView`，因为早期版本有
+    /// 「矮柱走单段矩形、正常柱走两段 VStack」两条形状不同的分支。
+    /// 现在矮柱分支已删（两段固定高 + 外层裁切，矮柱同样走 VStack），
+    /// 只剩一条路径 —— 而 `AnyView` 会**切断视图身份**，
+    /// SwiftUI 可能把每帧当作全新视图插入，导致高度动画失去插值目标。
+    private func splitBody(d: Double, s: Double, targetHeight h: CGFloat) -> some View {
         let total = d + s
         var hs: CGFloat = s > 0 ? (s / total * Double(h)).rounded() : 0
         hs = s > 0 ? max(2, min(h - 1, hs)) : 0
         hs = min(hs, h)
         let hd = max(0, h - hs)
 
-        return AnyView(VStack(spacing: 0) {
+        return VStack(spacing: 0) {
             if hs > 0 {
                 Rectangle()
                     .fill(LinearGradient(
@@ -382,7 +402,8 @@ struct V2BarChart: View {
                     ))
                     .frame(height: hd)
             }
-        })
+        }
+        .frame(height: h, alignment: .bottom)
     }
 
     private var singleGradient: LinearGradient {
@@ -574,17 +595,5 @@ struct V2BarChart: View {
         guard !didInitOffset, cardWidth > 0 else { return }
         didInitOffset = true
         offset = maxOffset
-    }
-}
-
-// MARK: - 卡片内高光
-
-private extension V2BarChart {
-    /// `inset 0 1px 2px rgba(255,255,255,.60)` 的近似（与 `CardSurface` 同一手法）
-    var highlight: some View {
-        RoundedRectangle(cornerRadius: V2Metrics.cardRadius, style: .continuous)
-            .stroke(V2Color.glassHighlight, lineWidth: 2)
-            .offset(y: 1)
-            .clipShape(RoundedRectangle(cornerRadius: V2Metrics.cardRadius, style: .continuous))
     }
 }
