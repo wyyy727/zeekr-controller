@@ -155,6 +155,18 @@ class AppConfig:
     port: int = field(default_factory=lambda: _env_int("APP_PORT", 8765))
     debug: bool = field(default_factory=lambda: _env_bool("APP_DEBUG", False))
 
+    # 是否暴露自动生成的接口文档（`/docs`、`/redoc`、`/openapi.json`）。
+    #
+    # 默认关闭：线上是公网部署，这套文档会把**全部路由、参数、请求/响应模型**
+    # 摊给任何知道地址的人 —— 等于附赠一份现成的攻击面清单，而线上并不需要它调试。
+    # 要看文档：在 .env 里写 `ENABLE_API_DOCS=true` 再重启。
+    #
+    # 刻意**不与 APP_DEBUG 联动**：万一哪天线上把 DEBUG 打开，接口文档也不会
+    # 跟着一起漏出去。要开就显式开，只开这一个口子。
+    api_docs_enabled: bool = field(
+        default_factory=lambda: _env_bool("ENABLE_API_DOCS", False)
+    )
+
     # 允许下发的车控指令总开关（默认关闭，符合"只读优先"的安全原则）
     allow_commands: bool = field(default_factory=lambda: _env_bool("ALLOW_COMMANDS", False))
 

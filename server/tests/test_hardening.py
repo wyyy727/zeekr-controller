@@ -593,6 +593,78 @@ class TestApiTokenMiddleware:
         assert resp.json()["status"] == "ok"
 
 
+# MARK: - 自动接口文档默认关闭
+
+
+class TestApiDocsHiddenByDefault:
+    """`/docs`、`/redoc`、`/openapi.json` 默认**不注册**。
+
+    修之前：FastAPI 默认把这套自动文档全开着。线上是公网裸奔的
+    `https://47.100.196.120.sslip.io`，等于把全部路由、参数、请求/响应模型
+    整份摊给任何知道地址的人 —— 一份现成的攻击面清单，而线上没有调试需求。
+    现在只有 `.env` 里显式设 `ENABLE_API_DOCS=true` 才开。
+    """
+
+    @staticmethod
+    def _client():
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        return TestClient(app)
+
+    def test_kwargs_are_all_none_when_disabled(self) -> None:
+        from app.main import _api_docs_kwargs
+
+        assert _api_docs_kwargs(False) == {
+            "docs_url": None,
+            "redoc_url": None,
+            "openapi_url": None,
+        }
+
+    def test_kwargs_restored_when_enabled(self) -> None:
+        from app.main import _api_docs_kwargs
+
+        assert _api_docs_kwargs(True) == {
+            "docs_url": "/docs",
+            "redoc_url": "/redoc",
+            "openapi_url": "/openapi.json",
+        }
+
+    def test_routes_follow_the_switch(self) -> None:
+        """路由是否注册必须与当前配置一致（本地跑测试时默认就是关的）。"""
+        from app.core.config import config
+
+        expected = 200 if config.api_docs_enabled else 404
+        client = self._client()
+        for path in ("/docs", "/redoc", "/openapi.json"):
+            assert client.get(path).status_code == expected, (
+                f"{path} 应与 ENABLE_API_DOCS={config.api_docs_enabled} 一致"
+            )
+
+    def test_root_hides_docs_link_when_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import app.main as main_module
+        from app.core.config import config as app_config
+
+        monkeypatch.setattr(main_module, "PREVIEW_INDEX", Path("/nonexistent/index.html"))
+        monkeypatch.setattr(app_config, "api_docs_enabled", False)
+        payload = self._client().get("/").json()
+        assert payload["service"] == "zeekrdash-api"
+        assert "docs" not in payload, "文档关了就不该再指向一个 404 的 /docs"
+
+    def test_root_advertises_docs_when_enabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import app.main as main_module
+        from app.core.config import config as app_config
+
+        monkeypatch.setattr(main_module, "PREVIEW_INDEX", Path("/nonexistent/index.html"))
+        monkeypatch.setattr(app_config, "api_docs_enabled", True)
+        assert self._client().get("/").json()["docs"] == "/docs"
+
+
 # MARK: - D7 三处 mock 数据一致性
 
 

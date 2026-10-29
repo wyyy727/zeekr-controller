@@ -87,11 +87,26 @@ async def lifespan(app: FastAPI):
     logger.info("ZeekrDash 服务已停止")
 
 
+def _api_docs_kwargs(enabled: bool) -> dict[str, str | None]:
+    """自动文档的三个 URL：关掉时传 None，FastAPI 就根本不注册这些路由。
+
+    传 None 而不是"注册了再拦"，是因为后者一旦中间件顺序或路径匹配出偏差，
+    文档就会重新露出来；不注册是彻底没有。
+    """
+    return {
+        "docs_url": "/docs" if enabled else None,
+        "redoc_url": "/redoc" if enabled else None,
+        "openapi_url": "/openapi.json" if enabled else None,
+    }
+
+
 app = FastAPI(
     title="ZeekrDash",
     description="极氪车主自建看板服务端",
     version="0.1.0",
     lifespan=lifespan,
+    # 默认关闭：公网部署不该把接口清单摊开（见 core/config.py 的 api_docs_enabled）。
+    **_api_docs_kwargs(config.api_docs_enabled),
 )
 
 # iOS App 直连本机服务；preview 页也可能从别的端口访问，故放开跨域。
@@ -217,12 +232,15 @@ async def root():
         from fastapi.responses import RedirectResponse
 
         return RedirectResponse(url="/preview")
-    return {
+    payload: dict[str, str] = {
         "service": "zeekrdash-api",
         "status": "ok",
-        "docs": "/docs",
         "health": "/api/health",
     }
+    # 文档关了就别在服务信息里给个会 404 的链接（本机开发开着时才提示）。
+    if config.api_docs_enabled:
+        payload["docs"] = "/docs"
+    return payload
 
 
 def mount_preview() -> None:
