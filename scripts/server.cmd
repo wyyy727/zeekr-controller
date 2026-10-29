@@ -183,8 +183,8 @@ if defined LISTEN_PID (
 ) else (
   echo [OK] Service ready on port %PORT%
 )
-echo     preview: http://127.0.0.1:%PORT%/preview/index.html
-echo     debug:   http://127.0.0.1:%PORT%/preview/debug.html
+echo     api:     http://127.0.0.1:%PORT%/api/health
+echo     docs:    http://127.0.0.1:%PORT%/docs
 goto :eof
 
 REM -- stop ---------------------------------------------------------

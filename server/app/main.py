@@ -202,32 +202,48 @@ def register_routers() -> None:
     app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
 
 
+# 设计预览页位于**仓库根目录**的 preview/（server/ 的上一级）。
+# 线上只部署 server/ 时这个目录根本不存在 —— 服务必须照常跑，不能把「有没有网页」
+# 当成启动前提。故：根路径永远注册（无网页时返回一句 JSON 而不是 404），
+# /preview 只在文件确实存在时才挂载。
+PREVIEW_DIR = Path(__file__).resolve().parent.parent.parent / "preview"
+PREVIEW_INDEX = PREVIEW_DIR / "index.html"
+
+
+@app.get("/", include_in_schema=False)
+async def root():
+    """根路径：有预览页就跳过去（本机开发方便），纯后端部署返回服务信息。"""
+    if PREVIEW_INDEX.is_file():
+        from fastapi.responses import RedirectResponse
+
+        return RedirectResponse(url="/preview")
+    return {
+        "service": "zeekrdash-api",
+        "status": "ok",
+        "docs": "/docs",
+        "health": "/api/health",
+    }
+
+
 def mount_preview() -> None:
-    """挂载设计预览页（Safari 可访问）。
+    """挂载设计预览页（Safari / 浏览器可访问）。
 
     用于在没有 Mac 无法编译 iOS App 时，先验证界面设计与配色。
     预览页复用同一套接口，是原生版的「所见即所得」参照。
+    **可选**：没有 preview/index.html（线上纯后端部署）就静默跳过，不影响 /api/*。
     """
-    from fastapi.responses import FileResponse, RedirectResponse
+    from fastapi.responses import FileResponse
     from fastapi.staticfiles import StaticFiles
 
-    # 预览页位于项目根目录的 preview/（server/ 的上一级）
-    preview_dir = Path(__file__).resolve().parent.parent.parent / "preview"
-    index_file = preview_dir / "index.html"
-
-    if not index_file.exists():
-        logger.warning("预览页不存在，跳过挂载：%s", index_file)
+    if not PREVIEW_INDEX.is_file():
+        logger.info("未找到 %s，按纯后端模式运行（不挂载预览页）", PREVIEW_INDEX)
         return
-
-    @app.get("/", include_in_schema=False)
-    async def root() -> RedirectResponse:
-        return RedirectResponse(url="/preview")
 
     @app.get("/preview", include_in_schema=False)
     async def preview() -> FileResponse:
-        return FileResponse(index_file)
+        return FileResponse(PREVIEW_INDEX)
 
-    app.mount("/preview", StaticFiles(directory=preview_dir), name="preview")
+    app.mount("/preview", StaticFiles(directory=PREVIEW_DIR), name="preview")
     logger.info("设计预览页已挂载：http://<服务地址>/preview")
 
 

@@ -577,6 +577,21 @@ class TestApiTokenMiddleware:
             "要支持 ?token= 以便浏览器打开 /preview"
         )
 
+    def test_root_never_404_without_preview(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """线上只部署 server/（没有 preview/）时，根路径必须仍然有响应。
+
+        以前 "/" 是在 mount_preview() 内部才注册的：没有网页就整个根路径不存在，
+        访问返回 404，看起来像服务没起来。现在根路径常驻，没网页时给一句 JSON。
+        """
+        import app.main as main_module
+
+        monkeypatch.setattr(main_module, "PREVIEW_INDEX", Path("/nonexistent/index.html"))
+        client = self._client()
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert resp.json()["service"] == "zeekrdash-api"
+        assert resp.json()["status"] == "ok"
+
 
 # MARK: - D7 三处 mock 数据一致性
 

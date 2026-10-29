@@ -35,6 +35,15 @@ for env_file in "$SERVER_DIR/.env" "$REPO_DIR/.env"; do
   fi
 done
 
+# 纯后端部署也要能用：线上只拷 server/ + scripts/ + .env（没有 preview/、没有 iOS 源码）
+# 时这个脚本照旧工作 —— 它只关心 server/ 与 .env，不碰任何 HTML。
+# 先挡一次「只拷了一半」，比让 uvicorn 抛 ModuleNotFoundError 好认。
+if [[ ! -f "$SERVER_DIR/app/main.py" ]]; then
+  echo "✗ 找不到后端代码：$SERVER_DIR/app/main.py" >&2
+  echo "  期望结构：<root>/server/app/... 与 <root>/scripts/server.sh" >&2
+  exit 1
+fi
+
 port_alive() {
   curl -sf "http://127.0.0.1:$PORT/api/health" > /dev/null 2>&1
 }
@@ -96,6 +105,11 @@ start() {
 
   echo "启动 ZeekrDash 服务 → http://$HOST:$PORT"
   echo "  解释器：$py"
+  if [[ -f "$REPO_DIR/preview/index.html" ]]; then
+    echo "  网页预览：http://$HOST:$PORT/preview"
+  else
+    echo "  纯后端模式（无 preview/）：健康检查 http://$HOST:$PORT/api/health"
+  fi
   cd "$SERVER_DIR"
   # 刻意**不设** PYTHONIOENCODING —— 让 Python 用它自己的默认值
   # （Windows 下即 locale 编码，中文系统是 GBK）。这与 CMD 窗口一致，
