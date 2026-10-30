@@ -122,10 +122,19 @@ struct V2BottomSheet<Content: View>: View {
                             .padding(.bottom, 10 + proxy.safeAreaInsets.bottom)
                     }
                 }
-                // hug 模式传 nil：由子视图自己撑高
-                /* 高度：常规按屏高比例锁死（最小 320，保证正文塞得下）。
-                   键盘弹起时再夹一次上限 —— 面板是整块上移的，高度不减就会顶出屏幕顶。 */
+                /* 高度两条路（2026-10-30 修）：
+                   · 非 hug：按屏高比例锁死，键盘弹起时再夹到「键盘上沿 − 12」；
+                   · hug：**不加任何高度约束**，由「正文 cap + chrome」自然决定。
+
+                   ⚠️ 这里之前对 hug 还套了一层 `.frame(maxHeight: maxPanelHeight)` 想兜底，
+                   结果 hug 彻底失效 —— `.frame(maxHeight:)` 不是「最多这么高」，而是**弹性框**：
+                   Apple 文档原文「若指定了最大约束、且父级提议的尺寸大于本视图，
+                   则取**父级提议值夹到该上限**」。父级是铺满屏的 ZStack，于是面板永远
+                   撑到 `屏高 − 12`（实测 766pt / 屏高 874），内容被 `.center` 居中 ——
+                   真机表现就是标题上方 ~198pt、按钮下方 ~239pt 两大片空白
+                   （按钮本该距面板底只有 44pt）。所以 hug 分支不能套任何 maxHeight。 */
                 .frame(
+                    // `height: nil` = 不加高度约束（文档：height 为 nil 时沿用子视图的尺寸行为）
                     height: hugContent
                         ? nil
                         : min(
@@ -133,10 +142,6 @@ struct V2BottomSheet<Content: View>: View {
                             maxPanelHeight(proxy.size.height)
                         )
                 )
-                /* hug 模式没有比例兜底：正文按 cap 撑高之后，面板 = 正文 + chrome，
-                   chrome 一旦估偏就会越过键盘上沿（2026-10-28 补）。这里显式封顶 ——
-                   宁可让正文内滚，也不让标题跑出屏幕。 */
-                .modifier(PanelMaxHeight(limit: hugContent ? maxPanelHeight(proxy.size.height) : nil))
                 .offset(y: dragOffset)
                 .frame(maxWidth: .infinity)
                 .background(panelBackground)
@@ -290,23 +295,5 @@ private struct SheetBodyHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
-    }
-}
-
-/// hug 面板的高度兜底：只在 `limit != nil` 时套一层 `.frame(maxHeight:)`。
-///
-/// 为什么不直接写 `.frame(maxHeight: ...)`：非 hug 面板已经按屏高比例锁死高度，
-/// 再叠一层 maxHeight 是多余的约束；而 `limit` 为 nil 时这个修饰符完全透明。
-private struct PanelMaxHeight: ViewModifier {
-
-    let limit: CGFloat?
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if let limit {
-            content.frame(maxHeight: limit)
-        } else {
-            content
-        }
     }
 }

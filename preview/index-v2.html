@@ -1089,6 +1089,42 @@ body.is-scrolled .topbar::before {
   .sheet-root { align-items: center; }
   .sheet { border-radius: 18px; max-width: 360px; padding-bottom: 10px; }
 }
+/* ── 日期时间选择：五列滚轮（2026-10-30，与 iOS 自绘选择器对齐）──
+   面板白 0.62 微透、选中数字用主紫、选中衬底用背景那支浅紫 C4B5FD@.22。 */
+.sheet.dt-sheet {
+  background: rgba(255, 255, 255, .62);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+}
+.dt-head { display: flex; align-items: center; gap: 8px; padding: 2px 2px 4px; }
+.dt-title { flex: 1 1 auto; text-align: center; font-size: 14px; font-weight: 600; color: var(--text-1); }
+.dt-btn { min-height: 44px; padding: 0 8px; border: 0; background: none; font: inherit;
+  font-size: 13px; color: var(--text-3); cursor: pointer; }
+.dt-btn.primary { color: var(--accent); font-weight: 600; }
+.dt-labels,
+.dt-wheels { display: grid; grid-template-columns: repeat(5, 1fr); }
+.dt-labels { padding: 0 2px 2px; }
+.dt-labels span { text-align: center; font-size: 10px; font-weight: 600; color: var(--text-3); }
+.dt-wheels { position: relative; height: 220px; }
+/* 选中衬底横跨五列，位置对准中间那一行（(220-44)/2 = 88） */
+.dt-hl { position: absolute; left: 12px; right: 12px; top: 90px; height: 40px; border-radius: 14px;
+  background: rgba(196, 181, 253, .22); border: 1px solid rgba(103, 66, 232, .20); pointer-events: none; }
+.dt-col { position: relative; z-index: 1; height: 220px; overflow-y: auto;
+  scroll-snap-type: y mandatory; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 18%, #000 82%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 18%, #000 82%, transparent 100%); }
+.dt-col::-webkit-scrollbar { display: none; }
+/* 首尾各垫半屏高，第一项/最后一项才滚得到正中间 */
+.dt-pad { height: 88px; }
+.dt-item { height: 44px; display: flex; align-items: center; justify-content: center;
+  scroll-snap-align: center; font-size: 16px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.dt-item.on { font-size: 19px; font-weight: 600; color: var(--accent); }
+/* 时间选择器要盖在补录弹层之上；同时也压过 toast（z-index 100），
+   否则「演示数据…」那条提示会浮在滚轮上挡住数字。 */
+#dtRoot { z-index: 120; }
+/* 演示态说明条：两个补录弹层共用（与 iOS 面板里的黄条对齐） */
+.ocr-demo { margin: 0 12px 8px; padding: 8px 10px; border-radius: 10px;
+  background: #FEF3E2; color: #8A5A12; font-size: 11px; line-height: 1.45; }
 .sheet-title {
   font-size: 12px; color: var(--text-3); text-align: center; padding: 12px 0 6px;
 }
@@ -2518,6 +2554,7 @@ const state = {
   ocrRows: null,         // 待核对的识别结果
   ocrImageSha: '',
   ocrPick: {},           // 行序号 → 指定的充电流水 sessionId
+  ocrDemo: false,        // 本次核对框是不是「演示示例」（不请求、不落库）
   payments: [],          // 待确认 / 未配对的支付证据（GET /api/charges/payments）
   ocrHits: {},           // 本次识别判定为「已经补录过」的记录：sessionId → { amount }
   days: 7,
@@ -4897,6 +4934,10 @@ function renderCharges() {
 }
 function costCard(c) {
   const writable = canWriteCharges();
+  /* 演示态（2026-10-30，与 iOS 的 `canOpenEntries` 对齐）：入口要能点开看界面。
+     之前三个按钮按 `writable` 置灰，演示数据下全点不动；改成「能开、但不发请求」。
+     非 live 模式没有登录这回事，直接放开；live 模式才要求登录态。 */
+  const canOpen = state.mode !== 'live' || isLoggedIn();
   const priced = c.amountCount || 0;
   const unpriced = c.unpricedCount || 0;
 
@@ -4925,8 +4966,11 @@ function costCard(c) {
   if (pending) {
     notes.push(`有 ${pending} 笔金额配不上充电流水，在「待确认」里等你指定。`);
   }
-  if (!writable) {
-    notes.push('当前是演示/离线数据，补录入口不可用（没有真实流水可配对）。');
+  if (state.mode !== 'live') {
+    notes.push('当前是演示或离线数据：补录入口可以打开看效果，'
+      + '但保存/识别不会请求后端，也不会落库。');
+  } else if (!writable) {
+    notes.push('未登录：补录需要服务端登录态。');
   } else if (state.ocrConfigured === false) {
     notes.push('截图识别未开启：服务端 .env 填 DEEPSEEK_API_KEY 并重启后可用；'
       + '在那之前先用手写录入。');
@@ -4953,12 +4997,12 @@ function costCard(c) {
       ${notes.length ? `<div class="v2-cost-note">${notes.map(esc).join('<br>')}</div>` : ''}
       ${state.ocrError ? `<div class="v2-cost-err">识别失败：${esc(state.ocrError)}，可以手写录入</div>` : ''}
       <div class="v2-cost-actions">
-        <button class="v2-btn primary" id="ocrPickBtn"${writable && !state.ocrBusy ? '' : ' disabled'}>
+        <button class="v2-btn primary" id="ocrPickBtn"${canOpen && !state.ocrBusy ? '' : ' disabled'}>
           ${state.ocrBusy ? '<i class="v2-spin"></i>识别中…' : `${SVG.scan} 截图识别`}
         </button>
-        <button class="v2-btn ghost" id="manualPayBtn"${writable ? '' : ' disabled'}>${SVG.money} 手写录入</button>
+        <button class="v2-btn ghost" id="manualPayBtn"${canOpen ? '' : ' disabled'}>${SVG.money} 手写录入</button>
         ${pending
-          ? `<button class="v2-btn warn" id="pendingPayBtn"${writable ? '' : ' disabled'}>• 待确认 ${pending}</button>`
+          ? `<button class="v2-btn warn" id="pendingPayBtn"${canOpen ? '' : ' disabled'}>• 待确认 ${pending}</button>`
           : ''}
       </div>
     </div>`;
@@ -5054,9 +5098,187 @@ function closeSheetRoot(root) {
   setTimeout(() => root.classList.add('hidden'), 180);
 }
 
+/* ── 日期时间选择：五列滚轮（年 / 月 / 日 / 时 / 分）──
+   2026-10-30 与 iOS 对齐。原来两处时间都是纯文本输入，得手敲 `2026-10-16 22:10`，
+   格式错一次后端就 400；iOS 那边已换成自绘五列滚轮，网页这边同步同一套外观：
+   白 .62 微透面板 + 选中主紫 + 选中衬底 C4B5FD@.22，**任意年月的任意一天都能选**。 */
+
+const DT_ROW = 44;                                  // 行高，与 CSS `.dt-item` 一致
+const DT_TITLES = ['年', '月', '日', '时', '分'];
+const DT_KEYS = ['y', 'm', 'd', 'h', 'mi'];
+
+/** 从 `2026-10-16 22:10` / `2026/10/16` 等写法里取年月日时分；解析不了就用「现在」。 */
+function dtParse(raw) {
+  const now = new Date();
+  const m = String(raw || '').trim()
+    .match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})(?:\D+(\d{1,2})\D+(\d{1,2}))?/);
+  if (!m) {
+    return { y: now.getFullYear(), m: now.getMonth() + 1, d: now.getDate(),
+      h: now.getHours(), mi: now.getMinutes() };
+  }
+  return {
+    y: +m[1], m: +m[2], d: +m[3],
+    h: m[4] == null ? 0 : +m[4], mi: m[5] == null ? 0 : +m[5],
+  };
+}
+
+const dtPad2 = (v) => String(v).padStart(2, '0');
+/** 某年某月有几天（2 月随闰年变）。 */
+const dtDayCount = (y, m) => new Date(y, m, 0).getDate();
+
+function openDateTimeSheet(cfg) {
+  const title = (cfg && cfg.title) || '选择时间';
+  const onDone = (cfg && cfg.onDone) || function () {};
+  const v = dtParse(cfg && cfg.value);
+  const thisYear = new Date().getFullYear();
+  const years = [];
+  for (let y = thisYear - 4; y <= thisYear; y += 1) years.push(y);
+
+  let root = document.getElementById('dtRoot');
+  if (!root) {
+    root = document.createElement('div');
+    root.id = 'dtRoot';
+    root.className = 'sheet-root hidden';
+    document.body.appendChild(root);
+  }
+
+  /* 解析出来的年份可能早于可选范围 → 夹到最近一端；日越界则落到当月最后一天。
+     刻意不静默换成「今年」，否则看起来像没选上。 */
+  const cur = {
+    y: Math.min(thisYear, Math.max(thisYear - 4, v.y)),
+    m: Math.min(12, Math.max(1, v.m)),
+    d: Math.max(1, v.d),
+    h: Math.min(23, Math.max(0, v.h)),
+    mi: Math.min(59, Math.max(0, v.mi)),
+  };
+  cur.d = Math.min(dtDayCount(cur.y, cur.m), cur.d);
+
+  const listOf = (key) => {
+    if (key === 'y') return years;
+    if (key === 'm') return Array.from({ length: 12 }, (_, i) => i + 1);
+    if (key === 'd') return Array.from({ length: dtDayCount(cur.y, cur.m) }, (_, i) => i + 1);
+    if (key === 'h') return Array.from({ length: 24 }, (_, i) => i);
+    return Array.from({ length: 60 }, (_, i) => i);
+  };
+  const labelOf = (key, val) => (key === 'h' || key === 'mi' ? dtPad2(val) : String(val));
+
+  const colHtml = (key) => {
+    const list = listOf(key);
+    const idx = Math.max(0, list.indexOf(cur[key]));
+    return `<div class="dt-col" data-key="${key}">
+      <div class="dt-pad"></div>
+      ${list.map((val, i) => `<div class="dt-item${i === idx ? ' on' : ''}">${labelOf(key, val)}</div>`).join('')}
+      <div class="dt-pad"></div>
+    </div>`;
+  };
+
+  root.innerHTML = `<div class="sheet dt-sheet" role="dialog" aria-modal="true">
+      <div class="dt-head">
+        <button class="dt-btn" data-dt-cancel>取消</button>
+        <div class="dt-title">${esc(title)}</div>
+        <button class="dt-btn primary" data-dt-done>完成</button>
+      </div>
+      <div class="dt-labels">${DT_TITLES.map((t) => `<span>${t}</span>`).join('')}</div>
+      <div class="dt-wheels"><div class="dt-hl"></div>${DT_KEYS.map(colHtml).join('')}</div>
+    </div>`;
+  root.classList.remove('hidden');
+  requestAnimationFrame(() => root.classList.add('show'));
+
+  /* 单列绑定：item 落在「半屏 pad + i×44」，居中即 scrollTop = i×44。
+     只绑一列（日列重建后单独重绑），不整体重排 —— 整体重设 scrollTop
+     会打断正在滑的那一列的惯性。 */
+  const bindCol = (col) => {
+    const key = col.dataset.key;
+    const list = listOf(key);
+    const idx = Math.max(0, list.indexOf(cur[key]));
+    col.scrollTop = idx * DT_ROW;
+    if (col._dtScroll) col.removeEventListener('scroll', col._dtScroll);
+    let ticking = false;
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        ticking = false;
+        const items = col.querySelectorAll('.dt-item');
+        if (!items.length) return;
+        const i = Math.min(items.length - 1, Math.max(0, Math.round(col.scrollTop / DT_ROW)));
+        const val = list[i];
+        if (cur[key] === val) return;
+        cur[key] = val;
+        items.forEach((el, k) => el.classList.toggle('on', k === i));
+        /* 年 / 月一变，日列长度要跟着变；越界就落到当月最后一天 */
+        if (key === 'y' || key === 'm') {
+          const days = dtDayCount(cur.y, cur.m);
+          if (cur.d > days) cur.d = days;
+          const old = root.querySelector('.dt-col[data-key="d"]');
+          if (old) {
+            old.insertAdjacentHTML('afterend', colHtml('d'));
+            old.remove();
+            bindCol(root.querySelector('.dt-col[data-key="d"]'));
+          }
+        }
+      });
+    };
+    col._dtScroll = onScroll;
+    col.addEventListener('scroll', onScroll, { passive: true });
+  };
+  root.querySelectorAll('.dt-col').forEach(bindCol);
+
+  root.onclick = (e) => {
+    if (e.target === root || e.target.closest('[data-dt-cancel]')) { closeSheetRoot(root); return; }
+    if (e.target.closest('[data-dt-done]')) {
+      onDone(`${cur.y}-${dtPad2(cur.m)}-${dtPad2(cur.d)} ${dtPad2(cur.h)}:${dtPad2(cur.mi)}`);
+      closeSheetRoot(root);
+    }
+  };
+}
+
+/* 演示态专用：塞一份示例小票，直接开核对页（与 iOS 的 `seedDemoOcr()` 同一套口径）。
+   候选流水优先挂演示库里**真实存在**的那一笔，核对页才会显示成可选的样子；
+   演示库为空就退化成「没匹配到流水」的形态 —— 那也是核对页的一种真实形态。 */
+function openDemoOcrSheet() {
+  const now = new Date();
+  const start = new Date(now.getTime() - 2 * 3600 * 1000);
+  const pad = (v) => String(v).padStart(2, '0');
+  const at = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`
+    + ` ${pad(start.getHours())}:${pad(start.getMinutes())}`;
+  const rec = ((state.charge && state.charge.records) || [])[0];
+
+  state.ocrRows = [{
+    amount: 38.6,
+    energyKwh: 41.2,
+    startAt: at,
+    stationName: '演示充电站',
+    confidence: 0.72,
+    candidates: rec ? [{
+      sessionId: rec.sessionId,
+      startTime: rec.startTime,
+      energyKwh: rec.energyKwh,
+      kind: 'weak',
+      confidence: 'low',
+    }] : [],
+  }];
+  state.ocrError = '';
+  state.ocrAt = Date.now();
+  state.ocrImageSha = '';
+  state.ocrPick = {};
+  state.ocrUserPicked = {};
+  // 只有唯一候选才预选 —— 与真实识别流程的规则一致
+  if (rec) state.ocrPick[0] = rec.sessionId;
+  state.ocrDemo = true;
+  openOcrSheet();
+  toast('演示数据：不打开相册、也不上传识别，直接给你看核对页');
+}
+
 /* ── ① 截图识别 ── */
 
 function pickReceiptImage() {
+  /* 演示态（2026-10-30）：**不打开相册** —— 选了图也传不上去（没有后端），
+     等于「选了图、什么都没发生」。直接给一份示例小票，把核对页开出来看界面。 */
+  if (state.mode !== 'live') {
+    openDemoOcrSheet();
+    return;
+  }
   if (!canWriteCharges()) {
     toast('当前是演示/离线数据，不能补录金额');
     return;
@@ -5094,6 +5316,7 @@ async function runReceiptOcr(file) {
     }
     state.ocrRows = rows;
     state.ocrError = '';
+    state.ocrDemo = false;      // 真识别出来的，不是示例
     state.ocrAt = Date.now();   // 设计稿 18:167 副标题「已识别 1 张 · 11:04」
     state.ocrImageSha = data.imageSha8 || '';
     /* 默认归属：只有**唯一候选**时才预选；
@@ -5190,7 +5413,8 @@ function ocrRowHtml(row, i) {
         </div>
         <div class="ocr-field">
           <label>开始时间</label>
-          <input class="ocr-input" data-f="startAt" value="${esc(when)}" placeholder="2026-10-16 22:10">
+          <input class="ocr-input" data-f="startAt" readonly data-dt="充电开始时间"
+                 value="${esc(when)}" placeholder="2026-10-16 22:10">
         </div>
         <div class="ocr-field">
           <label>站点名</label>
@@ -5225,8 +5449,9 @@ function openOcrSheet() {
   openSheetRoot(root, `
     <div class="ocr-head">
       <div class="ocr-title">识别充电小票</div>
-      <div class="ocr-sub">已识别 ${rows.length} 张 · ${state.ocrAt ? clockOf(state.ocrAt) : "--"}</div>
+      <div class="ocr-sub">${state.ocrDemo ? '演示示例' : `已识别 ${rows.length} 张`} · ${state.ocrAt ? clockOf(state.ocrAt) : "--"}</div>
     </div>
+    ${state.ocrDemo ? '<div class="ocr-demo">演示数据：这是一张示例小票，没有上传图片、也没有请求后端；「确认补录」不会落库。</div>' : ''}
     <div class="ocr-body">${rows.map(ocrRowHtml).join('')}</div>
     <div class="ocr-actions">
       <button class="sheet-cancel" data-ocr-close>取消</button>
@@ -5264,6 +5489,7 @@ function closeOcrSheet() {
   state.ocrRows = null;
   state.ocrPick = {};
   state.ocrImageSha = '';
+  state.ocrDemo = false;
 }
 
 /* 从核对框里读回用户改过的数。
@@ -5293,6 +5519,14 @@ function collectOcrRows() {
 async function commitOcr() {
   const rows = collectOcrRows();
   if (!rows.length) { toast('至少填一笔金额'); return; }
+
+  /* 演示态：示例小票不落库，直接当成功关掉面板 ——
+     否则会请求一个不存在的后端，用户只看到失败。 */
+  if (state.mode !== 'live') {
+    closeOcrSheet();
+    toast('演示数据：没有请求后端，也没有落库');
+    return;
+  }
 
   const btn = document.getElementById('ocrCommitBtn');
   if (btn) { btn.disabled = true; btn.textContent = '补录中…'; }
@@ -5324,7 +5558,8 @@ function ocrResultText(d) {
 /* ── ② 手写录入（零依赖兜底）── */
 
 function openManualSheet() {
-  if (!canWriteCharges()) { toast('当前是演示/离线数据，不能补录金额'); return; }
+  // 演示态也允许打开，保存那一步再拦；只有 live 模式才要求登录态
+  if (state.mode === 'live' && !isLoggedIn()) { toast('未登录：补录需要服务端登录态'); return; }
   const now = new Date();
   const pad = (v) => String(v).padStart(2, '0');
   const defAt = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} `
@@ -5333,6 +5568,7 @@ function openManualSheet() {
   const root = ocrRootEl();
   openSheetRoot(root, `
     <div class="sheet-title">手写录入一笔金额</div>
+    ${state.mode !== 'live' ? '<div class="ocr-demo">演示数据：可以填、可以选时间，但「保存」不会请求后端，也不会落库。</div>' : ''}
     <div class="ocr-body">
       <div class="ocr-row">
         <div class="ocr-fields">
@@ -5346,7 +5582,8 @@ function openManualSheet() {
           </div>
           <div class="ocr-field wide">
             <label>支付时间（用来配对充电流水）</label>
-            <input class="ocr-input" id="mpAt" value="${defAt}" placeholder="2026-10-16 22:10">
+            <input class="ocr-input" id="mpAt" readonly data-dt="支付时间"
+                   value="${defAt}" placeholder="2026-10-16 22:10">
           </div>
           <div class="ocr-field wide">
             <label>站点（选填）</label>
@@ -5379,6 +5616,13 @@ async function submitManualPayment() {
   const paidAt = ((document.getElementById('mpAt') || {}).value || '').trim();
   const station = ((document.getElementById('mpStation') || {}).value || '').trim();
   if (!paidAt) { toast('请填支付时间'); return; }
+
+  /* 演示态：不请求后端、不落库，直接当成功关掉面板 */
+  if (state.mode !== 'live') {
+    closeSheetRoot(document.getElementById('ocrRoot'));
+    toast('演示数据：没有请求后端，也没有落库');
+    return;
+  }
 
   const btn = document.getElementById('mpSaveBtn');
   if (btn) { btn.disabled = true; btn.textContent = '保存中…'; }
@@ -7369,6 +7613,22 @@ document.addEventListener('change', (e) => {
 });
 
 document.addEventListener('click', (e) => {
+  /* 时间输入框 → 五列滚轮（2026-10-30）。两处：OCR 核对框的「开始时间」、
+     手写录入的「支付时间」。它们都是 readonly，点一下弹选择器，不再手敲。 */
+  const dtField = e.target.closest('input[data-dt]');
+  if (dtField) {
+    dtField.blur();   // 别让光标留在 readonly 框里
+    openDateTimeSheet({
+      title: dtField.dataset.dt || '选择时间',
+      value: dtField.value,
+      onDone: (v) => {
+        dtField.value = v;
+        // OCR 行改了时间要撤销「自动预选」，那段逻辑挂在 input 事件上
+        dtField.dispatchEvent(new Event('input', { bubbles: true }));
+      },
+    });
+    return;
+  }
   // 30 天图表：点柱子看这一根的日期与读数（7 天视图在 toggleChartTip 内部跳过）
   const chartBar = e.target.closest('.v2-bar[data-i]');
   if (chartBar) { toggleChartTip(chartBar); return; }
