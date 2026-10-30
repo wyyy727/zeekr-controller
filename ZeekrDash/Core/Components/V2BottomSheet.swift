@@ -62,12 +62,9 @@ struct V2BottomSheet<Content: View>: View {
     /// 在 body 里读它 → 随 `KeyboardHeight` 的 `@Observable` 自动重绘。
     private var keyboardInset: CGFloat { KeyboardHeight.shared.value }
 
-    /* 键盘避让的两个比例常量（2026-10-30，见 `panelLift` 的注释）。
-       集中在这里，真机上要微调只改这两个数。 */
-    /// 键盘弹起时，面板底边抬到「屏高 × 这个比例」处 ≈ 看得见的键盘上沿。
-    private static let keyboardLiftRatio: CGFloat = 0.34
-    /// 键盘弹起时，面板最高不超过屏高的这个比例。
-    private static let keyboardPanelMaxRatio: CGFloat = 0.64
+    /* 键盘避让的两个比例，真机上要微调只改这两个常量（定义在文件末尾）。
+       ⚠️ 不能写成 `static let`：`V2BottomSheet` 是泛型类型，Swift 不允许泛型类型
+       有静态**存储**属性（会报 `static stored properties not supported in generic types`）。 */
 
     /// 面板要往上抬多少 —— **不直接用 `keyboardInset`**。
     ///
@@ -82,7 +79,7 @@ struct V2BottomSheet<Content: View>: View {
     ///   按钮本身仍然完整可见 —— 两种键盘都不会把按钮挡掉。
     private func panelLift(_ screenHeight: CGFloat) -> CGFloat {
         guard keyboardInset > 0 else { return 0 }
-        return min(keyboardInset, screenHeight * Self.keyboardLiftRatio)
+        return min(keyboardInset, screenHeight * kKeyboardLiftRatio)
     }
 
     /// 键盘上方留给面板的最大高度。
@@ -92,7 +89,7 @@ struct V2BottomSheet<Content: View>: View {
     /// 键盘收起时仍用「屏高 − 12」，与非 hug 面板原来的口径一致。
     private func maxPanelHeight(_ screenHeight: CGFloat) -> CGFloat {
         guard keyboardInset > 0 else { return max(320, screenHeight - 12) }
-        return max(320, screenHeight * Self.keyboardPanelMaxRatio)
+        return max(320, screenHeight * kKeyboardPanelMaxRatio)
     }
 
     /// 面板除正文外的固定占用（标题区 + 底部操作 + 内距）。
@@ -326,3 +323,18 @@ private struct SheetBodyHeightKey: PreferenceKey {
         value = max(value, nextValue())
     }
 }
+
+// MARK: - 键盘避让的比例（真机微调只改这两个数）
+
+/* 为什么放在文件级而不是 `V2BottomSheet` 里面：
+   `V2BottomSheet` 是泛型类型（`<Content: View>`），Swift **不允许泛型类型有静态存储属性**
+   —— 每个特化都需要一份独立存储，编译器无法分配。写成 `static let` 会直接编译失败
+   （`static stored properties not supported in generic types`）。
+   写成实例属性又会让私有存储属性污染成员初始化器，所以退到文件级常量。 */
+
+/// 键盘弹起时，面板底边抬到「屏高 × 这个比例」处，约等于看得见的键盘上沿。
+private let kKeyboardLiftRatio: CGFloat = 0.34
+
+/// 键盘弹起时，面板最高不超过屏高的这个比例（多出来的那截画进输入法的透明预留区）。
+private let kKeyboardPanelMaxRatio: CGFloat = 0.64
+

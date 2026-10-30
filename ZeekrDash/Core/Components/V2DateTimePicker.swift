@@ -108,7 +108,9 @@ struct V2DateTimePickerSheet: View {
            否则会先显示「最早那天 00:00」再跳回来 —— 时间列那一闪特别明显。
            `onAppear` 里还会再同步一次 —— 那是给「换一行 / 二次打开」用的：
            `@State` 的初始值只在首次创建生效，再次呈现时靠它纠正。 */
-        let parts = Self.parts(from: text.wrappedValue)
+        /* 这里用具体类型名而不是 `Self.`：`init` 里所有存储属性还没初始化完，
+           用自身类型名调用静态方法可以避开任何「self 未初始化」的边界情况。 */
+        let parts = V2DateTimePickerSheet.parts(from: text.wrappedValue)
         _yearIndex = State(initialValue: parts.yearIndex)
         _monthIndex = State(initialValue: parts.monthIndex)
         _dayIndex = State(initialValue: parts.dayIndex)
