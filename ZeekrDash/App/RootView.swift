@@ -307,16 +307,19 @@ struct ScreenContainer<Content: View, Accessory: View>: View {
         self.content = content
     }
 
+    /// 键盘遮住屏幕底部的高度（0 = 收起）。
+    ///
+    /// 读 `@Observable` 单例的属性即建立依赖 —— 键盘一变，本视图的 body 就会重算，
+    /// 底部的安全区与留白跟着变。
+    private var keyboardInset: CGFloat { KeyboardHeight.shared.value }
+
     var body: some View {
         /* 底部留白由这里自己给：底栏是 overlay（见 RootView），不再内缩安全区，
            所以滚到底要留出「下留白 14 + 胶囊 62 + 间隙 29 = 105」，
            与网页 `.wrap{padding-bottom:105px}` 一致。
 
-           键盘弹起时改成跟着键盘走（见 `KeyboardHeight`）：根视图已经
-           `.ignoresSafeArea(.keyboard)`（底栏不许被顶上去），代价是滚动视图
-           不再自动为键盘让位；这里把「底部可滚动余量」临时撑到键盘高度，
-           否则靠近屏幕下半段的输入框（附近站点搜索、充电详情里的备注）会
-           藏在键盘下面，既看不见也滚不上来。 */
+           键盘**不参与**这条留白（2026-10-30 改）：键盘让位交给下面那条
+           `.safeAreaInset(edge: .bottom)`，靠缩小可视区触发系统的自动滚动。 */
         /* 氛围背景画在**屏内容器里面**，不能只画在 RootView 那一层。
            `NavigationStack` 在 iOS 26 会给自己的视图铺一层不透明的系统底，
            它压在 RootView 的 `V2Background` 之上 —— 真机表现就是：静止时全白、
@@ -334,15 +337,38 @@ struct ScreenContainer<Content: View, Accessory: View>: View {
                 }
                 .padding(.horizontal, V2Metrics.screenPadding)
             }
+            /* 底部留白：平时 105（下留白 14 + 胶囊 62 + 间隙 29，与网页一致）。
+               键盘弹起时底栏被键盘整个盖住，那 105 就白留了 —— 滚到底会看到
+               一大片死白压在键盘上方，所以缩到 16。
+               真正的「让位」由下面那条 safeAreaInset 负责，这里只管留白。 */
             .contentMargins(
                 .bottom,
-                max(V2Metrics.tabBarClearance, KeyboardHeight.shared.value + 12),
+                keyboardInset > 0 ? 16 : V2Metrics.tabBarClearance,
                 for: .scrollContent
             )
             .scrollContentBackground(.hidden)
             .safeAreaInset(edge: .top, spacing: 0) {
                 topBar
             }
+            /* 键盘让位（2026-10-30 修）：
+               根视图 `.ignoresSafeArea(.keyboard)` 让底栏不被顶上去，代价是**滚动视图也
+               不知道键盘占了半屏** —— 它以为自己可视到屏幕底，于是「自动把焦点输入框
+               滚进可视区」这件事不会触发，输入框停在键盘后面。
+
+               以前的做法是只把 `contentMargins.bottom` 临时撑到键盘高度：那只加了
+               **可滚动的余量**，不会让系统认为可视区变小，所以输入框照样不滚上来；
+               而且这条 margin 突变时没有任何动画，正停在底部的内容会「瞬跳」一下。
+
+               现在改成给滚动视图加一条**真实的底部安全区**：可视区真的缩到键盘上沿，
+               系统就会自己把焦点框滚上来。留白那条在这时缩到 16（底栏已被盖住）。 */
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Color.clear
+                    .frame(height: keyboardInset)
+                    // 纯占位，不能吃掉底部的手势（否则键盘收起那一下可能被它截住）
+                    .allowsHitTesting(false)
+            }
+            /* 键盘升降时可视区高度在变，加个缓动，别让内容硬跳一下。 */
+            .animation(.easeOut(duration: 0.25), value: keyboardInset)
             .scrollIndicators(.hidden)
             /* 键盘收起：
                · 下拉列表即交互式收起（网页里靠点空白处）；

@@ -95,6 +95,22 @@ final class ChargesViewModel {
         !isMock && !AppStore.shared.needsLogin
     }
 
+    /// 能不能**打开**补录入口（截图识别 / 手写录入 / 待确认）。
+    ///
+    /// 与 `canWrite` 的区别（2026-10-30）：演示态下也要能点开看界面 ——
+    /// 之前按 `canWrite` 置灰，演示时这两个按钮根本点不动，没法展示。
+    /// 现在改成「能开、但**不发请求**」：
+    /// - 打开：只要求已登录（未登录时面板里的保存必然 401，仍置灰）；
+    /// - 保存/识别：由各方法内部 `guard !isMock` 拦下，只弹提示不联网。
+    var canOpenEntries: Bool {
+        !AppStore.shared.needsLogin
+    }
+
+    /// 演示态下统一拦在发请求之前的那句提示。
+    private func blockMock(_ what: String) {
+        showToast("演示数据下不\(what)，也不会请求后端；切到真实数据源再试")
+    }
+
     /// 标题行右侧那行小字。**页面没有同步按钮，这是唯一的数据新鲜度线索**。
     var lastSyncText: String {
         guard let lastSyncedAt else { return "未同步" }
@@ -306,6 +322,8 @@ final class ChargesViewModel {
     /// Data 交给我们；为了复用 fileURL 版先落一个临时文件再读回来，既多一次
     /// 磁盘往返，又要自己负责删。字节版直接把内存里的字节拼进 multipart。
     func runOcr(imageData: Data, filename: String) async {
+        // 演示态：入口可以点开，但识别要上传字节到后端 —— 这里直接拦住
+        guard !isMock else { blockMock("上传识别"); return }
         await runOcrUpload {
             try await APIClient.shared.uploadFile(
                 APIRoutes.chargeOcr,
@@ -314,6 +332,53 @@ final class ChargesViewModel {
                 fieldName: "file"
             )
         }
+    }
+
+    /// **演示态专用**：不打开相册、不请求后端，直接塞一份示例小票，
+    /// 让「截图识别」按钮在演示数据下也能把核对页开出来看界面。
+    ///
+    /// 为什么不再走 `runOcr`：演示态根本没有可上传的图，就算让用户选完相册，
+    /// 上传也会被 `guard !isMock` 拦掉 —— 结果是「选了图、什么都没发生」。
+    /// 与其那样，不如直接给一份示例数据，并把「这是演示」讲明白。
+    ///
+    /// 候选流水优先挂到 `records` 里**真实存在**的那一笔：核对页的「候选」
+    /// 才会显示成可选的样子；演示库为空就退化成「没匹配到流水」的形态，
+    /// 那也是核对页的一种真实形态，不算错。
+    func seedDemoOcr() {
+        let calendar = Calendar.current
+        let now = Date()
+        let start = calendar.date(byAdding: .hour, value: -2, to: now) ?? now
+
+        let demoCandidates: [OcrCandidate]? = records.first.map { session in
+            [OcrCandidate(
+                sessionId: session.sessionId,
+                startTime: session.startTime,
+                energyKwh: session.energyKwh,
+                kind: "weak",
+                confidence: "low",
+                deltaMin: nil
+            )]
+        }
+
+        // 可选参数一律显式写出来：`OcrRow` 的可选字段没有声明 `= nil` 默认值，
+        // 省掉就会报 `missing argument for parameter 'endAt' in call`。
+        let row = OcrRow(
+            amount: 38.60,
+            energyKwh: 41.2,
+            startAt: V2DateTimeText.text(start),
+            endAt: nil,
+            durationMin: nil,
+            stationName: "演示充电站",
+            confidence: 0.72,
+            needsReview: nil,
+            reviewNote: nil,
+            candidates: demoCandidates
+        )
+
+        ocrResult = OcrPayload(type: "receipt", imageSha8: nil, rows: [row])
+        ocrAt = now
+        ocrErrorMessage = nil
+        showToast("演示数据：不打开相册、也不上传识别，直接给你看核对页")
     }
 
     /// 两条入口共用：忙碌标记、错误归一、结果写进 ocrResult（**不入库**）。
@@ -351,6 +416,7 @@ final class ChargesViewModel {
     /// 模型的所有字段都是可选的，序列化时反而要额外处理 nil。
     func commitOcr(imageSha8: String?, rows: [[String: Any]]) async -> Bool {
         guard !rows.isEmpty else { return false }
+        guard !isMock else { blockMock("保存补录"); return false }
 
         var body: [String: Any] = ["rows": rows]
         if let imageSha8 { body["imageSha8"] = imageSha8 }
@@ -382,6 +448,7 @@ final class ChargesViewModel {
     // MARK: - 金额补录：手工
 
     func addManual(amount: Double, paidAt: String, energyKwh: Double?, stationName: String?) async -> Bool {
+        guard !isMock else { blockMock("保存手写录入"); return false }
         var body: [String: Any] = ["amount": amount, "paidAt": paidAt]
         if let energyKwh { body["energyKwh"] = energyKwh }
         if let stationName, !stationName.isEmpty { body["stationName"] = stationName }
@@ -421,6 +488,7 @@ final class ChargesViewModel {
     }
 
     func link(paymentId: String, sessionId: String) async {
+        guard !isMock else { blockMock("绑定金额"); return }
         do {
             let _: LinkResult = try await APIClient.shared.post(
                 APIRoutes.chargePaymentLink(paymentId),
@@ -436,6 +504,7 @@ final class ChargesViewModel {
     }
 
     func unlink(paymentId: String) async {
+        guard !isMock else { blockMock("解绑金额"); return }
         do {
             let _: LinkResult = try await APIClient.shared.delete(
                 APIRoutes.chargePaymentLink(paymentId)

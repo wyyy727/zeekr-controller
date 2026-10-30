@@ -231,11 +231,14 @@ struct ChargesView: View {
                     payload: payload,
                     records: model.records,
                     recognizedAt: model.ocrAt,
+                    isDemo: model.isMock,
                     // 没匹配到流水时的两个兜底：退出核对框后再打开各自的入口
                     onReselectImage: { exitOcr(.reselect) },
                     onManualEntry: { exitOcr(.manual) }
                 ) { rows in
-                    await model.commitOcr(imageSha8: payload.imageSha8, rows: rows)
+                    // 演示态：示例小票不落库，直接当成功，让「确认补录」能正常关掉面板
+                    if model.isMock { return true }
+                    return await model.commitOcr(imageSha8: payload.imageSha8, rows: rows)
                 }
             }
         }
@@ -247,14 +250,24 @@ struct ChargesView: View {
             Task {
                 try? await Task.sleep(nanoseconds: 400_000_000)
                 switch action {
-                case .reselect: showPhotoPicker = true
+                case .reselect:
+                    /* 演示态没有「相册」这一步可走（传不上去），
+                       「重选截图」就再给一张示例，保持「不打开相册」这个前提。 */
+                    if model.isMock {
+                        model.seedDemoOcr()
+                        showOcrReview = true
+                    } else {
+                        showPhotoPicker = true
+                    }
                 case .manual:   showManualEntry = true
                 }
             }
         }
         .fullScreenCover(isPresented: $showManualEntry) {
-            ManualPaymentSheet { amount, paidAt, energyKwh, stationName in
-                await model.addManual(
+            ManualPaymentSheet(isDemo: model.isMock) { amount, paidAt, energyKwh, stationName in
+                // 演示态：不请求后端、不落库，直接当成功，让「保存」能正常关掉面板
+                if model.isMock { return true }
+                return await model.addManual(
                     amount: amount,
                     paidAt: paidAt,
                     energyKwh: energyKwh,
@@ -263,7 +276,7 @@ struct ChargesView: View {
             }
         }
         .fullScreenCover(isPresented: $showPayments) {
-            PaymentsSheet(payments: model.payments) { paymentId, sessionId in
+            PaymentsSheet(payments: model.payments, isDemo: model.isMock) { paymentId, sessionId in
                 await model.link(paymentId: paymentId, sessionId: sessionId)
             } onUnlink: { paymentId in
                 await model.unlink(paymentId: paymentId)
@@ -566,7 +579,15 @@ struct ChargesView: View {
             // 三个入口：截图识别 / 手写录入 / 待确认
             HStack(spacing: 8) {
                 Button {
-                    showPhotoPicker = true
+                    /* 演示态（2026-10-30）：**不打开相册** —— 就算让用户选完图，
+                       上传也会被 VM 的 `guard !isMock` 拦掉，等于「选了图什么都没发生」。
+                       这里直接塞一份示例小票，把核对页开出来给人看界面。 */
+                    if model.isMock {
+                        model.seedDemoOcr()
+                        showOcrReview = true
+                    } else {
+                        showPhotoPicker = true
+                    }
                 } label: {
                     HStack(spacing: 5) {
                         if model.isOcrBusy {
@@ -586,8 +607,8 @@ struct ChargesView: View {
                     .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .disabled(!model.canWrite || model.isOcrBusy)
-                .opacity(model.canWrite && !model.isOcrBusy ? 1 : 0.45)
+                .disabled(!model.canOpenEntries || model.isOcrBusy)
+                .opacity(model.canOpenEntries && !model.isOcrBusy ? 1 : 0.45)
 
                 Button {
                     showManualEntry = true
@@ -607,8 +628,8 @@ struct ChargesView: View {
                     .overlay(Capsule().strokeBorder(Color.white.opacity(0.90), lineWidth: 1))
                 }
                 .buttonStyle(.plain)
-                .disabled(!model.canWrite)
-                .opacity(model.canWrite ? 1 : 0.45)
+                .disabled(!model.canOpenEntries)
+                .opacity(model.canOpenEntries ? 1 : 0.45)
 
                 if pending > 0 {
                     Button {
@@ -622,8 +643,8 @@ struct ChargesView: View {
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                    .disabled(!model.canWrite)
-                    .opacity(model.canWrite ? 1 : 0.45)
+                    .disabled(!model.canOpenEntries)
+                    .opacity(model.canOpenEntries ? 1 : 0.45)
                 }
 
                 Spacer(minLength: 0)
@@ -658,8 +679,12 @@ struct ChargesView: View {
         if model.pendingCount > 0 {
             notes.append("有 \(model.pendingCount) 笔金额配不上充电流水，在「待确认」里等你指定。")
         }
-        if !model.canWrite {
-            notes.append("当前是演示/离线数据，补录入口不可用（没有真实流水可配对）。")
+        /* 演示态不再是「入口不可用」——入口现在可以点开，只是保存/识别不发请求，
+           所以这里改成说明「能开但不落库」，否则会和按钮的实际行为自相矛盾。 */
+        if model.isMock {
+            notes.append("当前是演示数据：补录入口可以打开看效果，但保存/识别不会请求后端，也不会落库。")
+        } else if !model.canWrite {
+            notes.append("未登录：补录需要服务端登录态。")
         } else if model.ocrConfigured == false {
             notes.append("截图识别未开启：服务端 .env 填 DEEPSEEK_API_KEY 并重启后可用；在那之前先用手写录入。")
         }
@@ -805,6 +830,8 @@ private struct OcrReviewSheet: View {
     var records: [ChargeSession] = []
     /// 识别时刻（副标题「已识别 N 张 · 21:34」用）
     var recognizedAt: Date?
+    /// 演示态：内容是一份**示例小票**，不是真识别结果 —— 顶部要讲明白
+    var isDemo: Bool = false
     let onCommit: ([[String: Any]]) async -> Bool
     /// 没匹配到流水时的两个兜底入口（HTML `data-ocr-again` / `data-ocr-manual`）
     var onReselectImage: () -> Void = {}
@@ -827,6 +854,7 @@ private struct OcrReviewSheet: View {
         payload: OcrPayload,
         records: [ChargeSession] = [],
         recognizedAt: Date? = nil,
+        isDemo: Bool = false,
         onReselectImage: @escaping () -> Void = {},
         onManualEntry: @escaping () -> Void = {},
         onCommit: @escaping ([[String: Any]]) async -> Bool
@@ -834,6 +862,7 @@ private struct OcrReviewSheet: View {
         self.payload = payload
         self.records = records
         self.recognizedAt = recognizedAt
+        self.isDemo = isDemo
         self.onReselectImage = onReselectImage
         self.onManualEntry = onManualEntry
         self.onCommit = onCommit
@@ -861,6 +890,18 @@ private struct OcrReviewSheet: View {
             footer: AnyView(footerBar)
         ) {
             VStack(alignment: .leading, spacing: 10) {
+                /* 演示态：这份小票是写死的示例，不是真识别结果 —— 顶部讲明白，
+                   否则用户会以为「识别成功、竟然还自动匹配到了流水」。 */
+                if isDemo {
+                    Text("演示数据：这是一张示例小票，没有上传图片、也没有请求后端；「确认补录」不会落库。")
+                        .v2Text(.note11b, color: V2Color.warn)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(V2Color.tintWarn)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
                 ForEach(drafts.indices, id: \.self) { index in
                     draftCard(index)
                 }
@@ -896,6 +937,8 @@ private struct OcrReviewSheet: View {
         } else {
             time = "--"
         }
+        // 演示态不写「已识别 N 张」——那是真识别的口径，示例数据不该冒充
+        if isDemo { return "演示示例 · \(time)" }
         return "已识别 \(drafts.count) 张 · \(time)"
     }
 
@@ -1341,6 +1384,9 @@ private struct OcrReviewSheet: View {
 
 private struct ManualPaymentSheet: View {
 
+    /// 演示态：面板内自带一条说明（全局 toast 被 fullScreenCover 盖住，看不见）
+    var isDemo: Bool = false
+
     let onSave: (Double, String, Double?, String?) async -> Bool
 
     @Environment(\.dismiss) private var dismiss
@@ -1369,6 +1415,19 @@ private struct ManualPaymentSheet: View {
                         .v2Text(.note11b, color: V2Color.text3)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.bottom, 2)
+
+                    /* 演示态说明放在面板**里面**：这个面板是 fullScreenCover，
+                       盖住了 RootView 的全局 toast，保存失败时外面那句提示看不见。 */
+                    if isDemo {
+                        Text("演示数据：可以填、可以选时间，但「保存」不会请求后端，也不会落库。")
+                            .v2Text(.note11b, color: V2Color.warn)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(V2Color.tintWarn)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
 
                     field("金额（元）", $amountText, .decimalPad)
                     paidAtButton
@@ -1459,10 +1518,18 @@ private struct ManualPaymentSheet: View {
 private struct PaymentsSheet: View {
 
     let payments: [ChargePayment]
+    /// 演示态：面板内自带说明（全局 toast 被 fullScreenCover 盖住，看不见）。
+    /// ⚠️ 必须声明在两个闭包**之前**：成员初始化器按声明顺序排参数，
+    /// 尾巴（trailing closure）只能落到最后一个参数上，它是 Bool 就绑不上。
+    var isDemo: Bool = false
     let onLink: (String, String) async -> Void
     let onUnlink: (String) async -> Void
 
     @Environment(\.dismiss) private var dismiss
+
+    /// 演示态点了「绑定 / 解绑」时的一次性提示：真去请求会被 ViewModel 拦掉，
+    /// 而全局 toast 被 fullScreenCover 盖住，用户会以为按钮坏了，所以就地回一句。
+    @State private var demoHint: String?
 
     var body: some View {
         V2BottomSheet(
@@ -1473,6 +1540,27 @@ private struct PaymentsSheet: View {
         ) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
+                    if isDemo {
+                        Text("演示数据：「绑定 / 解绑」不会请求后端，也不会改动记录。")
+                            .v2Text(.note11b, color: V2Color.warn)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(V2Color.tintWarn)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                    if let demoHint {
+                        Text(demoHint)
+                            .v2Text(.note11b, color: V2Color.warn)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(V2Color.tintWarn)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .transition(.opacity)
+                    }
                     if payments.isEmpty {
                         Text("没有待处理的金额记录。")
                             .v2Text(.label12, color: V2Color.text3)
@@ -1487,6 +1575,22 @@ private struct PaymentsSheet: View {
                 .padding(.bottom, 28)
             }
         }
+    }
+
+    /// 演示态下别让按钮静默失败：就地给提示，2 秒后自动收起。
+    private func perform(_ what: String, _ action: @escaping () async -> Void) {
+        guard !isDemo else {
+            demoHint = "演示数据：\(what)不会请求后端，也不会改动记录。"
+            // 显式回主线程：`perform` 不是 @MainActor，延时结束要改 @State
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_200_000_000)
+                if demoHint != nil {
+                    withAnimation(.easeOut(duration: 0.2)) { demoHint = nil }
+                }
+            }
+            return
+        }
+        Task { await action() }
     }
 
     private func paymentCard(_ payment: ChargePayment) -> some View {
@@ -1507,7 +1611,7 @@ private struct PaymentsSheet: View {
                 Text("已绑定到一次充电")
                     .v2Text(.label11, color: V2Color.good)
                 Button {
-                    Task { await onUnlink(payment.id) }
+                    perform("解绑") { await onUnlink(payment.id) }
                 } label: {
                     Text("解绑")
                         .v2Text(.label12, color: V2Color.bad)
@@ -1526,7 +1630,7 @@ private struct PaymentsSheet: View {
                 } else {
                     ForEach(candidates) { candidate in
                         Button {
-                            Task { await onLink(payment.id, candidate.sessionId ?? "") }
+                            perform("绑定") { await onLink(payment.id, candidate.sessionId ?? "") }
                         } label: {
                             HStack(spacing: 8) {
                                 Text("\(candidate.startTime ?? "--") · \(String(format: "%.1f", candidate.energyKwh ?? 0)) 度")
