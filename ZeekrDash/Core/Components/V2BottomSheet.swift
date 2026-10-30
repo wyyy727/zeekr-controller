@@ -62,13 +62,37 @@ struct V2BottomSheet<Content: View>: View {
     /// 在 body 里读它 → 随 `KeyboardHeight` 的 `@Observable` 自动重绘。
     private var keyboardInset: CGFloat { KeyboardHeight.shared.value }
 
+    /* 键盘避让的两个比例常量（2026-10-30，见 `panelLift` 的注释）。
+       集中在这里，真机上要微调只改这两个数。 */
+    /// 键盘弹起时，面板底边抬到「屏高 × 这个比例」处 ≈ 看得见的键盘上沿。
+    private static let keyboardLiftRatio: CGFloat = 0.34
+    /// 键盘弹起时，面板最高不超过屏高的这个比例。
+    private static let keyboardPanelMaxRatio: CGFloat = 0.64
+
+    /// 面板要往上抬多少 —— **不直接用 `keyboardInset`**。
+    ///
+    /// 系统上报的键盘高度会包含输入法自己的工具条 / 候选区 / **不绘制的预留区**：
+    /// 实测（iPhone 16 Pro，中文全键盘 + AI 候选条）上报 492pt，而肉眼可见只有 291pt，
+    /// 差的那 200pt 是透明的 —— 截图里能看到底下的页面内容透出来。
+    /// 按 492 位移就会把面板多推 200pt，在按钮和键盘之间留一条空带。
+    ///
+    /// 所以位移按屏高比例封顶：0.34 × 874 ≈ 297。
+    /// · 你这个输入法（可见键盘 291）：面板底边落在 577，与键盘只差约 6pt，基本贴上；
+    /// · 换成系统原生长键盘（≈336）：面板底边压住 39pt，而 footer 底部内距有 44pt，
+    ///   按钮本身仍然完整可见 —— 两种键盘都不会把按钮挡掉。
+    private func panelLift(_ screenHeight: CGFloat) -> CGFloat {
+        guard keyboardInset > 0 else { return 0 }
+        return min(keyboardInset, screenHeight * Self.keyboardLiftRatio)
+    }
+
     /// 键盘上方留给面板的最大高度。
     ///
-    /// 面板整块上移 `keyboardInset` 之后，**高度不能再按原比例算** ——
-    /// 0.70 比例的手机上高度 590 + 键盘 336 = 926 > 屏高 844，
-    /// 面板顶部（标题行）会被顶出屏幕外。这里留 12pt 呼吸位。
+    /// ⚠️ 键盘弹起时**不按 `keyboardInset` 算**（那值偏大，会把面板压扁到装不下内容）。
+    /// 改用屏高比例：多出来的那截正好画在输入法的透明预留区里，内容才展得开。
+    /// 键盘收起时仍用「屏高 − 12」，与非 hug 面板原来的口径一致。
     private func maxPanelHeight(_ screenHeight: CGFloat) -> CGFloat {
-        max(320, screenHeight - keyboardInset - 12)
+        guard keyboardInset > 0 else { return max(320, screenHeight - 12) }
+        return max(320, screenHeight * Self.keyboardPanelMaxRatio)
     }
 
     /// 面板除正文外的固定占用（标题区 + 底部操作 + 内距）。
@@ -108,7 +132,8 @@ struct V2BottomSheet<Content: View>: View {
                         cap: min(
                             proxy.size.height * bodyMaxHeightRatio,
                             bodyMaxHeight,
-                            // hug 模式没有 frame 兜底，正文区自己要让出「面板固定占用 + 键盘」
+                            // hug 模式没有 frame 兜底，正文区自己要让出「面板固定占用」；
+                            // 上限里的键盘部分由 `maxPanelHeight` 按屏高比例折算
                             max(200, maxPanelHeight(proxy.size.height) - chromeHeight(proxy))
                         )
                     )
@@ -162,8 +187,12 @@ struct V2BottomSheet<Content: View>: View {
                 /* 键盘弹起时把面板整体抬到键盘上沿。
                    面板是自绘的，不走系统避让（见 KeyboardHeight.swift 的注释），
                    不补这一段就会被键盘整块压住 —— 验证码弹窗的输入框和
-                   「确认登录」全在键盘下面，只透出一条淡紫。 */
-                .padding(.bottom, keyboardInset)
+                   「确认登录」全在键盘下面，只透出一条淡紫。
+
+                   ⚠️ 抬升量用 `panelLift` 而不是 `keyboardInset`：后者含输入法的
+                   透明预留区（实测多出约 200pt），直接用它就会在按钮和键盘之间
+                   留一条空带。见 `panelLift` 的注释。 */
+                .padding(.bottom, panelLift(proxy.size.height))
             }
             .ignoresSafeArea(edges: .bottom)
             // 跟手系统键盘的动画时长：键盘升起和面板上移要同时到位，不能一个先到

@@ -138,6 +138,11 @@ struct V2DateTimePickerSheet: View {
         .presentationDetents([.height(352)])
         .presentationDragIndicator(.hidden)
         .onAppear(perform: syncFromText)
+        /* 任意一列跨一行，震一下（iOS 17+，与系统 `UIDatePicker` 是同一类 selection 触感）。
+           trigger 用五列下标组成的数组：数组元素相等即不触发，所以只有真的换行才震。
+           用 `dayIndex`（原始值）而不是 `effectiveDayIndex`：切月份把 31 号收敛到 28 号
+           时不该震，那不是用户滚出来的。 */
+        .sensoryFeedback(.selection, trigger: [yearIndex, monthIndex, dayIndex, hour, minute])
     }
 
     // MARK: 头部
